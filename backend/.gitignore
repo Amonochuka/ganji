@@ -1,0 +1,22 @@
+cat > .gitignore << 'EOF'
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Go build artifacts
+/bin/
+*.exe
+*.test
+*.out
+
+# Go module cache (if accidentally vendored)
+vendor/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+EOF

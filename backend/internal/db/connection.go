@@ -9,8 +9,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// Open opens a connection pool to PostgreSQL and retries until it's
-// reachable. Caller decides what to do on error.
+// Open opens a connection pool to PostgreSQL, retries until it's reachable,
+// and runs all pending migrations before returning. Caller decides what to
+// do on error.
 func Open(databaseURL string) (*sql.DB, error) {
 	dbConn, err := sql.Open("postgres", databaseURL)
 	if err != nil {
@@ -26,6 +27,11 @@ func Open(databaseURL string) (*sql.DB, error) {
 	}
 
 	log.Println("connected to database")
+
+	if err := RunMigrations(databaseURL); err != nil {
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
 	return dbConn, nil
 }
 
