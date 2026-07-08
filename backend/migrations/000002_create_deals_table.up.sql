@@ -3,14 +3,13 @@ CREATE TABLE deals (
     freelancer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     title TEXT NOT NULL,
     amount_sats BIGINT NOT NULL,
-    platform_origin TEXT NOT NULL,
+    source_platform TEXT NOT NULL,
     preimage_hash TEXT NOT NULL UNIQUE,
     invoice TEXT NOT NULL,
     checking_id TEXT,
     status TEXT NOT NULL DEFAULT 'awaiting_payment',
-    deliverable_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    released_at TIMESTAMPTZ,
+    verified_at TIMESTAMPTZ,
 
     CONSTRAINT valid_status CHECK (
         status IN ('awaiting_payment', 'locked', 'work_submitted', 'reviewing', 'released', 'disputed')

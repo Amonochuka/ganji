@@ -21,24 +21,24 @@ const (
 	StatusDisputed        Status = "disputed"
 )
 
-// Deal mirrors the deals table. CheckingID and DeliverableURL are
-// nullable in the database (a deal can exist before Lightning invoice
-// details or a deliverable are attached), so they use sql.NullString.
-// ReleasedAt is nullable for the same reason — a deal isn't released
-// until the client explicitly approves it.
+// Deal mirrors the deals table. A deal is created before its Lightning
+// invoice exists — CheckingID starts NULL and gets filled in by
+// Repository.UpdateCheckingID once LNbits responds. This keeps deal
+// creation durable even if LNbits is briefly unavailable. Artifacts
+// (source code, sandboxes, previews) live in their own table — a Deal
+// only describes the transaction itself.
 type Deal struct {
 	ID             string         `json:"id"`
 	FreelancerID   string         `json:"freelancer_id"`
 	Title          string         `json:"title"`
 	AmountSats     int64          `json:"amount_sats"`
-	PlatformOrigin string         `json:"platform_origin"`
+	SourcePlatform string         `json:"source_platform"`
 	PreimageHash   string         `json:"preimage_hash"`
 	Invoice        string         `json:"invoice"`
 	CheckingID     sql.NullString `json:"checking_id"`
 	Status         Status         `json:"status"`
-	DeliverableURL sql.NullString `json:"deliverable_url"`
 	CreatedAt      time.Time      `json:"created_at"`
-	ReleasedAt     sql.NullTime   `json:"released_at"`
+	VerifiedAt     sql.NullTime   `json:"verified_at"`
 }
 
 // ValidTransitions defines which status transitions are allowed. This is
