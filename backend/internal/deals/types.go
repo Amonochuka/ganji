@@ -68,3 +68,47 @@ func CanTransition(from, to Status) bool {
 	}
 	return false
 }
+
+type Artifact struct {
+	ID         string       `json:"id"`
+	DealID     string       `json:"deal_id"`
+	Kind       ArtifactKind `json:"kind"`
+	StorageKey string       `json:"storage_key"`
+	UploadedAt time.Time    `json:"uploaded_at"`
+}
+
+// Artifact types
+type ArtifactKind string
+
+const (
+    ArtifactSourceCode ArtifactKind = "source_code"
+    ArtifactSourceFile ArtifactKind = "source_file"
+)
+
+// Verification types
+type VerificationMethod string
+
+const (
+    VerificationSandbox     VerificationMethod = "sandbox"
+    VerificationPreviewPDF  VerificationMethod = "preview_pdf"
+    VerificationPreviewImage VerificationMethod = "preview_image"
+)
+
+
+type VerificationStatus string
+
+const (
+	VerificationPending VerificationStatus = "pending"
+	VerificationReady   VerificationStatus = "ready"
+	VerificationExpired VerificationStatus = "expired"
+)
+
+type Verification struct {
+	ID         string             `json:"id"`
+	ArtifactID string             `json:"artifact_id"`
+	Method     VerificationMethod `json:"method"`
+	Reference  string             `json:"reference"`
+	Status     VerificationStatus `json:"status"`
+	ExpiresAt  sql.NullTime       `json:"expires_at"`
+	CreatedAt  time.Time          `json:"created_at"`
+}
