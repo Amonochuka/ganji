@@ -1,20 +1,11 @@
 package auth
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
-)
-
-var (
-	ErrEmailTaken         = errors.New("email is already registered")
-	ErrSlugTaken          = errors.New("slug is already taken")
-	ErrInvalidEmail       = errors.New("invalid email format")
-	ErrPasswordTooShort   = errors.New("password must be at least 8 characters")
-	ErrInvalidCredentials = errors.New("invalid email or password")
 )
 
 var emailPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -36,13 +27,13 @@ func (s *Service) Register(email, password, displayName string) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
 	if !emailPattern.MatchString(email) {
-		return nil, ErrInvalidEmail
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, ErrInvalidEmail)
 	}
 	if len(password) < 8 {
-		return nil, ErrPasswordTooShort
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, ErrPasswordTooShort)
 	}
 	if strings.TrimSpace(displayName) == "" {
-		return nil, errors.New("display name is required")
+		return nil, fmt.Errorf("%w: display name is required", ErrInvalidInput)
 	}
 
 	taken, err := s.repo.EmailExists(email)
@@ -77,6 +68,13 @@ func (s *Service) Register(email, password, displayName string) (*User, error) {
 func (s *Service) Authenticate(email, password string) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
+	if !emailPattern.MatchString(email) {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, ErrInvalidEmail)
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, fmt.Errorf("%w: password is required", ErrInvalidInput)
+	}
+
 	user, err := s.repo.FindByEmail(email)
 	if err != nil {
 		return nil, fmt.Errorf("looking up user: %w", err)
@@ -109,7 +107,7 @@ func (s *Service) generateUniqueSlug(displayName string) (string, error) {
 		slug = fmt.Sprintf("%s-%d", base, i+1)
 	}
 
-	return "", errors.New("could not generate a unique slug after 100 attempts")
+	return "", fmt.Errorf("%w: could not generate a unique slug after 100 attempts", ErrInvalidInput)
 }
 
 // slugify lowercases, replaces spaces with hyphens, and strips anything

@@ -38,6 +38,7 @@ type tokenResponse struct {
 // Signup handles POST /auth/signup
 func (h *Handler) Signup(c *gin.Context) {
 	var req registerRequest
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
@@ -46,11 +47,12 @@ func (h *Handler) Signup(c *gin.Context) {
 	user, err := h.service.Register(req.Email, req.Password, req.DisplayName)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrEmailTaken), errors.Is(err, ErrSlugTaken),
-			errors.Is(err, ErrInvalidEmail), errors.Is(err, ErrPasswordTooShort):
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrEmailTaken),
+			errors.Is(err, ErrSlugTaken):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create account"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
 		return
 	}
@@ -60,6 +62,7 @@ func (h *Handler) Signup(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return
 	}
+
 	refreshToken, err := h.tokens.GenerateRefreshToken(user.ID, user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
@@ -75,6 +78,7 @@ func (h *Handler) Signup(c *gin.Context) {
 // Login handles POST /auth/login
 func (h *Handler) Login(c *gin.Context) {
 	var req loginRequest
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
@@ -82,7 +86,14 @@ func (h *Handler) Login(c *gin.Context) {
 
 	user, err := h.service.Authenticate(req.Email, req.Password)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrInvalidCredentials):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
 		return
 	}
 
@@ -91,6 +102,7 @@ func (h *Handler) Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return
 	}
+
 	refreshToken, err := h.tokens.GenerateRefreshToken(user.ID, user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
