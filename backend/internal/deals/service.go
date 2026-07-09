@@ -2,7 +2,6 @@ package deals
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -23,19 +22,19 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	deal.SourcePlatform = strings.TrimSpace(deal.SourcePlatform)
 
 	if deal.FreelancerID == "" {
-		return errors.New("freelancer id is required")
+		return fmt.Errorf("%w: freelancer id is required", ErrInvalidInput)
 	}
 
 	if deal.Title == "" {
-		return errors.New("title is required")
+		return fmt.Errorf("%w: title is required", ErrInvalidInput)
 	}
 
 	if deal.AmountSats <= 0 {
-		return errors.New("amount must be greater than zero")
+		return fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
 	}
 
 	if deal.SourcePlatform == "" {
-		return errors.New("source platform is required")
+		return fmt.Errorf("%w: source platform is required", ErrInvalidInput)
 	}
 
 	if deal.Status == "" {
@@ -60,7 +59,7 @@ func (s *Service) GetDealByID(ctx context.Context, dealID, userID string) (*Deal
 
 func (s *Service) ListByFreelancer(ctx context.Context, userID string) ([]Deal, error) {
 	if userID == "" {
-		return nil, errors.New("freelancer id is required")
+		return nil, fmt.Errorf("%w: freelancer id is required", ErrInvalidInput)
 	}
 
 	return s.repo.ListByFreelancer(ctx, userID)
@@ -71,27 +70,28 @@ func (s *Service) UpdateStatus(ctx context.Context, dealID string, newStatus Sta
 	if err != nil {
 		return err
 	}
+
 	if !CanTransition(deal.Status, newStatus) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, newStatus)
 	}
+
 	return s.repo.UpdateStatus(ctx, dealID, newStatus)
 }
 
 // Artifacts
-// Artifacts
-
 func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *Artifact) error {
 	if artifact.DealID == "" {
-		return errors.New("deal id is required")
+		return fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
+
 	if artifact.StorageKey == "" {
-		return errors.New("storage key is required")
+		return fmt.Errorf("%w: storage key is required", ErrInvalidInput)
 	}
 
 	switch artifact.Kind {
 	case ArtifactSourceCode, ArtifactSourceFile:
 	default:
-		return errors.New("invalid artifact kind")
+		return fmt.Errorf("%w: invalid artifact kind", ErrInvalidInput)
 	}
 
 	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
@@ -110,9 +110,9 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 		StatusReviewing,
 		StatusReleased,
 		StatusDisputed:
-		return errors.New("uploads are no longer allowed")
+		return fmt.Errorf("%w: uploads are no longer allowed", ErrInvalidInput)
 	default:
-		return errors.New("deal is not ready for uploads")
+		return fmt.Errorf("%w: deal is not ready for uploads", ErrInvalidInput)
 	}
 
 	return s.repo.CreateArtifact(ctx, artifact)
@@ -120,7 +120,7 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 
 func (s *Service) GetArtifactByID(ctx context.Context, userID, artifactID string) (*Artifact, error) {
 	if artifactID == "" {
-		return nil, errors.New("artifact id is required")
+		return nil, fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
 	}
 
 	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)
@@ -142,7 +142,7 @@ func (s *Service) GetArtifactByID(ctx context.Context, userID, artifactID string
 
 func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, dealID string) ([]Artifact, error) {
 	if dealID == "" {
-		return nil, errors.New("deal id is required")
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
 
 	deal, err := s.repo.GetDealByID(ctx, dealID)
@@ -158,13 +158,13 @@ func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, dealID string
 }
 
 // Verifications
-
 func (s *Service) CreateVerification(ctx context.Context, userID string, verification *Verification) error {
 	if verification.ArtifactID == "" {
-		return errors.New("artifact id is required")
+		return fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
 	}
+
 	if verification.Reference == "" {
-		return errors.New("reference is required")
+		return fmt.Errorf("%w: reference is required", ErrInvalidInput)
 	}
 
 	switch verification.Method {
@@ -172,7 +172,7 @@ func (s *Service) CreateVerification(ctx context.Context, userID string, verific
 		VerificationPreviewPDF,
 		VerificationPreviewImage:
 	default:
-		return errors.New("invalid verification method")
+		return fmt.Errorf("%w: invalid verification method", ErrInvalidInput)
 	}
 
 	artifact, err := s.repo.GetArtifactByID(ctx, verification.ArtifactID)
@@ -198,7 +198,7 @@ func (s *Service) CreateVerification(ctx context.Context, userID string, verific
 
 func (s *Service) GetVerificationByID(ctx context.Context, userID, verificationID string) (*Verification, error) {
 	if verificationID == "" {
-		return nil, errors.New("verification id is required")
+		return nil, fmt.Errorf("%w: verification id is required", ErrInvalidInput)
 	}
 
 	verification, err := s.repo.GetVerificationByID(ctx, verificationID)
@@ -225,7 +225,7 @@ func (s *Service) GetVerificationByID(ctx context.Context, userID, verificationI
 
 func (s *Service) ListVerificationsByArtifact(ctx context.Context, userID, artifactID string) ([]Verification, error) {
 	if artifactID == "" {
-		return nil, errors.New("artifact id is required")
+		return nil, fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
 	}
 
 	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)

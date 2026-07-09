@@ -33,6 +33,8 @@ func (h *Handler) CreateArtifact(c *gin.Context) {
 
 	if err := h.service.CreateArtifact(c.Request.Context(), userID, artifact); err != nil {
 		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
@@ -57,6 +59,8 @@ func (h *Handler) ListArtifactsByDeal(c *gin.Context) {
 	artifacts, err := h.service.ListArtifactsByDeal(c.Request.Context(), userID, dealID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
@@ -81,6 +85,8 @@ func (h *Handler) GetArtifactByID(c *gin.Context) {
 	artifact, err := h.service.GetArtifactByID(c.Request.Context(), userID, artifactID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrArtifactNotFound):

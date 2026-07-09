@@ -33,6 +33,8 @@ func (h *Handler) CreateVerification(c *gin.Context) {
 
 	if err := h.service.CreateVerification(c.Request.Context(), userID, verification); err != nil {
 		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrArtifactNotFound):
@@ -57,6 +59,8 @@ func (h *Handler) ListVerificationsByArtifact(c *gin.Context) {
 	verifications, err := h.service.ListVerificationsByArtifact(c.Request.Context(), userID, artifactID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrArtifactNotFound):
@@ -81,6 +85,8 @@ func (h *Handler) GetVerificationByID(c *gin.Context) {
 	verification, err := h.service.GetVerificationByID(c.Request.Context(), userID, verificationID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrVerificationNotFound):

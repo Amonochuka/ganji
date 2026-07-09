@@ -43,9 +43,14 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 	}
 
 	if err := h.service.CreateDeal(c.Request.Context(), deal); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
 		return
 	}
 
@@ -61,6 +66,8 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
@@ -83,9 +90,14 @@ func (h *Handler) ListDeals(c *gin.Context) {
 
 	deals, err := h.service.ListByFreelancer(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "internal server error",
-		})
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
 		return
 	}
 
