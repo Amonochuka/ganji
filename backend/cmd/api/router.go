@@ -43,9 +43,11 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 	protected.Use(middleware.AuthRequired(tokenManager))
 
 	deals.RegisterRoutes(protected, dealHandler)
-	// Future: deals.RegisterRoutes(router, dbConn, cfg)
-	// Future: lightning.RegisterRoutes(router, dbConn, cfg)
-	// Future: cv.RegisterRoutes(router, dbConn, cfg)
+	deals.RegisterArtifactRoutes(protected, dealHandler)
+	deals.RegisterVerificationRoutes(protected, dealHandler)
+
+	// Future: lightning.RegisterRoutes(protected, ...)
+	// Future: cv.RegisterRoutes(protected, ...)
 
 	return router
 }

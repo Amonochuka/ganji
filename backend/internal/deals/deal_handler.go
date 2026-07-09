@@ -2,8 +2,9 @@ package deals
 
 import (
 	"errors"
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
@@ -31,6 +32,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 		})
 		return
 	}
+
 	userID := c.GetString("userID")
 
 	deal := &Deal{
@@ -39,32 +41,38 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 		AmountSats:     req.AmountSats,
 		SourcePlatform: req.SourcePlatform,
 	}
+
 	if err := h.service.CreateDeal(c.Request.Context(), deal); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
 		return
 	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"deal": deal,
 	})
 }
 
 func (h *Handler) GetDealByID(c *gin.Context) {
-	dealID := c.Param("id")
 	userID := c.GetString("userID")
+	dealID := c.Param("dealID")
 
 	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID)
-
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-		default:
+		case errors.Is(err, ErrDealNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
 		}
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"deal": deal,
 	})
@@ -75,9 +83,12 @@ func (h *Handler) ListDeals(c *gin.Context) {
 
 	deals, err := h.service.ListByFreelancer(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"deals": deals,
 	})
@@ -88,5 +99,5 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 
 	group.POST("", h.CreateDeal)
 	group.GET("", h.ListDeals)
-	group.GET("/:id", h.GetDealByID)
+	group.GET("/:dealID", h.GetDealByID)
 }

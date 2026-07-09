@@ -78,11 +78,12 @@ func (s *Service) UpdateStatus(ctx context.Context, dealID string, newStatus Sta
 }
 
 // Artifacts
+// Artifacts
+
 func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *Artifact) error {
 	if artifact.DealID == "" {
 		return errors.New("deal id is required")
 	}
-
 	if artifact.StorageKey == "" {
 		return errors.New("storage key is required")
 	}
@@ -104,6 +105,7 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 
 	switch deal.Status {
 	case StatusLocked:
+		// uploads allowed
 	case StatusWorkSubmitted,
 		StatusReviewing,
 		StatusReleased,
@@ -116,22 +118,48 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 	return s.repo.CreateArtifact(ctx, artifact)
 }
 
-func (s *Service) GetArtifactByID(ctx context.Context, id string) (*Artifact, error) {
-	if id == "" {
+func (s *Service) GetArtifactByID(ctx context.Context, userID, artifactID string) (*Artifact, error) {
+	if artifactID == "" {
 		return nil, errors.New("artifact id is required")
 	}
-	return s.repo.GetArtifactByID(ctx, id)
+
+	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)
+	if err != nil {
+		return nil, err
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
+	return artifact, nil
 }
 
-func (s *Service) ListArtifactsByDeal(ctx context.Context, dealID string) ([]Artifact, error) {
+func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, dealID string) ([]Artifact, error) {
 	if dealID == "" {
 		return nil, errors.New("deal id is required")
 	}
+
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
 	return s.repo.ListArtifactsByDeal(ctx, dealID)
 }
 
-// verifications
-func (s *Service) CreateVerification(ctx context.Context, verification *Verification) error {
+// Verifications
+
+func (s *Service) CreateVerification(ctx context.Context, userID string, verification *Verification) error {
 	if verification.ArtifactID == "" {
 		return errors.New("artifact id is required")
 	}
@@ -143,27 +171,76 @@ func (s *Service) CreateVerification(ctx context.Context, verification *Verifica
 	case VerificationSandbox,
 		VerificationPreviewPDF,
 		VerificationPreviewImage:
-
 	default:
 		return errors.New("invalid verification method")
+	}
+
+	artifact, err := s.repo.GetArtifactByID(ctx, verification.ArtifactID)
+	if err != nil {
+		return err
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
+	if err != nil {
+		return err
+	}
+
+	if deal.FreelancerID != userID {
+		return ErrForbidden
 	}
 
 	if verification.Status == "" {
 		verification.Status = VerificationPending
 	}
+
 	return s.repo.CreateVerification(ctx, verification)
 }
 
-func (s *Service) GetVerificationByID(ctx context.Context, id string) (*Verification, error) {
-	if id == "" {
+func (s *Service) GetVerificationByID(ctx context.Context, userID, verificationID string) (*Verification, error) {
+	if verificationID == "" {
 		return nil, errors.New("verification id is required")
 	}
-	return s.repo.GetVerificationByID(ctx, id)
+
+	verification, err := s.repo.GetVerificationByID(ctx, verificationID)
+	if err != nil {
+		return nil, err
+	}
+
+	artifact, err := s.repo.GetArtifactByID(ctx, verification.ArtifactID)
+	if err != nil {
+		return nil, err
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
+	return verification, nil
 }
 
-func (s *Service) ListVerificationsByArtifact(ctx context.Context, artifactID string) ([]Verification, error) {
+func (s *Service) ListVerificationsByArtifact(ctx context.Context, userID, artifactID string) ([]Verification, error) {
 	if artifactID == "" {
 		return nil, errors.New("artifact id is required")
 	}
+
+	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)
+	if err != nil {
+		return nil, err
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
 	return s.repo.ListVerificationsByArtifact(ctx, artifactID)
 }
