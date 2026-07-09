@@ -81,19 +81,18 @@ type Artifact struct {
 type ArtifactKind string
 
 const (
-    ArtifactSourceCode ArtifactKind = "source_code"
-    ArtifactSourceFile ArtifactKind = "source_file"
+	ArtifactSourceCode ArtifactKind = "source_code"
+	ArtifactSourceFile ArtifactKind = "source_file"
 )
 
 // Verification types
 type VerificationMethod string
 
 const (
-    VerificationSandbox     VerificationMethod = "sandbox"
-    VerificationPreviewPDF  VerificationMethod = "preview_pdf"
-    VerificationPreviewImage VerificationMethod = "preview_image"
+	VerificationSandbox      VerificationMethod = "sandbox"
+	VerificationPreviewPDF   VerificationMethod = "preview_pdf"
+	VerificationPreviewImage VerificationMethod = "preview_image"
 )
-
 
 type VerificationStatus string
 

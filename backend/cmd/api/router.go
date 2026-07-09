@@ -8,7 +8,9 @@ import (
 
 	"github.com/Amonochuka/ganji-backend/internal/auth"
 	"github.com/Amonochuka/ganji-backend/internal/config"
+	"github.com/Amonochuka/ganji-backend/internal/deals"
 	"github.com/Amonochuka/ganji-backend/internal/health"
+	"github.com/Amonochuka/ganji-backend/internal/middleware"
 )
 
 // setupRouter builds the Gin engine and registers all routes. As we add
@@ -33,6 +35,14 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 	authHandler := auth.NewHandler(authService, tokenManager)
 	auth.RegisterRoutes(router, authHandler)
 
+	dealRepo := deals.NewRepository(dbConn)
+	dealService := deals.NewService(dealRepo)
+	dealHandler := deals.NewHandler(dealService)
+
+	protected := router.Group("/")
+	protected.Use(middleware.AuthRequired(tokenManager))
+
+	deals.RegisterRoutes(protected, dealHandler)
 	// Future: deals.RegisterRoutes(router, dbConn, cfg)
 	// Future: lightning.RegisterRoutes(router, dbConn, cfg)
 	// Future: cv.RegisterRoutes(router, dbConn, cfg)

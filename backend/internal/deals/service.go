@@ -45,18 +45,25 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	return s.repo.CreateDeal(ctx, deal)
 }
 
-func (s *Service) GetDealByID(ctx context.Context, id string) (*Deal, error) {
-	if id == "" {
-		return nil, errors.New("deal id is required")
+func (s *Service) GetDealByID(ctx context.Context, dealID, userID string) (*Deal, error) {
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
 	}
-	return s.repo.GetDealByID(ctx, id)
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
+	return deal, nil
 }
 
-func (s *Service) ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error) {
-	if freelancerID == "" {
+func (s *Service) ListByFreelancer(ctx context.Context, userID string) ([]Deal, error) {
+	if userID == "" {
 		return nil, errors.New("freelancer id is required")
 	}
-	return s.repo.ListByFreelancer(ctx, freelancerID)
+
+	return s.repo.ListByFreelancer(ctx, userID)
 }
 
 func (s *Service) UpdateStatus(ctx context.Context, dealID string, newStatus Status) error {
@@ -71,7 +78,7 @@ func (s *Service) UpdateStatus(ctx context.Context, dealID string, newStatus Sta
 }
 
 // Artifacts
-func (s *Service) CreateArtifact(ctx context.Context, artifact *Artifact) error {
+func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *Artifact) error {
 	if artifact.DealID == "" {
 		return errors.New("deal id is required")
 	}
@@ -81,9 +88,7 @@ func (s *Service) CreateArtifact(ctx context.Context, artifact *Artifact) error 
 	}
 
 	switch artifact.Kind {
-	case ArtifactSourceCode,
-		ArtifactSourceFile:
-
+	case ArtifactSourceCode, ArtifactSourceFile:
 	default:
 		return errors.New("invalid artifact kind")
 	}
@@ -93,9 +98,12 @@ func (s *Service) CreateArtifact(ctx context.Context, artifact *Artifact) error 
 		return err
 	}
 
+	if deal.FreelancerID != userID {
+		return ErrForbidden
+	}
+
 	switch deal.Status {
 	case StatusLocked:
-		// uploads allowed
 	case StatusWorkSubmitted,
 		StatusReviewing,
 		StatusReleased,
@@ -104,6 +112,7 @@ func (s *Service) CreateArtifact(ctx context.Context, artifact *Artifact) error 
 	default:
 		return errors.New("deal is not ready for uploads")
 	}
+
 	return s.repo.CreateArtifact(ctx, artifact)
 }
 
@@ -121,7 +130,7 @@ func (s *Service) ListArtifactsByDeal(ctx context.Context, dealID string) ([]Art
 	return s.repo.ListArtifactsByDeal(ctx, dealID)
 }
 
-//verifications
+// verifications
 func (s *Service) CreateVerification(ctx context.Context, verification *Verification) error {
 	if verification.ArtifactID == "" {
 		return errors.New("artifact id is required")
@@ -129,7 +138,7 @@ func (s *Service) CreateVerification(ctx context.Context, verification *Verifica
 	if verification.Reference == "" {
 		return errors.New("reference is required")
 	}
-	
+
 	switch verification.Method {
 	case VerificationSandbox,
 		VerificationPreviewPDF,

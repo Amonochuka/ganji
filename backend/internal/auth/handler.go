@@ -7,9 +7,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Handler wires HTTP requests to Service and TokenManager. No validation
-// or hashing here — that lives in Service. This file should only ever
-// grow request/response plumbing.
+// Handler wires HTTP requests to the Service and TokenManager.
+// It is responsible for request binding and HTTP responses.
+// Business validation, hashing, and persistence belong to the Service.
 type Handler struct {
 	service *Service
 	tokens  *TokenManager

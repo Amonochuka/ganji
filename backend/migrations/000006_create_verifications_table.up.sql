@@ -8,5 +8,9 @@ CREATE TABLE verifications (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CONSTRAINT valid_verification_status CHECK (
+    status IN ('pending', 'ready', 'expired')
+)
+
 CREATE INDEX idx_verifications_artifact
 ON verifications(artifact_id);
