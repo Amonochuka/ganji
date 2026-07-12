@@ -5,12 +5,12 @@ CREATE TABLE verifications (
     reference TEXT NOT NULL,
     status TEXT NOT NULL,
     expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT valid_verification_status CHECK (
+        status IN ('pending', 'ready', 'expired')
+    )
 );
 
-CONSTRAINT valid_verification_status CHECK (
-    status IN ('pending', 'ready', 'expired')
-)
-
 CREATE INDEX idx_verifications_artifact
-ON verifications(artifact_id);
+ON verifications (artifact_id);

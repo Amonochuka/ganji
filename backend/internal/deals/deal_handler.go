@@ -17,6 +17,10 @@ func NewHandler(service *Service) *Handler {
 	}
 }
 
+type updateDealStatusRequest struct {
+	Status Status `json:"status" binding:"required"`
+}
+
 type createDealRequest struct {
 	Title          string `json:"title" binding:"required"`
 	AmountSats     int64  `json:"amount_sats" binding:"required"`
@@ -112,4 +116,52 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group.POST("", h.CreateDeal)
 	group.GET("", h.ListDeals)
 	group.GET("/:dealID", h.GetDealByID)
+	group.PATCH("/:dealID/status", h.UpdateDealStatus)
+}
+
+func (h *Handler) UpdateDealStatus(c *gin.Context) {
+	userID := c.GetString("userID")
+	dealID := c.Param("dealID")
+
+	var req updateDealStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request body",
+		})
+		return
+	}
+
+	// Ensure the caller owns the deal.
+	if _, err := h.service.GetDealByID(c.Request.Context(), dealID, userID); err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	if err := h.service.UpdateStatus(c.Request.Context(), dealID, req.Status); err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidTransition),
+			errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "deal status updated",
+	})
 }
