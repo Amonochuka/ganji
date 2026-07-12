@@ -1,26 +1,114 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Vault surfaces — near-black, slightly cool, never pure #000 */
+  --color-vault-bg: #0b0d10;
+  --color-vault-surface: #14171c;
+  --color-vault-raised: #1b1f26;
+  --color-vault-border: #262b33;
+
+  /* Text */
+  --color-ink-100: #f5f3ef;
+  --color-ink-300: #c7c9cd;
+  --color-ink-500: #8a8f98;
+  --color-ink-700: #565b64;
+
+  /* Bitcoin orange — the one accent, spent deliberately */
+  --color-sats-500: #f7931a;
+  --color-sats-600: #d97b0c;
+  --color-sats-900: #3a2308;
+
+  /* Status */
+  --color-status-locked: #f7931a;
+  --color-status-waiting: #5b8cff;
+  --color-status-review: #b98cff;
+  --color-status-released: #3ddc84;
+  --color-status-disputed: #e5484d;
+
+  --font-display: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-body: "Inter", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-vault-bg);
+  color: var(--color-ink-100);
+  font-family: var(--font-body);
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(247, 147, 26, 0.07), transparent 40%),
+    radial-gradient(circle at 85% 100%, rgba(91, 140, 255, 0.05), transparent 45%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: var(--color-sats-500);
+  color: var(--color-vault-bg);
+}
+
+/* Focus rings — always visible, never suppressed */
+:focus-visible {
+  outline: 2px solid var(--color-sats-500);
+  outline-offset: 2px;
+}
+
+/* Signature seam: a notched top edge used on lockbox-style cards,
+   evoking a physical strongbox lid rather than a generic rounded card. */
+.vault-seam::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-vault-border) 0px,
+    var(--color-vault-border) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+.mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@keyframes pulse-lock {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes count-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-count-in {
+  animation: count-in 0.4s ease-out;
 }
