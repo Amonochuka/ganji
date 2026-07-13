@@ -103,16 +103,14 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 		return ErrForbidden
 	}
 
+	// TEMP: Allow uploads before LNBits escrow integration.
+	// Remove this once deals automatically transition to StatusLocked after payment.
 	switch deal.Status {
-	case StatusLocked:
-		// uploads allowed
 	case StatusWorkSubmitted,
 		StatusReviewing,
 		StatusReleased,
 		StatusDisputed:
 		return fmt.Errorf("%w: uploads are no longer allowed", ErrInvalidInput)
-	default:
-		return fmt.Errorf("%w: deal is not ready for uploads", ErrInvalidInput)
 	}
 
 	return s.repo.CreateArtifact(ctx, artifact)
