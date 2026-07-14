@@ -1,4 +1,4 @@
-CREATE TABLE deals (
+CREATE TABLE IF NOT EXISTS  deals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     freelancer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     title TEXT NOT NULL,

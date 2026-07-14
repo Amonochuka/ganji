@@ -1,4 +1,4 @@
-CREATE TABLE verifications (
+CREATE TABLE IF NOT EXISTS  verifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     artifact_id UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
     method TEXT NOT NULL,

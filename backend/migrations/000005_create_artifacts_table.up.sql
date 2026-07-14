@@ -1,4 +1,4 @@
-CREATE TABLE artifacts (
+CREATE TABLE IF NOT EXISTS  artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     deal_id UUID NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
