@@ -15,3 +15,11 @@ type User struct {
 	TrustScore     float64   `json:"trust_score"`
 	CreatedAt      time.Time `json:"created_at"`
 }
+
+type RefreshToken struct {
+	ID         string
+	UserID     string
+	TokenHash  string
+	ExpiresAt  time.Time
+	CreatedAt  time.Time
+}

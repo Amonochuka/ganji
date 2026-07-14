@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -108,4 +110,55 @@ func (r *Repository) SlugExists(slug string) (bool, error) {
 		return false, fmt.Errorf("failed to check slug existence: %w", err)
 	}
 	return exists, nil
+}
+
+func (r *Repository) StoreRefreshToken(ctx context.Context, token *RefreshToken) error {
+	query := `INSERT INTO refresh_tokens(user_id, token_hash, expires_at)
+			VALUES($1, $2, $3) RETURNING(id, created_at);`
+	row := r.db.QueryRowContext(ctx, query, token.UserID, token.TokenHash, token.ExpiresAt)
+	if err := row.Scan(&token.ID, &token.CreatedAt); err != nil {
+		return fmt.Errorf("repository: store refresh token: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error) {
+	query := `
+		SELECT id, user_id,token_hash,expires_at, created_at FROM refresh_tokens
+		WHERE token_hash = $1;
+	`
+	token := RefreshToken{}
+	err := r.db.QueryRowContext(ctx, query, tokenHash).Scan(
+		&token.ID,
+		&token.UserID,
+		&token.TokenHash,
+		&token.ExpiresAt,
+		&token.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRefreshTokenNotFound
+		}
+		return nil, fmt.Errorf("repository: find refresh token: %w", err)
+	}
+
+	return &token, nil
+}
+
+func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
+	query := `
+		DELETE FROM refresh_tokens WHERE token_hash = $1;`
+
+	result, err := r.db.ExecContext(ctx, query, tokenHash)
+	if err != nil {
+		return fmt.Errorf("repository: revoke refresh token: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: revoke refresh token: %w", err)
+	}
+	if rows == 0 {
+		return ErrRefreshTokenNotFound
+	}
+	return nil
 }
