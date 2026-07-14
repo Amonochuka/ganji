@@ -79,11 +79,15 @@ func (h *Handler) ListVerificationsByArtifact(c *gin.Context) {
 }
 
 func (h *Handler) GetVerificationByID(c *gin.Context) {
+
 	userID := c.GetString("userID")
 	verificationID := c.Param("verificationID")
+	dealID := c.Param("dealID")
+	artifactID := c.Param("artifactID")
 
-	verification, err := h.service.GetVerificationByID(c.Request.Context(), userID, verificationID)
+	verification, err := h.service.GetVerificationByID(c.Request.Context(), userID, dealID, artifactID, verificationID)
 	if err != nil {
+
 		switch {
 		case errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -98,7 +102,6 @@ func (h *Handler) GetVerificationByID(c *gin.Context) {
 		}
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"verification": verification,
 	})

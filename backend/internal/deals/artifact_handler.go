@@ -81,8 +81,9 @@ func (h *Handler) ListArtifactsByDeal(c *gin.Context) {
 func (h *Handler) GetArtifactByID(c *gin.Context) {
 	userID := c.GetString("userID")
 	artifactID := c.Param("artifactID")
+	dealID := c.Param("dealID")
 
-	artifact, err := h.service.GetArtifactByID(c.Request.Context(), userID, artifactID)
+	artifact, err := h.service.GetArtifactByID(c.Request.Context(), userID, dealID, artifactID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):

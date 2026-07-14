@@ -2,6 +2,9 @@ package deals
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -40,6 +43,14 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	if deal.Status == "" {
 		deal.Status = StatusAwaitingPayment
 	}
+
+	preimage := make([]byte, 32)
+	if _, err := rand.Read(preimage); err != nil {
+		return fmt.Errorf("generating preimage hash: %w", err)
+	}
+
+	hash := sha256.Sum256(preimage)
+	deal.PreimageHash = hex.EncodeToString(hash[:])
 
 	return s.repo.CreateDeal(ctx, deal)
 }
@@ -116,7 +127,17 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 	return s.repo.CreateArtifact(ctx, artifact)
 }
 
-func (s *Service) GetArtifactByID(ctx context.Context, userID, artifactID string) (*Artifact, error) {
+func (s *Service) GetArtifactByID(
+	ctx context.Context,
+	userID,
+	dealID,
+	artifactID string,
+) (*Artifact, error) {
+
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
 	if artifactID == "" {
 		return nil, fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
 	}
@@ -124,6 +145,10 @@ func (s *Service) GetArtifactByID(ctx context.Context, userID, artifactID string
 	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)
 	if err != nil {
 		return nil, err
+	}
+
+	if artifact.DealID != dealID {
+		return nil, ErrArtifactNotFound
 	}
 
 	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
@@ -194,7 +219,22 @@ func (s *Service) CreateVerification(ctx context.Context, userID string, verific
 	return s.repo.CreateVerification(ctx, verification)
 }
 
-func (s *Service) GetVerificationByID(ctx context.Context, userID, verificationID string) (*Verification, error) {
+func (s *Service) GetVerificationByID(
+	ctx context.Context,
+	userID,
+	dealID,
+	artifactID,
+	verificationID string,
+) (*Verification, error) {
+
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	if artifactID == "" {
+		return nil, fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
+	}
+
 	if verificationID == "" {
 		return nil, fmt.Errorf("%w: verification id is required", ErrInvalidInput)
 	}
@@ -204,9 +244,17 @@ func (s *Service) GetVerificationByID(ctx context.Context, userID, verificationI
 		return nil, err
 	}
 
+	if verification.ArtifactID != artifactID {
+		return nil, ErrVerificationNotFound
+	}
+
 	artifact, err := s.repo.GetArtifactByID(ctx, verification.ArtifactID)
 	if err != nil {
 		return nil, err
+	}
+
+	if artifact.DealID != dealID {
+		return nil, ErrVerificationNotFound
 	}
 
 	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
