@@ -29,9 +29,10 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 
 	router.GET("/health", health.Handler(dbConn))
 
-	authRepo := auth.NewRepository(dbConn)
-	authService := auth.NewService(authRepo)
 	tokenManager := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTRefreshSecret)
+
+	authRepo := auth.NewRepository(dbConn)
+	authService := auth.NewService(authRepo, tokenManager)
 	authHandler := auth.NewHandler(authService, tokenManager)
 	auth.RegisterRoutes(router, authHandler)
 

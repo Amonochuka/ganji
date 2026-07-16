@@ -17,9 +17,15 @@ type User struct {
 }
 
 type RefreshToken struct {
-	ID         string
-	UserID     string
-	TokenHash  string
-	ExpiresAt  time.Time
-	CreatedAt  time.Time
+	ID        string
+	UserID    string
+	TokenHash string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+type AuthResponse struct {
+	User         *User  `json:"user"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
 }

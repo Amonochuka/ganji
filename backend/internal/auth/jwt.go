@@ -94,3 +94,7 @@ func (tm *TokenManager) verify(tokenString string, secret []byte) (*Claims, erro
 
 	return claims, nil
 }
+
+func (tm *TokenManager) RefreshTokenTTL() time.Duration {
+	return refreshTokenTTL
+}

@@ -1,9 +1,13 @@
 package auth
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -14,16 +18,20 @@ var emailPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-z
 // users. It owns validation and hashing — Repository is pure SQL and
 // knows nothing about passwords being plaintext or hashed.
 type Service struct {
-	repo *Repository
+	repo   *Repository
+	tokens *TokenManager
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo *Repository, tokens *TokenManager) *Service {
+	return &Service{
+		repo:   repo,
+		tokens: tokens,
+	}
 }
 
 // Register validates input, checks for conflicts, hashes the password,
 // generates a slug from the display name, and creates the user.
-func (s *Service) Register(email, password, displayName string) (*User, error) {
+func (s *Service) Register(ctx context.Context, email, password, displayName string) (*AuthResponse, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
 	if !emailPattern.MatchString(email) {
@@ -49,17 +57,43 @@ func (s *Service) Register(email, password, displayName string) (*User, error) {
 		return nil, fmt.Errorf("generating slug: %w", err)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
 
-	user, err := s.repo.Create(email, string(hash), strings.TrimSpace(displayName), slug)
+	user, err := s.repo.Create(email, string(passwordHash), strings.TrimSpace(displayName), slug)
 	if err != nil {
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 
-	return user, nil
+	accessToken, err := s.tokens.GenerateAccessToken(user.ID, user.Email)
+	if err != nil {
+		return nil, fmt.Errorf("generating access token: %w", err)
+	}
+
+	refreshToken, err := s.tokens.GenerateRefreshToken(user.ID, user.Email)
+	if err != nil {
+		return nil, fmt.Errorf("generating refresh token: %w", err)
+	}
+
+	hash := sha256.Sum256([]byte(refreshToken))
+	tokenHash := hex.EncodeToString(hash[:])
+
+	err = s.repo.StoreRefreshToken(ctx, &RefreshToken{
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(s.tokens.RefreshTokenTTL()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storing refresh token: %w", err)
+	}
+
+	return &AuthResponse{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }
 
 // Authenticate verifies an email/password pair against the stored hash.

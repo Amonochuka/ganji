@@ -44,7 +44,7 @@ func (h *Handler) Signup(c *gin.Context) {
 		return
 	}
 
-	user, err := h.service.Register(req.Email, req.Password, req.DisplayName)
+	authResponse, err := h.service.Register(c.Request.Context(), req.Email, req.Password, req.DisplayName)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
@@ -56,23 +56,7 @@ func (h *Handler) Signup(c *gin.Context) {
 		}
 		return
 	}
-
-	accessToken, err := h.tokens.GenerateAccessToken(user.ID, user.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
-		return
-	}
-
-	refreshToken, err := h.tokens.GenerateRefreshToken(user.ID, user.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"user":   user,
-		"tokens": tokenResponse{AccessToken: accessToken, RefreshToken: refreshToken},
-	})
+	c.JSON(http.StatusCreated, authResponse)
 }
 
 // Login handles POST /auth/login
