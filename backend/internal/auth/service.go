@@ -98,10 +98,6 @@ func (s *Service) Authenticate(ctx context.Context, email, password string) (*Au
 	return s.issueTokens(ctx, user)
 }
 
-func(s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error){
-	
-}
-
 // generateUniqueSlug turns a display name into a URL-safe slug and
 // appends a numeric suffix if it's already taken (e.g. "juma-codes-2").
 func (s *Service) generateUniqueSlug(displayName string) (string, error) {
@@ -111,7 +107,7 @@ func (s *Service) generateUniqueSlug(displayName string) (string, error) {
 	for i := 1; i < 100; i++ {
 		taken, err := s.repo.SlugExists(slug)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("checking slug availability: %w", err)
 		}
 		if !taken {
 			return slug, nil
@@ -149,7 +145,7 @@ func slugify(name string) string {
 	return slug
 }
 
-func (s *Service) issueTokens(ctx context.Context,user *User) (*AuthResponse, error) {
+func (s *Service) issueTokens(ctx context.Context, user *User) (*AuthResponse, error) {
 	accessToken, err := s.tokens.GenerateAccessToken(user.ID, user.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generating access token: %w", err)
@@ -166,7 +162,7 @@ func (s *Service) issueTokens(ctx context.Context,user *User) (*AuthResponse, er
 	err = s.repo.StoreRefreshToken(ctx, &StoredRefreshToken{
 		UserID:    user.ID,
 		TokenHash: tokenHash,
-		ExpiresAt: time.Now().Add(s.tokens.RefreshTokenTTL()),
+		ExpiresAt: time.Now().Add(RefreshTokenTTL()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storing refresh token: %w", err)
@@ -177,4 +173,38 @@ func (s *Service) issueTokens(ctx context.Context,user *User) (*AuthResponse, er
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 	}, nil
+}
+
+func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error) {
+	claims, err := s.tokens.VerifyRefreshToken(refreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("verifying refresh token: %w", err)
+	}
+
+	user, err := s.repo.FindByEmail(claims.Email)
+	if err != nil {
+		return nil, fmt.Errorf("finding user: %w", err)
+	}
+
+	hash := sha256.Sum256([]byte(refreshToken))
+	tokenHash := hex.EncodeToString(hash[:])
+
+	storedRefreshToken, err := s.repo.FindRefreshToken(ctx, tokenHash)
+	if err != nil {
+		return nil, fmt.Errorf("finding refresh token: %w", err)
+	}
+
+	// Expired token: revoke it and reject the request.
+	if time.Now().After(storedRefreshToken.ExpiresAt) {
+		if err := s.repo.RevokeRefreshToken(ctx, tokenHash); err != nil {
+			return nil, fmt.Errorf("revoking expired refresh token: %w", err)
+		}
+		return nil, ErrInvalidToken
+	}
+	// Valid token: revoke it too (rotation).
+	if err := s.repo.RevokeRefreshToken(ctx, tokenHash); err != nil {
+		return nil, fmt.Errorf("revoking refresh token: %w", err)
+	}
+
+	return s.issueTokens(ctx, user)
 }

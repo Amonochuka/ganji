@@ -60,7 +60,7 @@ func (tm *TokenManager) GenerateRefreshToken(userID, email string) (string, erro
 		UserID: userID,
 		Email:  email,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(refreshTokenTTL)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(RefreshTokenTTL())),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -95,6 +95,6 @@ func (tm *TokenManager) verify(tokenString string, secret []byte) (*Claims, erro
 	return claims, nil
 }
 
-func (tm *TokenManager) RefreshTokenTTL() time.Duration {
+func RefreshTokenTTL() time.Duration {
 	return refreshTokenTTL
 }
