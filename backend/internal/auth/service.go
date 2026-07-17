@@ -67,39 +67,13 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 
-	accessToken, err := s.tokens.GenerateAccessToken(user.ID, user.Email)
-	if err != nil {
-		return nil, fmt.Errorf("generating access token: %w", err)
-	}
-
-	refreshToken, err := s.tokens.GenerateRefreshToken(user.ID, user.Email)
-	if err != nil {
-		return nil, fmt.Errorf("generating refresh token: %w", err)
-	}
-
-	hash := sha256.Sum256([]byte(refreshToken))
-	tokenHash := hex.EncodeToString(hash[:])
-
-	err = s.repo.StoreRefreshToken(ctx, &RefreshToken{
-		UserID:    user.ID,
-		TokenHash: tokenHash,
-		ExpiresAt: time.Now().Add(s.tokens.RefreshTokenTTL()),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("storing refresh token: %w", err)
-	}
-
-	return &AuthResponse{
-		User:         user,
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-	}, nil
+	return s.issueTokens(ctx, user)
 }
 
 // Authenticate verifies an email/password pair against the stored hash.
 // Returns ErrInvalidCredentials for both "no such user" and "wrong
 // password" — never reveal which one it was.
-func (s *Service) Authenticate(email, password string) (*User, error) {
+func (s *Service) Authenticate(ctx context.Context, email, password string) (*AuthResponse, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
 	if !emailPattern.MatchString(email) {
@@ -121,7 +95,7 @@ func (s *Service) Authenticate(email, password string) (*User, error) {
 		return nil, ErrInvalidCredentials
 	}
 
-	return user, nil
+	return s.issueTokens(ctx, user)
 }
 
 // generateUniqueSlug turns a display name into a URL-safe slug and
@@ -169,4 +143,34 @@ func slugify(name string) string {
 		slug = "user"
 	}
 	return slug
+}
+
+func (s *Service) issueTokens(ctx context.Context,user *User) (*AuthResponse, error) {
+	accessToken, err := s.tokens.GenerateAccessToken(user.ID, user.Email)
+	if err != nil {
+		return nil, fmt.Errorf("generating access token: %w", err)
+	}
+
+	refreshToken, err := s.tokens.GenerateRefreshToken(user.ID, user.Email)
+	if err != nil {
+		return nil, fmt.Errorf("generating refresh token: %w", err)
+	}
+
+	hash := sha256.Sum256([]byte(refreshToken))
+	tokenHash := hex.EncodeToString(hash[:])
+
+	err = s.repo.StoreRefreshToken(ctx, &RefreshToken{
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(s.tokens.RefreshTokenTTL()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storing refresh token: %w", err)
+	}
+
+	return &AuthResponse{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }

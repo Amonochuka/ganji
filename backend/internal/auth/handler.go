@@ -68,7 +68,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	user, err := h.service.Authenticate(req.Email, req.Password)
+	authResponse, err := h.service.Authenticate(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -80,23 +80,7 @@ func (h *Handler) Login(c *gin.Context) {
 		}
 		return
 	}
-
-	accessToken, err := h.tokens.GenerateAccessToken(user.ID, user.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
-		return
-	}
-
-	refreshToken, err := h.tokens.GenerateRefreshToken(user.ID, user.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"user":   user,
-		"tokens": tokenResponse{AccessToken: accessToken, RefreshToken: refreshToken},
-	})
+	c.JSON(http.StatusOK, authResponse)
 }
 
 // RegisterRoutes mounts the auth routes onto the given router group.
