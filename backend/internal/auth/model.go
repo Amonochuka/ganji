@@ -16,7 +16,7 @@ type User struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-type RefreshToken struct {
+type StoredRefreshToken struct {
 	ID        string
 	UserID    string
 	TokenHash string

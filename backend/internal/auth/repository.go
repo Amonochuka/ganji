@@ -112,7 +112,7 @@ func (r *Repository) SlugExists(slug string) (bool, error) {
 	return exists, nil
 }
 
-func (r *Repository) StoreRefreshToken(ctx context.Context, token *RefreshToken) error {
+func (r *Repository) StoreRefreshToken(ctx context.Context, token *StoredRefreshToken) error {
 	query := `INSERT INTO refresh_tokens(user_id, token_hash, expires_at)
 			VALUES($1, $2, $3) RETURNING(id, created_at);`
 	row := r.db.QueryRowContext(ctx, query, token.UserID, token.TokenHash, token.ExpiresAt)
@@ -122,12 +122,12 @@ func (r *Repository) StoreRefreshToken(ctx context.Context, token *RefreshToken)
 	return nil
 }
 
-func (r *Repository) FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error) {
+func (r *Repository) FindRefreshToken(ctx context.Context, tokenHash string) (*StoredRefreshToken, error) {
 	query := `
 		SELECT id, user_id,token_hash,expires_at, created_at FROM refresh_tokens
 		WHERE token_hash = $1;
 	`
-	token := RefreshToken{}
+	token := StoredRefreshToken{}
 	err := r.db.QueryRowContext(ctx, query, tokenHash).Scan(
 		&token.ID,
 		&token.UserID,

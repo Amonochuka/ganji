@@ -98,6 +98,10 @@ func (s *Service) Authenticate(ctx context.Context, email, password string) (*Au
 	return s.issueTokens(ctx, user)
 }
 
+func(s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error){
+	
+}
+
 // generateUniqueSlug turns a display name into a URL-safe slug and
 // appends a numeric suffix if it's already taken (e.g. "juma-codes-2").
 func (s *Service) generateUniqueSlug(displayName string) (string, error) {
@@ -159,7 +163,7 @@ func (s *Service) issueTokens(ctx context.Context,user *User) (*AuthResponse, er
 	hash := sha256.Sum256([]byte(refreshToken))
 	tokenHash := hex.EncodeToString(hash[:])
 
-	err = s.repo.StoreRefreshToken(ctx, &RefreshToken{
+	err = s.repo.StoreRefreshToken(ctx, &StoredRefreshToken{
 		UserID:    user.ID,
 		TokenHash: tokenHash,
 		ExpiresAt: time.Now().Add(s.tokens.RefreshTokenTTL()),
