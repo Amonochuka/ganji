@@ -208,3 +208,24 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 
 	return s.issueTokens(ctx, user)
 }
+
+func (s *Service) Logout(ctx context.Context, refreshToken string) error {
+	_, err := s.tokens.VerifyRefreshToken(refreshToken)
+	if err != nil {
+		return fmt.Errorf("verifying refresh token: %w", err)
+	}
+
+	hash := sha256.Sum256([]byte(refreshToken))
+	tokenHash := hex.EncodeToString(hash[:])
+
+	_, err = s.repo.FindRefreshToken(ctx, tokenHash)
+	if err != nil {
+		return fmt.Errorf("finding refresh token: %w", err)
+	}
+
+	if err := s.repo.RevokeRefreshToken(ctx, tokenHash); err != nil {
+		return fmt.Errorf("revoking refresh token: %w", err)
+	}
+	return nil
+}
+
