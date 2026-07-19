@@ -30,9 +30,8 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+type refreshTokenRequest struct {
+    RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
 // Signup handles POST /auth/signup
@@ -83,9 +82,31 @@ func (h *Handler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, authResponse)
 }
 
+func(h *Handler) Logout(c *gin.Context) {
+	var req refreshTokenRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	err := h.service.Logout(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidToken):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "logged out successfully"})
+}
+
 // RegisterRoutes mounts the auth routes onto the given router group.
 func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group := router.Group("/auth")
 	group.POST("/signup", h.Signup)
 	group.POST("/login", h.Login)
+	group.POST("/logout", h.Logout)
 }
