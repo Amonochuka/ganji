@@ -103,10 +103,32 @@ func(h *Handler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "logged out successfully"})
 }
 
+func(h *Handler) RefreshToken(c *gin.Context) {
+	var req refreshTokenRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	authResponse, err := h.service.RefreshToken(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidToken):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, authResponse)			
+}
+
 // RegisterRoutes mounts the auth routes onto the given router group.
 func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group := router.Group("/auth")
 	group.POST("/signup", h.Signup)
 	group.POST("/login", h.Login)
 	group.POST("/logout", h.Logout)
+	group.POST("/refresh-token", h.RefreshToken)
 }
