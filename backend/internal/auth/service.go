@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -191,6 +192,9 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 
 	storedRefreshToken, err := s.repo.FindRefreshToken(ctx, tokenHash)
 	if err != nil {
+		if errors.Is(err, ErrRefreshTokenNotFound) {
+			return nil, ErrInvalidToken
+		}
 		return nil, fmt.Errorf("finding refresh token: %w", err)
 	}
 
@@ -220,6 +224,9 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 
 	_, err = s.repo.FindRefreshToken(ctx, tokenHash)
 	if err != nil {
+		if errors.Is(err, ErrRefreshTokenNotFound) {
+			return ErrInvalidToken
+		}
 		return fmt.Errorf("finding refresh token: %w", err)
 	}
 
@@ -228,4 +235,3 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	}
 	return nil
 }
-

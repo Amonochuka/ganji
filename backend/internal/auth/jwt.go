@@ -1,13 +1,10 @@
 package auth
 
 import (
-	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
-
-var ErrInvalidToken = errors.New("invalid or expired token")
 
 const (
 	accessTokenTTL  = 15 * time.Minute

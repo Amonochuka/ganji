@@ -114,7 +114,7 @@ func (r *Repository) SlugExists(slug string) (bool, error) {
 
 func (r *Repository) StoreRefreshToken(ctx context.Context, token *StoredRefreshToken) error {
 	query := `INSERT INTO refresh_tokens(user_id, token_hash, expires_at)
-			VALUES($1, $2, $3) RETURNING(id, created_at);`
+			VALUES($1, $2, $3) RETURNING id, created_at;`
 	row := r.db.QueryRowContext(ctx, query, token.UserID, token.TokenHash, token.ExpiresAt)
 	if err := row.Scan(&token.ID, &token.CreatedAt); err != nil {
 		return fmt.Errorf("repository: store refresh token: %w", err)

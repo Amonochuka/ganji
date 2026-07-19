@@ -10,4 +10,5 @@ var (
 	ErrSlugTaken            = errors.New("slug is already taken")
 	ErrInvalidCredentials   = errors.New("invalid email or password")
 	ErrRefreshTokenNotFound = errors.New("refresh token not found")
+	ErrInvalidToken         = errors.New("invalid or expired token")
 )

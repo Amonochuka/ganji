@@ -31,7 +31,7 @@ type loginRequest struct {
 }
 
 type refreshTokenRequest struct {
-    RefreshToken string `json:"refresh_token" binding:"required"`
+	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
 // Signup handles POST /auth/signup
@@ -69,6 +69,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	authResponse, err := h.service.Authenticate(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
+
 		switch {
 		case errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -82,7 +83,7 @@ func (h *Handler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, authResponse)
 }
 
-func(h *Handler) Logout(c *gin.Context) {
+func (h *Handler) Logout(c *gin.Context) {
 	var req refreshTokenRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -92,6 +93,7 @@ func(h *Handler) Logout(c *gin.Context) {
 
 	err := h.service.Logout(c.Request.Context(), req.RefreshToken)
 	if err != nil {
+
 		switch {
 		case errors.Is(err, ErrInvalidToken):
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
@@ -103,7 +105,7 @@ func(h *Handler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "logged out successfully"})
 }
 
-func(h *Handler) RefreshToken(c *gin.Context) {
+func (h *Handler) RefreshToken(c *gin.Context) {
 	var req refreshTokenRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -113,6 +115,7 @@ func(h *Handler) RefreshToken(c *gin.Context) {
 
 	authResponse, err := h.service.RefreshToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
+
 		switch {
 		case errors.Is(err, ErrInvalidToken):
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
@@ -121,7 +124,7 @@ func(h *Handler) RefreshToken(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, authResponse)			
+	c.JSON(http.StatusOK, authResponse)
 }
 
 // RegisterRoutes mounts the auth routes onto the given router group.
