@@ -179,7 +179,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Sta
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("repository: get affected rows: %w", err)
+		return fmt.Errorf("repository: update deal status: %w", err)
 	}
 	if rowsAffected == 0 {
 		return ErrDealNotFound

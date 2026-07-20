@@ -131,26 +131,13 @@ func (h *Handler) UpdateDealStatus(c *gin.Context) {
 		return
 	}
 
-	// Ensure the caller owns the deal.
-	if _, err := h.service.GetDealByID(c.Request.Context(), dealID, userID); err != nil {
-		switch {
-		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "internal server error",
-			})
-		}
-		return
-	}
-
-	if err := h.service.UpdateStatus(c.Request.Context(), dealID, req.Status); err != nil {
+	if err := h.service.UpdateStatus(c.Request.Context(), dealID, userID, req.Status); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidTransition),
 			errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		default:

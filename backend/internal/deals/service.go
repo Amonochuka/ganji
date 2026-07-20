@@ -76,16 +76,19 @@ func (s *Service) ListByFreelancer(ctx context.Context, userID string) ([]Deal, 
 	return s.repo.ListByFreelancer(ctx, userID)
 }
 
-func (s *Service) UpdateStatus(ctx context.Context, dealID string, newStatus Status) error {
+func (s *Service) UpdateStatus(ctx context.Context,userID,dealID string,newStatus Status) error {
 	deal, err := s.repo.GetDealByID(ctx, dealID)
 	if err != nil {
 		return err
 	}
 
+	if deal.FreelancerID != userID {
+		return ErrForbidden
+	}
+
 	if !CanTransition(deal.Status, newStatus) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, newStatus)
 	}
-
 	return s.repo.UpdateStatus(ctx, dealID, newStatus)
 }
 

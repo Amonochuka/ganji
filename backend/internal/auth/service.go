@@ -45,7 +45,7 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 		return nil, fmt.Errorf("%w: display name is required", ErrInvalidInput)
 	}
 
-	taken, err := s.repo.EmailExists(email)
+	taken, err := s.repo.EmailExists(ctx, email)
 	if err != nil {
 		return nil, fmt.Errorf("checking email availability: %w", err)
 	}
@@ -53,7 +53,7 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 		return nil, ErrEmailTaken
 	}
 
-	slug, err := s.generateUniqueSlug(displayName)
+	slug, err := s.generateUniqueSlug(ctx, displayName)
 	if err != nil {
 		return nil, fmt.Errorf("generating slug: %w", err)
 	}
@@ -63,7 +63,7 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
 
-	user, err := s.repo.Create(email, string(passwordHash), strings.TrimSpace(displayName), slug)
+	user, err := s.repo.Create(ctx, email, string(passwordHash), strings.TrimSpace(displayName), slug)
 	if err != nil {
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
@@ -84,7 +84,7 @@ func (s *Service) Authenticate(ctx context.Context, email, password string) (*Au
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidInput)
 	}
 
-	user, err := s.repo.FindByEmail(email)
+	user, err := s.repo.FindByEmail(ctx, email)
 	if err != nil {
 		return nil, fmt.Errorf("looking up user: %w", err)
 	}
@@ -101,12 +101,12 @@ func (s *Service) Authenticate(ctx context.Context, email, password string) (*Au
 
 // generateUniqueSlug turns a display name into a URL-safe slug and
 // appends a numeric suffix if it's already taken (e.g. "juma-codes-2").
-func (s *Service) generateUniqueSlug(displayName string) (string, error) {
+func (s *Service) generateUniqueSlug(ctx context.Context, displayName string) (string, error) {
 	base := slugify(displayName)
 	slug := base
 
 	for i := 1; i < 100; i++ {
-		taken, err := s.repo.SlugExists(slug)
+		taken, err := s.repo.SlugExists(ctx, slug)
 		if err != nil {
 			return "", fmt.Errorf("checking slug availability: %w", err)
 		}
@@ -146,6 +146,11 @@ func slugify(name string) string {
 	return slug
 }
 
+func hashRefreshToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
+}
+
 func (s *Service) issueTokens(ctx context.Context, user *User) (*AuthResponse, error) {
 	accessToken, err := s.tokens.GenerateAccessToken(user.ID, user.Email)
 	if err != nil {
@@ -157,8 +162,7 @@ func (s *Service) issueTokens(ctx context.Context, user *User) (*AuthResponse, e
 		return nil, fmt.Errorf("generating refresh token: %w", err)
 	}
 
-	hash := sha256.Sum256([]byte(refreshToken))
-	tokenHash := hex.EncodeToString(hash[:])
+	tokenHash := hashRefreshToken(refreshToken)
 
 	err = s.repo.StoreRefreshToken(ctx, &StoredRefreshToken{
 		UserID:    user.ID,
@@ -182,13 +186,15 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 		return nil, fmt.Errorf("verifying refresh token: %w", err)
 	}
 
-	user, err := s.repo.FindByEmail(claims.Email)
+	user, err := s.repo.FindByEmail(ctx, claims.Email)
 	if err != nil {
 		return nil, fmt.Errorf("finding user: %w", err)
 	}
+	if user == nil {
+		return nil, ErrInvalidToken
+	}
 
-	hash := sha256.Sum256([]byte(refreshToken))
-	tokenHash := hex.EncodeToString(hash[:])
+	tokenHash := hashRefreshToken(refreshToken)
 
 	storedRefreshToken, err := s.repo.FindRefreshToken(ctx, tokenHash)
 	if err != nil {
@@ -205,6 +211,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 		}
 		return nil, ErrInvalidToken
 	}
+
 	// Valid token: revoke it too (rotation).
 	if err := s.repo.RevokeRefreshToken(ctx, tokenHash); err != nil {
 		return nil, fmt.Errorf("revoking refresh token: %w", err)
@@ -219,8 +226,7 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 		return fmt.Errorf("verifying refresh token: %w", err)
 	}
 
-	hash := sha256.Sum256([]byte(refreshToken))
-	tokenHash := hex.EncodeToString(hash[:])
+	tokenHash := hashRefreshToken(refreshToken)
 
 	_, err = s.repo.FindRefreshToken(ctx, tokenHash)
 	if err != nil {

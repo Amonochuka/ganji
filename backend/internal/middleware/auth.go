@@ -30,7 +30,9 @@ func AuthRequired(tokens *auth.TokenManager) gin.HandlerFunc {
 			return
 		}
 
+		c.Set("claims", claims)
 		c.Set("userID", claims.UserID)
+		c.Set("email", claims.Email)
 		c.Next()
 	}
 }
