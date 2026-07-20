@@ -15,10 +15,6 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// CreateDeal inserts a new deal without a checking_id — that gets filled
-// in afterward via UpdateCheckingID once the Lightning invoice has been
-// generated. This keeps deal creation durable even if invoice generation
-// fails or is delayed.
 func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 	query := `
 		INSERT INTO deals (

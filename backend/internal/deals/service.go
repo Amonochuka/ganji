@@ -19,7 +19,6 @@ func NewService(repo *Repository) *Service {
 	}
 }
 
-// Deals
 func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	deal.Title = strings.TrimSpace(deal.Title)
 	deal.SourcePlatform = strings.TrimSpace(deal.SourcePlatform)

@@ -15,9 +15,6 @@ import (
 
 var emailPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
-// Service holds the business logic for registering and authenticating
-// users. It owns validation and hashing — Repository is pure SQL and
-// knows nothing about passwords being plaintext or hashed.
 type Service struct {
 	repo   *Repository
 	tokens *TokenManager
@@ -30,8 +27,6 @@ func NewService(repo *Repository, tokens *TokenManager) *Service {
 	}
 }
 
-// Register validates input, checks for conflicts, hashes the password,
-// generates a slug from the display name, and creates the user.
 func (s *Service) Register(ctx context.Context, email, password, displayName string) (*AuthResponse, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
@@ -71,9 +66,6 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 	return s.issueTokens(ctx, user)
 }
 
-// Authenticate verifies an email/password pair against the stored hash.
-// Returns ErrInvalidCredentials for both "no such user" and "wrong
-// password" — never reveal which one it was.
 func (s *Service) Authenticate(ctx context.Context, email, password string) (*AuthResponse, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 

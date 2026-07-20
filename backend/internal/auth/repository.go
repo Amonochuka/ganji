@@ -7,9 +7,6 @@ import (
 	"fmt"
 )
 
-// Repository wraps raw SQL access to the users table. No business logic
-// lives here — just queries. Validation and password hashing belong in
-// Service, which calls this repository.
 type Repository struct {
 	db *sql.DB
 }
@@ -18,7 +15,6 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// Create inserts a new user and returns the generated ID and created_at.
 func (r *Repository) Create(ctx context.Context, email, passwordHash, displayName, slug string) (*User, error) {
 	query := `
 		INSERT INTO users (email, password_hash, display_name, slug)
@@ -40,8 +36,6 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash, displayNam
 	return &u, nil
 }
 
-// FindByEmail looks up a user by email, including password_hash — needed
-// for login to verify the password. Returns nil, nil if no user is found.
 func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, error) {
 	query := `
 		SELECT id, email, password_hash, display_name, slug, bitcoin_address, trust_score, created_at
@@ -92,7 +86,6 @@ func (r *Repository) FindBySlug(ctx context.Context, slug string) (*User, error)
 	return &u, nil
 }
 
-// EmailExists checks if an email is already registered.
 func (r *Repository) EmailExists(ctx context.Context, email string) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists)
