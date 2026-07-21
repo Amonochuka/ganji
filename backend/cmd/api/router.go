@@ -33,7 +33,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 
 	authRepo := auth.NewRepository(dbConn)
 	authService := auth.NewService(authRepo, tokenManager)
-	authHandler := auth.NewHandler(authService, tokenManager)
+	authHandler := auth.NewHandler(authService)
 	auth.RegisterRoutes(router, authHandler)
 
 	dealRepo := deals.NewRepository(dbConn)
