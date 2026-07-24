@@ -6,13 +6,22 @@ import (
 	"errors"
 	"fmt"
 )
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
 
 type Repository struct {
 	db *sql.DB
+	q  DBTX
 }
 
 func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+	return &Repository{
+		db: db,
+		q:  db,
+	}
 }
 
 func (r *Repository) Create(ctx context.Context, email, passwordHash, displayName, slug string) (*User, error) {
