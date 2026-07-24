@@ -28,34 +28,48 @@ func NewClient(cfg Config) *Client {
 }
 
 
-func (c *Client) CreateInvoice(ctx context.Context, req CreateInvoiceRequest) (*Invoice, error){
+func (c *Client) CreateInvoice(ctx context.Context, req CreateInvoiceRequest) (*Invoice, error) {
 	body, err := json.Marshal(req)
-	if err != nil{
-		return nil, fmt.Errorf("lnbits: marshal create invoice request: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("marshal invoice request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"api/v1/payments", bytes.NewReader(body))
-	if err != nil{
-		return nil, fmt.Errorf("lnbits: create request: %w", err)
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.url+"/api/v1/payments",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Api-Key", c.apiKey)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Api-Key", c.apiKey)
 
-	resp, err := c.http.Do(httpReq)
-	if err != nil{
-		return nil, fmt.Errorf("lnbits: create invoice request: %w", err)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer response.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("lnbits: create invoice request failed with status: %s", resp.Status)
+	if response.StatusCode >= http.StatusMultipleChoices {
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+    		body = []byte("<unable to read response body>")
+		}
+		return nil, fmt.Errorf("lnbits returned %d: %s", response.StatusCode, string(body))
 	}
 
-	var invoice Invoice
-	if err := json.NewDecoder(resp.Body).Decode(&invoice); err != nil {
-		return nil, fmt.Errorf("lnbits: decode create invoice response: %w", err)
+	var invoice CreateInvoiceResponse
+
+	if err := json.NewDecoder(response.Body).Decode(&invoice); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	return &invoice, nil
+	return &Invoice{
+		PaymentRequest: invoice.PaymentRequest,
+		PaymentHash:    invoice.PaymentHash,
+		CheckingID:     invoice.CheckingID,
+	}, nil
 }

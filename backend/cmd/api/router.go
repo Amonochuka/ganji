@@ -37,7 +37,14 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 	auth.RegisterRoutes(router, authHandler)
 
 	dealRepo := deals.NewRepository(dbConn)
-	dealService := deals.NewService(dealRepo)
+	lnbitsClient := lnbits.NewClient(
+		lnbits.Config{
+			URL:    cfg.LNBitsURL,
+			APIKey: cfg.LNBitsAPIKey,
+		},
+	)
+
+	dealService := deals.NewService(dealRepo, lnbitsClient)
 	dealHandler := deals.NewHandler(dealService)
 
 	protected := router.Group("/")

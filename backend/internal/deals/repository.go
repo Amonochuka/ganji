@@ -34,10 +34,11 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 			source_platform,
 			preimage_hash,
 			invoice,
+			checking_id,
 			status
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7
+			$1, $2, $3, $4, $5, $6, $7, $8
 		)
 		RETURNING id, created_at;
 	`
@@ -51,6 +52,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		deal.SourcePlatform,
 		deal.PreimageHash,
 		deal.Invoice,
+		deal.CheckingID
 		deal.Status,
 	)
 
@@ -151,26 +153,7 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 	return deals, nil
 }
 
-func (r *Repository) UpdateCheckingID(ctx context.Context, dealID string, checkingID string) error {
-	query := `
-		UPDATE deals
-		SET checking_id = $1
-		WHERE id = $2;
-	`
-	result, err := r.q.ExecContext(ctx, query, checkingID, dealID)
-	if err != nil {
-		return fmt.Errorf("repository: update checking id: %w", err)
-	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("repository: checking affected rows: %w", err)
-	}
-	if rowsAffected == 0 {
-		return ErrDealNotFound
-	}
-	return nil
-}
 
 func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Status) error {
 	query := `

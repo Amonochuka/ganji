@@ -23,7 +23,6 @@ const (
 
 // Deal mirrors the deals table. A deal is created before its Lightning
 // invoice exists — CheckingID starts NULL and gets filled in by
-// Repository.UpdateCheckingID once LNbits responds. This keeps deal
 // creation durable even if LNbits is briefly unavailable. Artifacts
 // (source code, sandboxes, previews) live in their own table — a Deal
 // only describes the transaction itself.

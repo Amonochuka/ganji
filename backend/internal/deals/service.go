@@ -7,15 +7,18 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"import github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
 type Service struct {
-	repo *Repository
+	repo   *Repository
+	lnbits *lnbits.Client
 }
 
-func NewService(repo *Repository) *Service {
+func NewService(repo *Repository, lnbits *lnbits.Client) *Service {
 	return &Service{
-		repo: repo,
+		repo:   repo,
+		lnbits: lnbits,
 	}
 }
 
@@ -50,6 +53,18 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 
 	hash := sha256.Sum256(preimage)
 	deal.PreimageHash = hex.EncodeToString(hash[:])
+
+	invoice, err := s.lnbits.CreateInvoice(ctx, lnbits.CreateInvoiceRequest{
+		Out:    false,
+		Amount: deal.AmountSats,
+		Memo:   deal.Title,	
+	})
+	
+	if err != nil {
+		return fmt.Errorf("creating LNBits invoice: %w", err)
+	}
+
+	deal.Invoice = invoice.PaymentRequest
 
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
@@ -133,11 +148,7 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 }
 
 func (s *Service) GetArtifactByID(
-	ctx context.Context,
-	userID,
-	dealID,
-	artifactID string,
-) (*Artifact, error) {
+	ctx context.Context,userID, dealID, artifactID string) (*Artifact, error) {
 
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
@@ -225,12 +236,7 @@ func (s *Service) CreateVerification(ctx context.Context, userID string, verific
 }
 
 func (s *Service) GetVerificationByID(
-	ctx context.Context,
-	userID,
-	dealID,
-	artifactID,
-	verificationID string,
-) (*Verification, error) {
+	ctx context.Context, userID, dealID, artifactID, verificationID string) (*Verification, error) {
 
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
