@@ -316,3 +316,14 @@ func (r *Repository) ListVerificationsByArtifact(ctx context.Context, artifactID
 	}
 	return verifications, nil
 }
+
+func (r *Repository) WithTx(tx *sql.Tx) *Repository {
+	return &Repository{
+		db: r.db,
+		q:  tx,
+	}
+}
+
+func (r *Repository) BeginTx(ctx context.Context) (*sql.Tx, error) {
+	return r.db.BeginTx(ctx, nil)
+}

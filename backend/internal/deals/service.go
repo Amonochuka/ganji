@@ -51,20 +51,23 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	hash := sha256.Sum256(preimage)
 	deal.PreimageHash = hex.EncodeToString(hash[:])
 
-	return s.repo.CreateDeal(ctx, deal)
-}
-
-func (s *Service) GetDealByID(ctx context.Context, dealID, userID string) (*Deal, error) {
-	deal, err := s.repo.GetDealByID(ctx, dealID)
+	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	repo := s.repo.WithTx(tx)
+
+	if err := repo.CreateDeal(ctx, deal); err != nil {
+		return err
 	}
 
-	if deal.FreelancerID != userID {
-		return nil, ErrForbidden
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 
-	return deal, nil
+	return nil
 }
 
 func (s *Service) ListByFreelancer(ctx context.Context, userID string) ([]Deal, error) {
