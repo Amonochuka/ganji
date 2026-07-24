@@ -42,7 +42,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		RETURNING id, created_at;
 	`
 
-	row := r.db.QueryRowContext(
+	row := r.q.QueryRowContext(
 		ctx,
 		query,
 		deal.FreelancerID,
@@ -79,7 +79,7 @@ func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) 
 		WHERE id = $1;
 	`
 	deal := &Deal{}
-	row := r.db.QueryRowContext(ctx, query, id)
+	row := r.q.QueryRowContext(ctx, query, id)
 	if err := row.Scan(
 		&deal.ID,
 		&deal.FreelancerID,
@@ -120,7 +120,7 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 		ORDER BY created_at DESC;
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, freelancerID)
+	rows, err := r.q.QueryContext(ctx, query, freelancerID)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list deals by freelancer: %w", err)
 	}
@@ -157,7 +157,7 @@ func (r *Repository) UpdateCheckingID(ctx context.Context, dealID string, checki
 		SET checking_id = $1
 		WHERE id = $2;
 	`
-	result, err := r.db.ExecContext(ctx, query, checkingID, dealID)
+	result, err := r.q.ExecContext(ctx, query, checkingID, dealID)
 	if err != nil {
 		return fmt.Errorf("repository: update checking id: %w", err)
 	}
@@ -178,7 +178,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Sta
 		SET status = $1
 		WHERE id = $2;
 	`
-	result, err := r.db.ExecContext(ctx, query, status, dealID)
+	result, err := r.q.ExecContext(ctx, query, status, dealID)
 	if err != nil {
 		return fmt.Errorf("repository: update deal status: %w", err)
 	}
@@ -197,7 +197,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Sta
 func (r *Repository) CreateArtifact(ctx context.Context, artifact *Artifact) error {
 	query := `INSERT INTO artifacts (deal_id, kind, storage_key) VALUES ($1, $2, $3)
 		RETURNING id, uploaded_at;`
-	err := r.db.QueryRowContext(ctx, query, artifact.DealID, artifact.Kind, artifact.StorageKey).Scan(&artifact.ID, &artifact.UploadedAt)
+	err := r.q.QueryRowContext(ctx, query, artifact.DealID, artifact.Kind, artifact.StorageKey).Scan(&artifact.ID, &artifact.UploadedAt)
 	if err != nil {
 		return fmt.Errorf("repository: create artifact: %w", err)
 	}
@@ -207,7 +207,7 @@ func (r *Repository) CreateArtifact(ctx context.Context, artifact *Artifact) err
 func (r *Repository) GetArtifactByID(ctx context.Context, id string) (*Artifact, error) {
 	query := `SELECT id, deal_id, kind, storage_key, uploaded_at FROM artifacts WHERE id = $1;`
 	artifact := Artifact{}
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&artifact.ID, &artifact.DealID, &artifact.Kind, &artifact.StorageKey, &artifact.UploadedAt)
+	err := r.q.QueryRowContext(ctx, query, id).Scan(&artifact.ID, &artifact.DealID, &artifact.Kind, &artifact.StorageKey, &artifact.UploadedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrArtifactNotFound
@@ -220,7 +220,7 @@ func (r *Repository) GetArtifactByID(ctx context.Context, id string) (*Artifact,
 func (r *Repository) ListArtifactsByDeal(ctx context.Context, dealID string) ([]Artifact, error) {
 	query := `SELECT id, deal_id, kind, storage_key, uploaded_at FROM artifacts WHERE deal_id = $1
 			ORDER BY uploaded_at ASC;`
-	rows, err := r.db.QueryContext(ctx, query, dealID)
+	rows, err := r.q.QueryContext(ctx, query, dealID)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list artifacts: %w", err)
 	}
@@ -247,7 +247,7 @@ func (r *Repository) CreateVerification(ctx context.Context, verification *Verif
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, created_at;
 	`
-	err := r.db.QueryRowContext(ctx, query,
+	err := r.q.QueryRowContext(ctx, query,
 		verification.ArtifactID,
 		verification.Method,
 		verification.Reference,
@@ -265,7 +265,7 @@ func (r *Repository) GetVerificationByID(ctx context.Context, id string) (*Verif
 			  FROM verifications
 			  WHERE id = $1;`
 	verification := Verification{}
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.q.QueryRowContext(ctx, query, id).Scan(
 		&verification.ID,
 		&verification.ArtifactID,
 		&verification.Method,
@@ -288,7 +288,7 @@ func (r *Repository) ListVerificationsByArtifact(ctx context.Context, artifactID
 			  FROM verifications
 			  WHERE artifact_id = $1
 			  ORDER BY created_at ASC;`
-	rows, err := r.db.QueryContext(ctx, query, artifactID)
+	rows, err := r.q.QueryContext(ctx, query, artifactID)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list verifications: %w", err)
 	}

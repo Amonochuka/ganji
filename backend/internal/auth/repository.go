@@ -34,7 +34,7 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash, displayNam
 	var u User
 	var bitcoinAddress sql.NullString
 
-	err := r.db.QueryRowContext(ctx, query, email, passwordHash, displayName, slug).Scan(
+	err := r.q.QueryRowContext(ctx, query, email, passwordHash, displayName, slug).Scan(
 		&u.ID, &u.Email, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.CreatedAt,
 	)
 	if err != nil {
@@ -55,7 +55,7 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 	var u User
 	var bitcoinAddress sql.NullString
 
-	err := r.db.QueryRowContext(ctx, query, email).Scan(
+	err := r.q.QueryRowContext(ctx, query, email).Scan(
 		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -81,7 +81,7 @@ func (r *Repository) FindBySlug(ctx context.Context, slug string) (*User, error)
 	var u User
 	var bitcoinAddress sql.NullString
 
-	err := r.db.QueryRowContext(ctx, query, slug).Scan(
+	err := r.q.QueryRowContext(ctx, query, slug).Scan(
 		&u.ID, &u.Email, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -97,7 +97,7 @@ func (r *Repository) FindBySlug(ctx context.Context, slug string) (*User, error)
 
 func (r *Repository) EmailExists(ctx context.Context, email string) (bool, error) {
 	var exists bool
-	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists)
+	err := r.q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("repository: email exists: %w", err)
 	}
@@ -107,7 +107,7 @@ func (r *Repository) EmailExists(ctx context.Context, email string) (bool, error
 // SlugExists checks if a slug is already taken.
 func (r *Repository) SlugExists(ctx context.Context, slug string) (bool, error) {
 	var exists bool
-	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE slug = $1)`, slug).Scan(&exists)
+	err := r.q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE slug = $1)`, slug).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("repository: slug exists: %w", err)
 	}
@@ -117,7 +117,7 @@ func (r *Repository) SlugExists(ctx context.Context, slug string) (bool, error) 
 func (r *Repository) StoreRefreshToken(ctx context.Context, token *StoredRefreshToken) error {
 	query := `INSERT INTO refresh_tokens(user_id, token_hash, expires_at)
 			VALUES($1, $2, $3) RETURNING id, created_at;`
-	row := r.db.QueryRowContext(ctx, query, token.UserID, token.TokenHash, token.ExpiresAt)
+	row := r.q.QueryRowContext(ctx, query, token.UserID, token.TokenHash, token.ExpiresAt)
 	if err := row.Scan(&token.ID, &token.CreatedAt); err != nil {
 		return fmt.Errorf("repository: store refresh token: %w", err)
 	}
@@ -130,7 +130,7 @@ func (r *Repository) FindRefreshToken(ctx context.Context, tokenHash string) (*S
 		WHERE token_hash = $1;
 	`
 	token := StoredRefreshToken{}
-	err := r.db.QueryRowContext(ctx, query, tokenHash).Scan(
+	err := r.q.QueryRowContext(ctx, query, tokenHash).Scan(
 		&token.ID,
 		&token.UserID,
 		&token.TokenHash,
@@ -151,7 +151,7 @@ func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) e
 	query := `
 		DELETE FROM refresh_tokens WHERE token_hash = $1;`
 
-	result, err := r.db.ExecContext(ctx, query, tokenHash)
+	result, err := r.q.ExecContext(ctx, query, tokenHash)
 	if err != nil {
 		return fmt.Errorf("repository: revoke refresh token: %w", err)
 	}
