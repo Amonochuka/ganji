@@ -166,9 +166,3 @@ func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) e
 	return nil
 }
 
-func (r *Repository) WithTx(tx *sql.Tx) *Repository {
-	return &Repository{
-		db: r.db,
-		q:  tx,
-	}
-}
