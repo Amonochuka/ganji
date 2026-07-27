@@ -10,6 +10,7 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/config"
 	"github.com/Amonochuka/ganji-backend/internal/deals"
 	"github.com/Amonochuka/ganji-backend/internal/health"
+	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 	"github.com/Amonochuka/ganji-backend/internal/middleware"
 )
 

@@ -52,7 +52,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		deal.SourcePlatform,
 		deal.PreimageHash,
 		deal.Invoice,
-		deal.CheckingID
+		deal.CheckingID,
 		deal.Status,
 	)
 
@@ -152,8 +152,6 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 	}
 	return deals, nil
 }
-
-
 
 func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Status) error {
 	query := `
@@ -300,7 +298,7 @@ func (r *Repository) ListVerificationsByArtifact(ctx context.Context, artifactID
 	return verifications, nil
 }
 
-func (r *Repository) WithTx(tx *sql.Tx) *Repository {
+func (r *Repository) WithTx(tx *sql.Tx) DealRepository {
 	return &Repository{
 		db: r.db,
 		q:  tx,

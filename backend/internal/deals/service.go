@@ -7,15 +7,16 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-	"import github.com/Amonochuka/ganji-backend/internal/lnbits"
+
+	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
 type Service struct {
-	repo   *Repository
+	repo   DealRepository
 	lnbits *lnbits.Client
 }
 
-func NewService(repo *Repository, lnbits *lnbits.Client) *Service {
+func NewService(repo DealRepository, lnbits *lnbits.Client) *Service {
 	return &Service{
 		repo:   repo,
 		lnbits: lnbits,
@@ -57,21 +58,27 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	invoice, err := s.lnbits.CreateInvoice(ctx, lnbits.CreateInvoiceRequest{
 		Out:    false,
 		Amount: deal.AmountSats,
-		Memo:   deal.Title,	
+		Memo:   deal.Title,
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("creating LNBits invoice: %w", err)
 	}
 
 	deal.Invoice = invoice.PaymentRequest
+	deal.CheckingID = invoice.CheckingID
 
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback()
 
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	
 	repo := s.repo.WithTx(tx)
 
 	if err := repo.CreateDeal(ctx, deal); err != nil {
@@ -85,6 +92,23 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	return nil
 }
 
+func (s *Service) GetDealByID(ctx context.Context, dealID, userID string) (*Deal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
+	return deal, nil
+}
+
 func (s *Service) ListByFreelancer(ctx context.Context, userID string) ([]Deal, error) {
 	if userID == "" {
 		return nil, fmt.Errorf("%w: freelancer id is required", ErrInvalidInput)
@@ -93,7 +117,7 @@ func (s *Service) ListByFreelancer(ctx context.Context, userID string) ([]Deal, 
 	return s.repo.ListByFreelancer(ctx, userID)
 }
 
-func (s *Service) UpdateStatus(ctx context.Context,userID,dealID string,newStatus Status) error {
+func (s *Service) UpdateStatus(ctx context.Context, userID, dealID string, newStatus Status) error {
 	deal, err := s.repo.GetDealByID(ctx, dealID)
 	if err != nil {
 		return err
@@ -148,7 +172,7 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 }
 
 func (s *Service) GetArtifactByID(
-	ctx context.Context,userID, dealID, artifactID string) (*Artifact, error) {
+	ctx context.Context, userID, dealID, artifactID string) (*Artifact, error) {
 
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)

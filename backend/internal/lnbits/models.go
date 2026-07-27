@@ -6,8 +6,16 @@ type CreateInvoiceRequest struct {
 	Memo   string `json:"memo"`
 }
 
-type Invoice struct {
-	CheckingID    string `json:"checking_id"`
-	PaymentHash   string `json:"payment_hash"`
+// Raw response from LNBits.
+type CreateInvoiceResponse struct {
+	CheckingID     string `json:"checking_id"`
+	PaymentHash    string `json:"payment_hash"`
 	PaymentRequest string `json:"payment_request"`
+}
+
+// Internal application model.
+type Invoice struct {
+	CheckingID     string
+	PaymentHash    string
+	PaymentRequest string
 }

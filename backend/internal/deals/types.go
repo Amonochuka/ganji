@@ -27,17 +27,17 @@ const (
 // (source code, sandboxes, previews) live in their own table — a Deal
 // only describes the transaction itself.
 type Deal struct {
-	ID             string         `json:"id"`
-	FreelancerID   string         `json:"freelancer_id"`
-	Title          string         `json:"title"`
-	AmountSats     int64          `json:"amount_sats"`
-	SourcePlatform string         `json:"source_platform"`
-	PreimageHash   string         `json:"preimage_hash"`
-	Invoice        string         `json:"invoice"`
-	CheckingID     sql.NullString `json:"checking_id"`
-	Status         Status         `json:"status"`
-	CreatedAt      time.Time      `json:"created_at"`
-	VerifiedAt     sql.NullTime   `json:"verified_at"`
+	ID             string       `json:"id"`
+	FreelancerID   string       `json:"freelancer_id"`
+	Title          string       `json:"title"`
+	AmountSats     int64        `json:"amount_sats"`
+	SourcePlatform string       `json:"source_platform"`
+	PreimageHash   string       `json:"preimage_hash"`
+	Invoice        string       `json:"invoice"`
+	CheckingID     string       `json:"checking_id"`
+	Status         Status       `json:"status"`
+	CreatedAt      time.Time    `json:"created_at"`
+	VerifiedAt     sql.NullTime `json:"verified_at"`
 }
 
 // ValidTransitions defines which status transitions are allowed. This is
