@@ -81,3 +81,48 @@ func (c *Client) CreateInvoice(ctx context.Context, req CreateInvoiceRequest) (*
 		CheckingID:     invoice.CheckingID,
 	}, nil
 }
+
+func (c *Client) CheckPayment(ctx context.Context, checkingID string) (*CheckPaymentResponse, error) {
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.url+"/api/v1/payments/"+checkingID,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create payment status request: %w", err)
+	}
+
+	request.Header.Set("X-Api-Key", c.apiKey)
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("send payment status request: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusMultipleChoices {
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"lnbits returned %d and response body could not be read: %w",
+				response.StatusCode,
+				err,
+			)
+		}
+
+		return nil, fmt.Errorf(
+			"lnbits returned %d: %s",
+			response.StatusCode,
+			string(body),
+		)
+	}
+
+	var payment CheckPaymentResponse
+
+	if err := json.NewDecoder(response.Body).Decode(&payment); err != nil {
+		return nil, fmt.Errorf("decode payment status response: %w", err)
+	}
+
+	return &payment, nil
+}
