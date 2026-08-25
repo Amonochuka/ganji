@@ -133,6 +133,39 @@ func (s *Service) UpdateStatus(ctx context.Context, userID, dealID string, newSt
 	return s.repo.UpdateStatus(ctx, dealID, newStatus)
 }
 
+// CheckPayment queries LNbits for the payment status of a deal's invoice.
+// If the payment has been received, the deal transitions from
+// awaiting_payment to locked. The caller should never be trusted to
+// set the status directly — the backend determines it from LNbits.
+func (s *Service) CheckPayment(ctx context.Context, userID, dealID string) (*Deal, error) {
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
+	if deal.CheckingID == "" {
+		return nil, ErrNoCheckingID
+	}
+
+	payment, err := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+	if err != nil {
+		return nil, fmt.Errorf("checking payment with lnbits: %w", err)
+	}
+
+	if payment.Paid && deal.Status == StatusAwaitingPayment {
+		if err := s.repo.UpdateStatus(ctx, dealID, StatusLocked); err != nil {
+			return nil, fmt.Errorf("updating deal status after payment: %w", err)
+		}
+		deal.Status = StatusLocked
+	}
+
+	return deal, nil
+}
+
 // Artifacts
 func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *Artifact) error {
 	if artifact.DealID == "" {

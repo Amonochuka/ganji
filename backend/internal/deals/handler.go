@@ -116,6 +116,7 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group.POST("", h.CreateDeal)
 	group.GET("", h.ListDeals)
 	group.GET("/:dealID", h.GetDealByID)
+	group.GET("/:dealID/payment", h.CheckPayment)
 	group.PATCH("/:dealID/status", h.UpdateDealStatus)
 }
 
@@ -150,5 +151,31 @@ func (h *Handler) UpdateDealStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "deal status updated",
+	})
+}
+
+func (h *Handler) CheckPayment(c *gin.Context) {
+	userID := c.GetString("userID")
+	dealID := c.Param("dealID")
+
+	deal, err := h.service.CheckPayment(c.Request.Context(), userID, dealID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrNoCheckingID):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"deal": deal,
 	})
 }
