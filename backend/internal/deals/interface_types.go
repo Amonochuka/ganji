@@ -9,6 +9,7 @@ type DealRepository interface {
 	// Deals
 	CreateDeal(ctx context.Context, deal *Deal) error
 	GetDealByID(ctx context.Context, id string) (*Deal, error)
+	GetDealByCheckingID(ctx context.Context, checkingID string) (*Deal, error)
 	ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
 

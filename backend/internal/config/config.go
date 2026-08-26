@@ -15,6 +15,7 @@ type Config struct {
 	LNBitsURL           string
 	LNBitsAPIKey        string
 	LNBitsWebhookSecret string
+	WebhookURL          string
 	FrontendURL         string
 }
 
@@ -31,6 +32,7 @@ func Load() *Config {
 		LNBitsURL:           getEnv("LNBITS_URL", ""),
 		LNBitsAPIKey:        getEnv("LNBITS_API_KEY", ""),
 		LNBitsWebhookSecret: getEnv("LNBITS_WEBHOOK_SECRET", ""),
+		WebhookURL:          getEnv("WEBHOOK_URL", ""),
 		FrontendURL:         getEnv("FRONTEND_URL", "http://localhost:3000"),
 	}
 

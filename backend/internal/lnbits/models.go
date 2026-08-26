@@ -1,9 +1,10 @@
 package lnbits
 
 type CreateInvoiceRequest struct {
-	Out    bool   `json:"out"`
-	Amount int64  `json:"amount"`
-	Memo   string `json:"memo"`
+	Out     bool   `json:"out"`
+	Amount  int64  `json:"amount"`
+	Memo    string `json:"memo"`
+	Webhook string `json:"webhook,omitempty"`
 }
 
 // Raw response from LNBits.

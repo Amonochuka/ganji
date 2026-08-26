@@ -12,6 +12,7 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/health"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 	"github.com/Amonochuka/ganji-backend/internal/middleware"
+	"github.com/Amonochuka/ganji-backend/internal/webhook"
 )
 
 // setupRouter builds the Gin engine and registers all routes. As we add
@@ -40,8 +41,9 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 	dealRepo := deals.NewRepository(dbConn)
 	lnbitsClient := lnbits.NewClient(
 		lnbits.Config{
-			URL:    cfg.LNBitsURL,
-			APIKey: cfg.LNBitsAPIKey,
+			URL:        cfg.LNBitsURL,
+			APIKey:     cfg.LNBitsAPIKey,
+			WebhookURL: cfg.WebhookURL,
 		},
 	)
 
@@ -55,7 +57,10 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 	deals.RegisterArtifactRoutes(protected, dealHandler)
 	deals.RegisterVerificationRoutes(protected, dealHandler)
 
-	// Future: lightning.RegisterRoutes(protected, ...)
+	webhookService := webhook.NewService(dealRepo, cfg.LNBitsWebhookSecret)
+	webhookHandler := webhook.NewHandler(webhookService)
+	webhook.RegisterRoutes(router, webhookHandler)
+
 	// Future: cv.RegisterRoutes(protected, ...)
 
 	return router

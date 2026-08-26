@@ -10,25 +10,32 @@ import (
 )
 
 type Config struct {
-	URL    string
-	APIKey string
+	URL        string
+	APIKey     string
+	WebhookURL string
 }
 
 type Client struct {
-	url    string
-	apiKey string
-	http   *http.Client
+	url        string
+	apiKey     string
+	webhookURL string
+	http       *http.Client
 }
 
 func NewClient(cfg Config) *Client {
 	return &Client{
-		url:    cfg.URL,
-		apiKey: cfg.APIKey,
-		http:   &http.Client{},
+		url:        cfg.URL,
+		apiKey:     cfg.APIKey,
+		webhookURL: cfg.WebhookURL,
+		http:       &http.Client{},
 	}
 }
 
 func (c *Client) CreateInvoice(ctx context.Context, req CreateInvoiceRequest) (*Invoice, error) {
+	if req.Webhook == "" && c.webhookURL != "" {
+		req.Webhook = c.webhookURL
+	}
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal invoice request: %w", err)

@@ -103,6 +103,46 @@ func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) 
 	return deal, nil
 }
 
+func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string) (*Deal, error) {
+	query := `
+		SELECT
+			id,
+			freelancer_id,
+			title,
+			amount_sats,
+			source_platform,
+			preimage_hash,
+			invoice,
+			checking_id,
+			status,
+			created_at,
+			verified_at
+		FROM deals
+		WHERE checking_id = $1;
+	`
+	deal := &Deal{}
+	row := r.q.QueryRowContext(ctx, query, checkingID)
+	if err := row.Scan(
+		&deal.ID,
+		&deal.FreelancerID,
+		&deal.Title,
+		&deal.AmountSats,
+		&deal.SourcePlatform,
+		&deal.PreimageHash,
+		&deal.Invoice,
+		&deal.CheckingID,
+		&deal.Status,
+		&deal.CreatedAt,
+		&deal.VerifiedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrDealNotFound
+		}
+		return nil, fmt.Errorf("repository: get deal by checking_id: %w", err)
+	}
+	return deal, nil
+}
+
 func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error) {
 	query := `
 		SELECT
