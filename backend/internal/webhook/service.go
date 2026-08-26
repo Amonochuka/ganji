@@ -16,6 +16,15 @@ import (
 
 const (
 	maxSignatureAge = 5 * time.Minute
+	maxClockSkew   = 5 * time.Minute
+)
+
+// Sentinel errors so the handler can map to distinct HTTP status codes.
+var (
+	ErrInvalidSignature = errors.New("invalid webhook signature")
+	ErrMalformedPayload = errors.New("malformed webhook payload")
+	ErrPaymentFailed    = errors.New("payment not successful")
+	ErrDealNotFound     = errors.New("no deal for checking_id")
 )
 
 // DealReader abstracts the deal repository methods the webhook needs.
@@ -39,25 +48,26 @@ func NewService(repo DealReader, secret string) *Service {
 // HandlePayment processes an LNbits payment notification. It verifies the
 // HMAC signature, looks up the deal by checking_id, and transitions it from
 // awaiting_payment to locked if the payment was successful.
+// Any other error is an unexpected internal failure.
 func (s *Service) HandlePayment(ctx context.Context, rawBody []byte, signatureHeader string, notification *PaymentNotification) error {
 	if s.secret != "" {
 		if err := s.verifySignature(rawBody, signatureHeader); err != nil {
-			return fmt.Errorf("webhook signature verification: %w", err)
+			return fmt.Errorf("%w: %v", ErrInvalidSignature, err)
 		}
 	}
 
 	if notification.CheckingID == "" {
-		return fmt.Errorf("missing checking_id in webhook payload")
+		return fmt.Errorf("%w: missing checking_id", ErrMalformedPayload)
 	}
 
 	if notification.Status != "success" {
-		return fmt.Errorf("payment not successful: status=%s", notification.Status)
+		return fmt.Errorf("%w: status=%s", ErrPaymentFailed, notification.Status)
 	}
 
 	deal, err := s.repo.GetDealByCheckingID(ctx, notification.CheckingID)
 	if err != nil {
 		if errors.Is(err, deals.ErrDealNotFound) {
-			return fmt.Errorf("no deal found for checking_id %s", notification.CheckingID)
+			return fmt.Errorf("%w: %s", ErrDealNotFound, notification.CheckingID)
 		}
 		return fmt.Errorf("lookup deal by checking_id: %w", err)
 	}
@@ -107,6 +117,10 @@ func (s *Service) verifySignature(rawBody []byte, header string) error {
 
 	if time.Since(time.Unix(ts, 0)) > maxSignatureAge {
 		return errors.New("webhook signature expired")
+	}
+
+	if time.Unix(ts, 0).After(time.Now().Add(maxClockSkew)) {
+		return errors.New("webhook signature timestamp in the future")
 	}
 
 	payload := fmt.Sprintf("%s.%s", timestampStr, string(rawBody))

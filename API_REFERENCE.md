@@ -360,17 +360,24 @@ Public endpoint called by LNbits when an invoice is paid. No JWT auth required.
 }
 ```
 
-**Response `200`** (always, even on errors — LNbits retries on non-200)
-```json
-{
-  "status": "ok"
-}
-```
+**Responses:**
+
+| Status | Condition | Body |
+|---|---|---|
+| `200` | Valid + processed | `{"status": "ok"}` |
+| `200` | Payment not successful (valid webhook, nothing to do) | `{"status": "ignored", "reason": "payment not successful"}` |
+| `400` | Malformed payload (missing `checking_id`, etc.) | `{"error": "malformed payload"}` |
+| `401` | Invalid or missing HMAC signature | `{"error": "invalid signature"}` |
+| `404` | No deal found for `checking_id` | `{"error": "no deal for checking_id"}` |
+| `500` | Unexpected internal failure | `{"error": "internal failure"}` |
+
+Payment-not-successful returns `200` because the webhook was received and understood — nothing for Ganji to do. Returning non-2xx would cause LNbits to retry unnecessarily.
 
 **Signature verification:**
 - The signed payload is `"{timestamp}.{raw_body}"`
 - HMAC-SHA256 with `LNBITS_WEBHOOK_SECRET` as key
-- Timestamps older than 5 minutes are rejected
+- Timestamps older than 5 minutes are rejected (replay protection)
+- Timestamps more than 5 minutes in the future are rejected (clock skew protection)
 - If `LNBITS_WEBHOOK_SECRET` is empty, signature verification is skipped
 
 ---

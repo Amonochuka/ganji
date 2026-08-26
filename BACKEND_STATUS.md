@@ -104,11 +104,24 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 3. Service verifies HMAC-SHA256 signature using `LNBITS_WEBHOOK_SECRET`
 4. Looks up the deal by `checking_id`
 5. If deal is `awaiting_payment` and payment status is `success`, transitions to `locked`
-6. Returns 200 to LNbits (always — errors are logged, not surfaced to LNbits)
+6. Returns appropriate HTTP status code based on the outcome
+
+**Response codes:**
+| Condition | Status | Body |
+|---|---|---|
+| Valid + processed | `200` | `{"status": "ok"}` |
+| Invalid signature | `401` | `{"error": "invalid signature"}` |
+| Malformed payload | `400` | `{"error": "malformed payload"}` |
+| Payment not successful (valid webhook) | `200` | `{"status": "ignored", "reason": "payment not successful"}` |
+| No deal for checking_id | `404` | `{"error": "no deal for checking_id"}` |
+| Internal failure | `500` | `{"error": "internal failure"}` |
+
+Payment-not-successful returns `200` because the webhook was received and understood — nothing for Ganji to do. Returning non-2xx would cause LNbits to retry unnecessarily.
 
 **Signature format:** `t=<unix_timestamp>,v1=<hmac_sha256_hex>`
 **Signed payload:** `"{timestamp}.{raw_body}"`
 **Max age:** 5 minutes (rejects replayed webhooks)
+**Future skew:** 5 minutes (rejects timestamps too far ahead)
 
 **New config vars:**
 - `WEBHOOK_URL` — public URL for this endpoint (e.g., `https://yourdomain.com/webhooks/lnbits`)
