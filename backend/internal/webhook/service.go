@@ -16,7 +16,7 @@ import (
 
 const (
 	maxSignatureAge = 5 * time.Minute
-	maxClockSkew   = 5 * time.Minute
+	maxClockSkew    = 5 * time.Minute
 )
 
 // Sentinel errors so the handler can map to distinct HTTP status codes.
@@ -34,8 +34,8 @@ type DealReader interface {
 }
 
 type Service struct {
-	repo    DealReader
-	secret  string
+	repo   DealReader
+	secret string
 }
 
 func NewService(repo DealReader, secret string) *Service {
