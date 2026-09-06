@@ -58,6 +58,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 	deals.RegisterVerificationRoutes(protected, dealHandler)
 
 	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient)
+	//webhookService := webhook.NewService(dealRepo, lnbitsClient)
 	webhookHandler := webhook.NewHandler(webhookService)
 	webhook.RegisterRoutes(router, webhookHandler)
 
