@@ -2,26 +2,15 @@ package webhook
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/Amonochuka/ganji-backend/internal/deals"
-)
-
-const (
-	maxSignatureAge = 5 * time.Minute
-	maxClockSkew    = 5 * time.Minute
+	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
 // Sentinel errors so the handler can map to distinct HTTP status codes.
 var (
-	ErrInvalidSignature = errors.New("invalid webhook signature")
 	ErrMalformedPayload = errors.New("malformed webhook payload")
 	ErrPaymentFailed    = errors.New("payment not successful")
 	ErrDealNotFound     = errors.New("no deal for checking_id")
@@ -35,27 +24,19 @@ type DealReader interface {
 
 type Service struct {
 	repo   DealReader
-	secret string
+	lnbits *lnbits.Client
 }
 
-func NewService(repo DealReader, secret string) *Service {
+func NewService(repo DealReader, lnbitsClient *lnbits.Client) *Service {
 	return &Service{
 		repo:   repo,
-		secret: secret,
+		lnbits: lnbitsClient,
 	}
 }
 
-// HandlePayment processes an LNbits payment notification. It verifies the
-// HMAC signature, looks up the deal by checking_id, and transitions it from
-// awaiting_payment to locked if the payment was successful.
-// Any other error is an unexpected internal failure.
-func (s *Service) HandlePayment(ctx context.Context, rawBody []byte, signatureHeader string, notification *PaymentNotification) error {
-	if s.secret != "" {
-		if err := s.verifySignature(rawBody, signatureHeader); err != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidSignature, err)
-		}
-	}
-
+// HandlePayment processes an LNbits payment notification and transitions
+// the matching deal from awaiting_payment to locked when payment succeeds.
+func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotification) error {
 	if notification.CheckingID == "" {
 		return fmt.Errorf("%w: missing checking_id", ErrMalformedPayload)
 	}
@@ -78,58 +59,6 @@ func (s *Service) HandlePayment(ctx context.Context, rawBody []byte, signatureHe
 
 	if err := s.repo.UpdateStatus(ctx, deal.ID, deals.StatusLocked); err != nil {
 		return fmt.Errorf("transition deal %s to locked: %w", deal.ID, err)
-	}
-
-	return nil
-}
-
-// verifySignature validates the LNbits-Signature header using HMAC-SHA256.
-// The header format is: t=<unix_timestamp>,v1=<hmac_hex>
-// The signed payload is: "{timestamp}.{raw_body}"
-func (s *Service) verifySignature(rawBody []byte, header string) error {
-	parts := strings.Split(header, ",")
-	if len(parts) != 2 {
-		return errors.New("invalid signature header format")
-	}
-
-	var timestampStr, sig string
-	for _, p := range parts {
-		kv := strings.SplitN(p, "=", 2)
-		if len(kv) != 2 {
-			return errors.New("invalid signature header part")
-		}
-		switch kv[0] {
-		case "t":
-			timestampStr = kv[1]
-		case "v1":
-			sig = kv[1]
-		}
-	}
-
-	if timestampStr == "" || sig == "" {
-		return errors.New("missing timestamp or signature in header")
-	}
-
-	ts, err := strconv.ParseInt(timestampStr, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid timestamp in signature header: %w", err)
-	}
-
-	if time.Since(time.Unix(ts, 0)) > maxSignatureAge {
-		return errors.New("webhook signature expired")
-	}
-
-	if time.Unix(ts, 0).After(time.Now().Add(maxClockSkew)) {
-		return errors.New("webhook signature timestamp in the future")
-	}
-
-	payload := fmt.Sprintf("%s.%s", timestampStr, string(rawBody))
-	mac := hmac.New(sha256.New, []byte(s.secret))
-	mac.Write([]byte(payload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-
-	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		return errors.New("webhook signature mismatch")
 	}
 
 	return nil

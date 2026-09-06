@@ -8,15 +8,14 @@ import (
 )
 
 type Config struct {
-	Port                string
-	DatabaseURL         string
-	JWTSecret           string
-	JWTRefreshSecret    string
-	LNBitsURL           string
-	LNBitsAPIKey        string
-	LNBitsWebhookSecret string
-	WebhookURL          string
-	FrontendURL         string
+	Port             string
+	DatabaseURL      string
+	JWTSecret        string
+	JWTRefreshSecret string
+	LNBitsURL        string
+	LNBitsAPIKey     string
+	WebhookURL       string
+	FrontendURL      string
 }
 
 func Load() *Config {
@@ -25,15 +24,14 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		Port:                getEnv("PORT", "8080"),
-		DatabaseURL:         requireEnv("DATABASE_URL"),
-		JWTSecret:           requireEnv("JWT_SECRET"),
-		JWTRefreshSecret:    requireEnv("JWT_REFRESH_SECRET"),
-		LNBitsURL:           getEnv("LNBITS_URL", ""),
-		LNBitsAPIKey:        getEnv("LNBITS_API_KEY", ""),
-		LNBitsWebhookSecret: getEnv("LNBITS_WEBHOOK_SECRET", ""),
-		WebhookURL:          getEnv("WEBHOOK_URL", ""),
-		FrontendURL:         getEnv("FRONTEND_URL", "http://localhost:3000"),
+		Port:             getEnv("PORT", "8080"),
+		DatabaseURL:      requireEnv("DATABASE_URL"),
+		JWTSecret:        requireEnv("JWT_SECRET"),
+		JWTRefreshSecret: requireEnv("JWT_REFRESH_SECRET"),
+		LNBitsURL:        getEnv("LNBITS_URL", ""),
+		LNBitsAPIKey:     getEnv("LNBITS_API_KEY", ""),
+		WebhookURL:       getEnv("WEBHOOK_URL", ""),
+		FrontendURL:      getEnv("FRONTEND_URL", "http://localhost:3000"),
 	}
 
 	return cfg

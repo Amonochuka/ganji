@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -17,9 +18,8 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// HandleLNbitsWebhook receives payment notifications from LNbits. This is a
-// public endpoint — no JWT auth. The HMAC signature is verified in the
-// service layer using LNBITS_WEBHOOK_SECRET.
+// HandleLNbitsWebhook receives payment notifications from LNbits.
+// This is a public endpoint and does not require JWT authentication.
 func (h *Handler) HandleLNbitsWebhook(c *gin.Context) {
 	rawBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -28,22 +28,16 @@ func (h *Handler) HandleLNbitsWebhook(c *gin.Context) {
 	}
 
 	var notification PaymentNotification
-	if err := c.ShouldBindJSON(&notification); err != nil {
+	if err := json.Unmarshal(rawBody, &notification); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid webhook payload"})
 		return
 	}
 
-	signatureHeader := c.GetHeader("LNbits-Signature")
-
 	if err := h.service.HandlePayment(
 		c.Request.Context(),
-		rawBody,
-		signatureHeader,
 		&notification,
 	); err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidSignature):
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 		case errors.Is(err, ErrMalformedPayload):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "malformed payload"})
 		case errors.Is(err, ErrPaymentFailed):
