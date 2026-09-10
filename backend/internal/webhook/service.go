@@ -41,14 +41,6 @@ func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotifi
 		return fmt.Errorf("%w: missing checking_id", ErrMalformedPayload)
 	}
 
-	deal, err := s.repo.GetDealByCheckingID(ctx, notification.CheckingID)
-	if err != nil {
-		if errors.Is(err, deals.ErrDealNotFound) {
-			return fmt.Errorf("%w: %s", ErrDealNotFound, notification.CheckingID)
-		}
-		return fmt.Errorf("lookup deal by checking_id: %w", err)
-	}
-
 	payment, err := s.lnbits.CheckPayment(ctx, notification.CheckingID)
 	if err != nil {
 		return fmt.Errorf("verify payment with lnbits: %w", err)
@@ -56,6 +48,15 @@ func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotifi
 
 	if !payment.Paid {
 		return fmt.Errorf("%w: payment not confirmed by lnbits", ErrPaymentFailed)
+	}
+
+	deal, err := s.repo.GetDealByCheckingID(ctx, notification.CheckingID)
+	if err != nil {
+		if errors.Is(err, deals.ErrDealNotFound) {
+			return fmt.Errorf("%w: %s", ErrDealNotFound, notification.CheckingID)
+		}
+
+		return fmt.Errorf("lookup deal by checking_id: %w", err)
 	}
 
 	if deal.Status != deals.StatusAwaitingPayment {
