@@ -22,12 +22,17 @@ type DealReader interface {
 	UpdateStatus(ctx context.Context, dealID string, status deals.Status) error
 }
 
-type Service struct {
-	repo   DealReader
-	lnbits *lnbits.Client
+// PaymentChecker abstracts the LNbits method needed by the webhook.
+type PaymentChecker interface {
+	CheckPayment(ctx context.Context, checkingID string) (*lnbits.CheckPaymentResponse, error)
 }
 
-func NewService(repo DealReader, lnbitsClient *lnbits.Client) *Service {
+type Service struct {
+	repo   DealReader
+	lnbits PaymentChecker
+}
+
+func NewService(repo DealReader, lnbitsClient PaymentChecker) *Service {
 	return &Service{
 		repo:   repo,
 		lnbits: lnbitsClient,
