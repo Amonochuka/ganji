@@ -11,6 +11,7 @@ type DealRepository interface {
 	GetDealByID(ctx context.Context, id string) (*Deal, error)
 	GetDealByCheckingID(ctx context.Context, checkingID string) (*Deal, error)
 	ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error)
+	ListForUser(ctx context.Context, userID, email string) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
 
 	// Artifacts

@@ -25,6 +25,7 @@ type createDealRequest struct {
 	Title          string `json:"title" binding:"required"`
 	AmountSats     int64  `json:"amount_sats" binding:"required"`
 	SourcePlatform string `json:"source_platform" binding:"required"`
+	ClientEmail    string `json:"client_email" binding:"required"`
 }
 
 func (h *Handler) CreateDeal(c *gin.Context) {
@@ -41,6 +42,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 
 	deal := &Deal{
 		FreelancerID:   userID,
+		ClientEmail:    req.ClientEmail,
 		Title:          req.Title,
 		AmountSats:     req.AmountSats,
 		SourcePlatform: req.SourcePlatform,
@@ -65,9 +67,10 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 
 func (h *Handler) GetDealByID(c *gin.Context) {
 	userID := c.GetString("userID")
+	email := c.GetString("email")
 	dealID := c.Param("dealID")
 
-	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID)
+	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -91,8 +94,9 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 
 func (h *Handler) ListDeals(c *gin.Context) {
 	userID := c.GetString("userID")
+	email := c.GetString("email")
 
-	deals, err := h.service.ListByFreelancer(c.Request.Context(), userID)
+	deals, err := h.service.ListByUser(c.Request.Context(), userID, email)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -118,6 +122,9 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group.GET("/:dealID", h.GetDealByID)
 	group.GET("/:dealID/payment", h.CheckPayment)
 	group.PATCH("/:dealID/status", h.UpdateDealStatus)
+	group.POST("/:dealID/submit", h.SubmitWork)
+	group.POST("/:dealID/approve", h.ApproveDeal)
+	group.POST("/:dealID/dispute", h.DisputeDeal)
 }
 
 func (h *Handler) UpdateDealStatus(c *gin.Context) {
@@ -177,5 +184,89 @@ func (h *Handler) CheckPayment(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"deal": deal,
+	})
+}
+
+func (h *Handler) SubmitWork(c *gin.Context) {
+	userID := c.GetString("userID")
+	dealID := c.Param("dealID")
+
+	deal, err := h.service.SubmitWork(c.Request.Context(), userID, dealID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "work submitted",
+		"deal":    deal,
+	})
+}
+
+func (h *Handler) ApproveDeal(c *gin.Context) {
+	email := c.GetString("email")
+	dealID := c.Param("dealID")
+
+	deal, err := h.service.ApproveDeal(c.Request.Context(), email, dealID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "deal approved and escrow released",
+		"deal":    deal,
+	})
+}
+
+func (h *Handler) DisputeDeal(c *gin.Context) {
+	email := c.GetString("email")
+	dealID := c.Param("dealID")
+
+	deal, err := h.service.DisputeDeal(c.Request.Context(), email, dealID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "dispute raised",
+		"deal":    deal,
 	})
 }

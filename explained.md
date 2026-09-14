@@ -79,6 +79,8 @@ frontend/                  Next.js app — currently does NOT compile
 | Deal repository interface | `backend/internal/deals/interface_types.go` |
 | Deal sentinel errors | `backend/internal/deals/errors.go` |
 | Deal Gin handlers + routes | `backend/internal/deals/handler.go` |
+| Deal service tests (submit/approve/dispute) | `backend/internal/deals/service_test.go` |
+| Client role schema (client_email) | `backend/migrations/000007_add_client_email_to_deals.up.sql` |
 | LNbits client (create invoice, check payment) | `backend/internal/lnbits/client.go` |
 | LNbits request/response models | `backend/internal/lnbits/models.go` |
 | Webhook handler (`POST /webhooks/lnbits`) | `backend/internal/webhook/handler.go` |
@@ -101,11 +103,15 @@ awaiting_payment ──payment confirmed──► locked ──► work_submitte
                                                       └───────► disputed ──► released
 ```
 
+Note: `work_submitted` may also go **directly** to `released` or `disputed`
+(the client can approve or dispute right after submission; `reviewing` is an
+optional formal phase reached via `PATCH /deals/:dealID/status`).
+
 | From | Allowed To |
 |---|---|
 | `awaiting_payment` | `locked` |
 | `locked` | `work_submitted` |
-| `work_submitted` | `reviewing` |
+| `work_submitted` | `reviewing`, `released`, `disputed` |
 | `reviewing` | `released`, `disputed` |
 | `disputed` | `released` |
 | `released` | *(terminal — nothing)* |
@@ -162,6 +168,53 @@ invoice is paid; if `Paid` and status is `awaiting_payment`, updates to `locked`
 
 - Narrow interfaces for easy testing: `DealReader` and `PaymentChecker`
   (`service.go`). This is why the tests need no real DB or LNbits.
+
+## 5. Client Role & Submit / Approve / Dispute Flow
+
+The `deals` table originally only recorded `freelancer_id`. This milestone adds
+the **client role** so the escrow can be completed by the person who actually
+owns the money side of the deal.
+
+### Identity model (email link, no forced sign-up)
+
+- Migration `000007` adds `client_email TEXT` to `deals`.
+- At creation the freelancer names the client by **email** — the client does
+  **not** need an account yet (product concept: no platform lock-in, deals
+  happen over WhatsApp/Telegram/X/etc.).
+- When the client is ready to review, they sign up with that same email. The
+  JWT access token carries their email (`middleware/auth.go` sets
+  `c.Set("email", claims.Email)`), which authorizes them for approve/dispute.
+- Emails are stored lowercased (matching `auth` signup normalization) and
+  compared with `strings.EqualFold`.
+
+### New endpoints (all in `internal/deals/handler.go`)
+
+| Method | Path | Who | Effect |
+|---|---|---|---|
+| `POST` | `/deals/:dealID/submit` | freelancer (owner) | `locked` → `work_submitted`; **requires ≥ 1 artifact** |
+| `POST` | `/deals/:dealID/approve` | client (email match) | `work_submitted`/`reviewing` → `released` (stamps `verified_at`) |
+| `POST` | `/deals/:dealID/dispute` | client (email match) | `work_submitted`/`reviewing` → `disputed` |
+
+### Authorization rules (`internal/deals/service.go`)
+
+- `SubmitWork(userID, dealID)` — `deal.FreelancerID != userID` → `ErrForbidden`.
+  Returns `ErrInvalidInput` if no artifacts exist yet.
+- `ApproveDeal(email, dealID)` / `DisputeDeal(email, dealID)` —
+  `strings.EqualFold(deal.ClientEmail, email)` fails → `ErrForbidden`.
+- The generic `PATCH /deals/:dealID/status` is **freelancer-only** and is
+  blocked from reaching `released`/`disputed` (returning `ErrInvalidTransition`)
+  so it can never be used to bypass the client. Those two states are reachable
+  only through the client's approve/dispute endpoints.
+- Releasing a deal via approve (`repository.go::UpdateStatus`) is what stamps
+  `verified_at = NOW()`; dispute resolution later reuses the same single path.
+- `GET /deals/:dealID` and `GET /deals` now also serve the **client**: a user
+  who matches `client_email` can view the deal, and `ListForUser` returns deals
+  where the user is freelancer **or** client.
+
+Tests: `internal/deals/service_test.go` (fake in-memory `DealRepository`) covers
+submit success/forbidden/no-artifact/bad-transition, approve as client (from
+`reviewing` and from `work_submitted`), approve/forbidden/pre-payment, dispute
+as client/forbidden, and the PATCH release/dispute bypass block.
 
 ---
 
@@ -231,10 +284,11 @@ c5567fe refactor: migrate to LNBits client and introduce transaction support for
 
 ## 7. Project State Overview
 
-**Working:** auth (JWT + refresh rotation), deals CRUD + state machine, artifacts
-+ verifications, LNbits invoice creation, payment polling, webhook payment
-verification → lock, health, migrations, graceful shutdown. `go build ./...`,
-`go vet ./...`, and the webhook tests all pass.
+**Working:** auth (JWT + refresh rotation), deals CRUD + state machine, **client
+role with submit/approve/dispute flow**, artifacts + verifications, LNbits
+invoice creation, payment polling, webhook payment verification → lock, health,
+migrations, graceful shutdown. `go build ./...`, `go vet ./...`, and the deals +
+webhook tests all pass.
 
 **Empty stubs (next features):** `internal/cv`, `internal/websocket`,
 `internal/middleware/cors.go`, `internal/middleware/ratelimit.go`,
@@ -245,11 +299,9 @@ verification → lock, health, migrations, graceful shutdown. `go build ./...`,
 - Frontend (`frontend/`) does **not compile** — 22 TS errors from missing
   `@/components/ui/*`, `@/components/auth/auth-shell`,
   `@/lib/auth/auth-context`, `@/lib/api-client`.
-- The `deals` table only tracks `freelancer_id` — there is **no client role**
-  yet, so the product flow's submit → approve → dispute endpoints
-  (`/deals/:dealID/submit|approve|dispute`) can't be built until the model
-  knows who the client is.
-- `verified_at` / `trust_score` are persisted but never set.
+- No dispute resolution endpoint (arbiter `disputed → released` is only
+  reachable via the freelancer's `PATCH /status`, though the DB accepts it).
+- `trust_score` is persisted but never calculated.
 - No file upload backend (artifacts just record a `storage_key` string).
 - No rate limiting, no structured logging (`log.Printf` everywhere).
 - No CI, Dockerfile, Makefile, or `.env.example`.

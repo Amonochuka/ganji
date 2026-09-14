@@ -29,6 +29,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 	query := `
 		INSERT INTO deals (
 			freelancer_id,
+			client_email,
 			title,
 			amount_sats,
 			source_platform,
@@ -38,7 +39,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 			status
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8
+			$1, $2, $3, $4, $5, $6, $7, $8, $9
 		)
 		RETURNING id, created_at;
 	`
@@ -47,6 +48,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		ctx,
 		query,
 		deal.FreelancerID,
+		deal.ClientEmail,
 		deal.Title,
 		deal.AmountSats,
 		deal.SourcePlatform,
@@ -68,6 +70,7 @@ func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) 
 		SELECT
 			id,
 			freelancer_id,
+			client_email,
 			title,
 			amount_sats,
 			source_platform,
@@ -85,6 +88,7 @@ func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) 
 	if err := row.Scan(
 		&deal.ID,
 		&deal.FreelancerID,
+		&deal.ClientEmail,
 		&deal.Title,
 		&deal.AmountSats,
 		&deal.SourcePlatform,
@@ -108,6 +112,7 @@ func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string)
 		SELECT
 			id,
 			freelancer_id,
+			client_email,
 			title,
 			amount_sats,
 			source_platform,
@@ -125,6 +130,7 @@ func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string)
 	if err := row.Scan(
 		&deal.ID,
 		&deal.FreelancerID,
+		&deal.ClientEmail,
 		&deal.Title,
 		&deal.AmountSats,
 		&deal.SourcePlatform,
@@ -148,6 +154,7 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 		SELECT
 			id,
 			freelancer_id,
+			client_email,
 			title,
 			amount_sats,
 			source_platform,
@@ -173,6 +180,62 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 		if err := rows.Scan(
 			&deal.ID,
 			&deal.FreelancerID,
+			&deal.ClientEmail,
+			&deal.Title,
+			&deal.AmountSats,
+			&deal.SourcePlatform,
+			&deal.PreimageHash,
+			&deal.Invoice,
+			&deal.CheckingID,
+			&deal.Status,
+			&deal.CreatedAt,
+			&deal.VerifiedAt,
+		); err != nil {
+			return nil, fmt.Errorf("repository: scan deal: %w", err)
+		}
+		deals = append(deals, deal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate deals: %w", err)
+	}
+	return deals, nil
+}
+
+// ListForUser returns deals where the user is either the freelancer or the
+// client (matched by email). This is what the client needs to see the deals
+// they are asked to review and approve.
+func (r *Repository) ListForUser(ctx context.Context, userID, email string) ([]Deal, error) {
+	query := `
+		SELECT
+			id,
+			freelancer_id,
+			client_email,
+			title,
+			amount_sats,
+			source_platform,
+			preimage_hash,
+			invoice,
+			checking_id,
+			status,
+			created_at,
+			verified_at
+		FROM deals
+		WHERE freelancer_id = $1 OR client_email = $2
+		ORDER BY created_at DESC;
+	`
+
+	rows, err := r.q.QueryContext(ctx, query, userID, email)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list deals for user: %w", err)
+	}
+	defer rows.Close()
+	var deals []Deal
+	for rows.Next() {
+		var deal Deal
+		if err := rows.Scan(
+			&deal.ID,
+			&deal.FreelancerID,
+			&deal.ClientEmail,
 			&deal.Title,
 			&deal.AmountSats,
 			&deal.SourcePlatform,
@@ -196,7 +259,8 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Status) error {
 	query := `
 		UPDATE deals
-		SET status = $1
+		SET status = $1,
+			verified_at = CASE WHEN $1 = 'released' THEN NOW() ELSE verified_at END
 		WHERE id = $2;
 	`
 	result, err := r.q.ExecContext(ctx, query, status, dealID)

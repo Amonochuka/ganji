@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/mail"
 	"strings"
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
@@ -29,6 +30,11 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 
 	if deal.FreelancerID == "" {
 		return fmt.Errorf("%w: freelancer id is required", ErrInvalidInput)
+	}
+
+	deal.ClientEmail = strings.ToLower(strings.TrimSpace(deal.ClientEmail))
+	if !isValidEmail(deal.ClientEmail) {
+		return fmt.Errorf("%w: valid client email is required", ErrInvalidInput)
 	}
 
 	if deal.Title == "" {
@@ -78,7 +84,7 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 			_ = tx.Rollback()
 		}
 	}()
-	
+
 	repo := s.repo.WithTx(tx)
 
 	if err := repo.CreateDeal(ctx, deal); err != nil {
@@ -92,7 +98,57 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	return nil
 }
 
-func (s *Service) GetDealByID(ctx context.Context, dealID, userID string) (*Deal, error) {
+func (s *Service) GetDealByID(ctx context.Context, dealID, userID, email string) (*Deal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
+		return nil, ErrForbidden
+	}
+
+	return deal, nil
+}
+
+func (s *Service) ListByUser(ctx context.Context, userID, email string) ([]Deal, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("%w: user id is required", ErrInvalidInput)
+	}
+
+	return s.repo.ListForUser(ctx, userID, email)
+}
+
+func (s *Service) UpdateStatus(ctx context.Context, userID, dealID string, newStatus Status) error {
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return err
+	}
+
+	if deal.FreelancerID != userID {
+		return ErrForbidden
+	}
+
+	// Releasing and disputing are client actions (ApproveDeal / DisputeDeal).
+	// The freelancer's generic status endpoint must not be able to reach them.
+	if newStatus == StatusReleased || newStatus == StatusDisputed {
+		return fmt.Errorf("%w: released and disputed must go through approve/dispute", ErrInvalidTransition)
+	}
+
+	if !CanTransition(deal.Status, newStatus) {
+		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, newStatus)
+	}
+	return s.repo.UpdateStatus(ctx, dealID, newStatus)
+}
+
+// SubmitWork moves a locked deal to work_submitted. Only the freelancer
+// (the deal owner) can submit, and the deal must already have at least one
+// artifact — you cannot submit nothing.
+func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
@@ -106,31 +162,80 @@ func (s *Service) GetDealByID(ctx context.Context, dealID, userID string) (*Deal
 		return nil, ErrForbidden
 	}
 
+	artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID)
+	if err != nil {
+		return nil, fmt.Errorf("checking submitted artifacts: %w", err)
+	}
+	if len(artifacts) == 0 {
+		return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
+	}
+
+	if !CanTransition(deal.Status, StatusWorkSubmitted) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusWorkSubmitted)
+	}
+
+	if err := s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted); err != nil {
+		return nil, fmt.Errorf("submitting work for deal %s: %w", dealID, err)
+	}
+
+	deal.Status = StatusWorkSubmitted
 	return deal, nil
 }
 
-func (s *Service) ListByFreelancer(ctx context.Context, userID string) ([]Deal, error) {
-	if userID == "" {
-		return nil, fmt.Errorf("%w: freelancer id is required", ErrInvalidInput)
+// ApproveDeal releases escrow to the freelancer. Only the client (matched
+// by the client_email recorded on the deal) can approve. Because released
+// is a terminal state, approving also stamps verified_at for the Live CV.
+func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
 
-	return s.repo.ListByFreelancer(ctx, userID)
-}
-
-func (s *Service) UpdateStatus(ctx context.Context, userID, dealID string, newStatus Status) error {
 	deal, err := s.repo.GetDealByID(ctx, dealID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if deal.FreelancerID != userID {
-		return ErrForbidden
+	if !strings.EqualFold(deal.ClientEmail, email) {
+		return nil, ErrForbidden
 	}
 
-	if !CanTransition(deal.Status, newStatus) {
-		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, newStatus)
+	if !CanTransition(deal.Status, StatusReleased) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
 	}
-	return s.repo.UpdateStatus(ctx, dealID, newStatus)
+
+	if err := s.repo.UpdateStatus(ctx, dealID, StatusReleased); err != nil {
+		return nil, fmt.Errorf("releasing escrow for deal %s: %w", dealID, err)
+	}
+
+	deal.Status = StatusReleased
+	return deal, nil
+}
+
+// DisputeDeal raises a dispute. Only the client can dispute.
+func (s *Service) DisputeDeal(ctx context.Context, email, dealID string) (*Deal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !strings.EqualFold(deal.ClientEmail, email) {
+		return nil, ErrForbidden
+	}
+
+	if !CanTransition(deal.Status, StatusDisputed) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusDisputed)
+	}
+
+	if err := s.repo.UpdateStatus(ctx, dealID, StatusDisputed); err != nil {
+		return nil, fmt.Errorf("disputing deal %s: %w", dealID, err)
+	}
+
+	deal.Status = StatusDisputed
+	return deal, nil
 }
 
 // CheckPayment queries LNbits for the payment status of a deal's invoice.
@@ -357,4 +462,12 @@ func (s *Service) ListVerificationsByArtifact(ctx context.Context, userID, artif
 	}
 
 	return s.repo.ListVerificationsByArtifact(ctx, artifactID)
+}
+
+// isValidEmail does a light syntactic check using the standard library. The
+// authoritative validation happens when the client actually registers with
+// this email (auth.Service lowercases + enforces a stricter pattern).
+func isValidEmail(s string) bool {
+	addr, err := mail.ParseAddress(s)
+	return err == nil && addr.Address == s && strings.Contains(s, "@")
 }

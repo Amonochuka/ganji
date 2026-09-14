@@ -29,6 +29,7 @@ const (
 type Deal struct {
 	ID             string       `json:"id"`
 	FreelancerID   string       `json:"freelancer_id"`
+	ClientEmail    string       `json:"client_email"`
 	Title          string       `json:"title"`
 	AmountSats     int64        `json:"amount_sats"`
 	SourcePlatform string       `json:"source_platform"`
@@ -47,10 +48,13 @@ type Deal struct {
 var ValidTransitions = map[Status][]Status{
 	StatusAwaitingPayment: {StatusLocked},
 	StatusLocked:          {StatusWorkSubmitted},
-	StatusWorkSubmitted:   {StatusReviewing},
-	StatusReviewing:       {StatusReleased, StatusDisputed},
-	StatusDisputed:        {StatusReleased},
-	StatusReleased:        {}, // terminal — no transitions out
+	// work_submitted -> released/disputed is allowed because the client can
+	// approve or dispute immediately on submission; reviewing is an optional
+	// formal phase (reachable via PATCH /status) before approve/dispute.
+	StatusWorkSubmitted: {StatusReviewing, StatusReleased, StatusDisputed},
+	StatusReviewing:     {StatusReleased, StatusDisputed},
+	StatusDisputed:      {StatusReleased},
+	StatusReleased:      {}, // terminal — no transitions out
 }
 
 // CanTransition checks whether moving from one status to another is a
