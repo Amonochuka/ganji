@@ -153,8 +153,30 @@ func TestHandleLNbitsWebhookIgnoresUnpaidPayment(t *testing.T) {
 	expectedBody := `{"status":"ignored","reason":"payment not successful"}`
 	actualBody := strings.TrimSpace(recorder.Body.String())
 
-	if actualBody != expectedBody {
+	var expectedJSON map[string]string
+	var actualJSON map[string]string
+
+	if err := json.Unmarshal([]byte(expectedBody), &expectedJSON); err != nil {
+		t.Fatalf("failed to parse expected JSON: %v", err)
+	}
+
+	if err := json.Unmarshal([]byte(actualBody), &actualJSON); err != nil {
+		t.Fatalf("failed to parse actual JSON: %v", err)
+	}
+
+	if len(expectedJSON) != len(actualJSON) {
 		t.Fatalf("expected body %s, got %s", expectedBody, actualBody)
+	}
+
+	for key, expectedValue := range expectedJSON {
+		if actualJSON[key] != expectedValue {
+			t.Fatalf(
+				"expected %s=%q, got %q",
+				key,
+				expectedValue,
+				actualJSON[key],
+			)
+		}
 	}
 
 	if dealReader.updatedDealID != "" {
