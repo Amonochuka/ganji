@@ -4,6 +4,11 @@ This document is a working reference for the Ganji backend: what the code does,
 which files implement it, what was recently changed and why, and what comes next.
 Read this first before touching code so you can find your way around.
 
+> **Current milestone: migrating from a custodial LNbits escrow to a
+> network-as-escrow (hold invoice) design.** Section 4 describes the old flow;
+> Section 4b documents the new hold-invoice flow and how far the migration has
+> progressed.
+
 ---
 
 ## 1. What Ganji Is
@@ -169,11 +174,75 @@ invoice is paid; if `Paid` and status is `awaiting_payment`, updates to `locked`
 - Narrow interfaces for easy testing: `DealReader` and `PaymentChecker`
   (`service.go`). This is why the tests need no real DB or LNbits.
 
-## 5. Client Role & Submit / Approve / Dispute Flow
+---
 
-The `deals` table originally only recorded `freelancer_id`. This milestone adds
-the **client role** so the escrow can be completed by the person who actually
-owns the money side of the deal.
+## 4b. Network-As-Escrow Migration (Hold Invoices) — IN PROGRESS
+
+**What we are replacing:** Section 4 above is the **custodial** design. Ganji
+generates a preimage but never uses it (LNbits mints its own), the client pays a
+regular invoice and the sats land **immediately in Ganji's LNbits wallet
+balance**, and `ApproveDeal` only flips a DB column — there is no payout leg and
+no way for the client to be refunded automatically. Ganji is the custodian of
+every escrowed sat.
+
+**Target:** use **hold invoices** so the Lightning Network itself is the escrow.
+
+### How a hold invoice works (vetted against LNbits source, v1.5.6/v1.6.1/[dev])
+
+Current LNbits endpoints (differ from old docs — the code is authoritative):
+
+| Action | Endpoint | Auth |
+|---|---|---|
+| Create hold invoice | `POST /api/v1/payments` `{out:false, amount, memo, payment_hash, webhook}` | invoice/admin |
+| Check status | `GET /api/v1/payments/{payment_hash}` | invoice/admin |
+| **Settle** (release) | `POST /api/v1/payments/settle` `{preimage}` | **admin** |
+| **Cancel** (refund) | `POST /api/v1/payments/cancel` `{payment_hash}` | **admin** |
+| Pay out | `POST /api/v1/payments` `{out:true, bolt11}` | **admin** |
+
+To create a hold invoice you pass `payment_hash = sha256(preimage)`. LNbits
+stores the preimage internally and the incoming HTLC sits **held** — it cannot
+complete until LNbits reveals the preimage (settle) or tears it down (cancel).
+
+### Backend-dependent "held" detection — IMPORTANT
+
+Whether LNbits reports a held-but-unsettled invoice as `paid` depends on the
+funding source (`lnbits/wallets/*.py` `get_invoice_status`):
+
+- **CLN / corelightning / clnrest**: maps invoice status `"paid"` → `paid=true`
+  while held. So a webhook/poll can lock a deal the moment the client pays.
+- **LND / lndrest / lndgrpc**: only `SETTLED` returns success; a held invoice
+  stays `ACCEPTED` → LNbits reports `paid=false` until **settled**, and LND's
+  `paid_invoices_stream` skips anything not `SETTLED` (so **no webhook fires
+  while held**).
+
+**Decision (with product):** autodetect — no backend config, no hacks.
+Locking is always gated on `paid == true`. On CLN the deal locks immediately on
+payment; on LND it stays `awaiting_payment` until the client approves, at which
+point `SettleHold` atomically proves the funds were really held. To avoid a
+deadlock on LND, `awaiting_payment → work_submitted` is an allowed transition
+(submit before confirmed payment is safe: `released` is only reachable via a
+successful settle, which cannot happen if the client never funded the hold).
+
+### Progress so far
+
+- [x] **LNbits hold-invoice client** (`internal/lnbits/client.go`,
+  `models.go`, `client_test.go`):
+  - `Client.adminKey` added; `Config{AdminKey}` wired from `LNBITS_ADMIN_KEY`
+    (new env var, required for settle/cancel/send).
+  - `CreateHoldInvoice` — POST `/api/v1/payments` with `payment_hash`,
+    attaches the configured webhook, defaults `unit` to `sat`.
+  - `SettleHold(preimage)` — POST `/api/v1/payments/settle`.
+  - `CancelHold(payment_hash)` — POST `/api/v1/payments/cancel`.
+  - `PayInvoice(bolt11)` — POST `/api/v1/payments` `out:true` (payout leg).
+  - `postJSON` helper for the new POST methods.
+  - Tests cover happy path, key selection (invoice vs admin), and error bodies.
+- [ ] Deal model + migration (preimage storage, payee_invoice, `refunded`).
+- [ ] `CreateDeal` → hold invoice.
+- [ ] Lock detection + transition changes.
+- [ ] Approve = settle + payout; Dispute = cancel → refunded.
+- [ ] More tests + docs.
+
+## 5. Client Role & Submit / Approve / Dispute Flow
 
 ### Identity model (email link, no forced sign-up)
 

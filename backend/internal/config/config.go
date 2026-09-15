@@ -14,6 +14,7 @@ type Config struct {
 	JWTRefreshSecret string
 	LNBitsURL        string
 	LNBitsAPIKey     string
+	LNBitsAdminKey   string
 	WebhookURL       string
 	FrontendURL      string
 }
@@ -30,6 +31,7 @@ func Load() *Config {
 		JWTRefreshSecret: requireEnv("JWT_REFRESH_SECRET"),
 		LNBitsURL:        getEnv("LNBITS_URL", ""),
 		LNBitsAPIKey:     getEnv("LNBITS_API_KEY", ""),
+		LNBitsAdminKey:   getEnv("LNBITS_ADMIN_KEY", ""),
 		WebhookURL:       getEnv("WEBHOOK_URL", ""),
 		FrontendURL:      getEnv("FRONTEND_URL", "http://localhost:3000"),
 	}

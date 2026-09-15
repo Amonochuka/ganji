@@ -43,6 +43,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 		lnbits.Config{
 			URL:        cfg.LNBitsURL,
 			APIKey:     cfg.LNBitsAPIKey,
+			AdminKey:   cfg.LNBitsAdminKey,
 			WebhookURL: cfg.WebhookURL,
 		},
 	)
