@@ -2,12 +2,17 @@ package webhook
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -34,13 +39,108 @@ func (f *handlerPaymentChecker) CheckPayment(
 }
 
 func setupWebhookRouter(service *Service) *gin.Engine {
+	return setupWebhookRouterWithSecret(service, "")
+}
+
+func setupWebhookRouterWithSecret(service *Service, secret string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	handler := NewHandler(service)
+	handler := NewHandler(service, secret)
 	RegisterRoutes(router, handler)
 
 	return router
+}
+
+func TestHandleLNbitsWebhookRejectsBadSignature(t *testing.T) {
+	paymentChecker := &handlerPaymentChecker{paid: true}
+	dealReader := &fakeDealReader{
+		deal: &deals.Deal{ID: "deal-123", Status: deals.StatusAwaitingPayment},
+	}
+
+	service := NewService(dealReader, paymentChecker)
+	router := setupWebhookRouterWithSecret(service, "wallet-secret")
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/webhooks/lnbits",
+		strings.NewReader(`{"checking_id":"checking-123"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("LNbits-Signature", "t=1,v1=bogus")
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", recorder.Code)
+	}
+	if dealReader.updatedDealID != "" {
+		t.Fatalf("expected no deal update, got %q", dealReader.updatedDealID)
+	}
+}
+
+func TestHandleLNbitsWebhookAcceptsValidSignature(t *testing.T) {
+	paymentChecker := &handlerPaymentChecker{paid: true}
+	dealReader := &fakeDealReader{
+		deal: &deals.Deal{ID: "deal-123", Status: deals.StatusAwaitingPayment},
+	}
+
+	service := NewService(dealReader, paymentChecker)
+	router := setupWebhookRouterWithSecret(service, "wallet-secret")
+
+	body := `{"checking_id":"checking-123"}`
+	timestamp := time.Now().Unix()
+	header := "t=" + strconv.FormatInt(timestamp, 10) + ",v1=" + signBody(body, "wallet-secret", timestamp)
+
+	request := httptest.NewRequest(http.MethodPost, "/webhooks/lnbits", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("LNbits-Signature", header)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+	if dealReader.updatedDealID != "deal-123" {
+		t.Fatalf("expected deal to be updated, got %q", dealReader.updatedDealID)
+	}
+}
+
+func TestVerifyLNbitsSignature(t *testing.T) {
+	body := []byte(`{"checking_id":"checking-123"}`)
+	now := time.Now().Unix()
+	header := "t=" + strconv.FormatInt(now, 10) + ",v1=" + signBody(string(body), "secret", now)
+
+	tests := []struct {
+		name   string
+		body   []byte
+		header string
+		secret string
+		want   bool
+	}{
+		{name: "valid", body: body, header: header, secret: "secret", want: true},
+		{name: "no secret skips verification", body: body, header: "", secret: "", want: true},
+		{name: "missing header refuses", body: body, header: "", secret: "secret", want: false},
+		{name: "tampered body refuses", body: []byte(`{"checking_id":"other"}`), header: header, secret: "secret", want: false},
+		{name: "wrong secret refuses", body: body, header: header, secret: "wrong", want: false},
+		{name: "stale timestamp refuses", body: body, header: "t=" + strconv.FormatInt(now-3600, 10) + ",v1=" + signBody(string(body), "secret", now-3600), secret: "secret", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := VerifyLNbitsSignature(tc.body, tc.header, tc.secret); got != tc.want {
+				t.Fatalf("expected %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+func signBody(body, secret string, timestamp int64) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(strconv.FormatInt(timestamp, 10) + "." + body))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func TestHandleLNbitsWebhookReturnsOKForPaidPayment(t *testing.T) {

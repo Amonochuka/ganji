@@ -12,18 +12,26 @@ import (
 
 type Handler struct {
 	service *Service
+	secret  string
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, secret string) *Handler {
+	return &Handler{service: service, secret: secret}
 }
 
 // HandleLNbitsWebhook receives payment notifications from LNbits.
-// This is a public endpoint and does not require JWT authentication.
+// This is a public endpoint and does not require JWT authentication. When
+// LNBITS_WEBHOOK_SECRET (the wallet's webhook_secret) is set, inbound
+// requests must carry a valid LNbits-Signature: t=<unix>,v1=<hmac_sha256>.
 func (h *Handler) HandleLNbitsWebhook(c *gin.Context) {
 	rawBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	if h.secret != "" && !VerifyLNbitsSignature(rawBody, c.GetHeader("LNbits-Signature"), h.secret) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 		return
 	}
 

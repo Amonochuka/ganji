@@ -61,7 +61,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 
 	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient)
 	//webhookService := webhook.NewService(dealRepo, lnbitsClient)
-	webhookHandler := webhook.NewHandler(webhookService)
+	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret)
 	webhook.RegisterRoutes(router, webhookHandler)
 
 	// Future: cv.RegisterRoutes(protected, ...)

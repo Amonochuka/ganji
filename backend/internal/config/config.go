@@ -16,9 +16,11 @@ type Config struct {
 	LNBitsURL                string
 	LNBitsAPIKey             string
 	LNBitsAdminKey           string
+	LNBitsWebhookSecret      string
 	WebhookURL               string
 	FrontendURL              string
 	HoldInvoiceExpirySeconds int64
+	HoldSweepIntervalSeconds int64
 }
 
 func Load() *Config {
@@ -34,9 +36,11 @@ func Load() *Config {
 		LNBitsURL:                getEnv("LNBITS_URL", ""),
 		LNBitsAPIKey:             getEnv("LNBITS_API_KEY", ""),
 		LNBitsAdminKey:           getEnv("LNBITS_ADMIN_KEY", ""),
+		LNBitsWebhookSecret:      getEnv("LNBITS_WEBHOOK_SECRET", ""),
 		WebhookURL:               getEnv("WEBHOOK_URL", ""),
 		FrontendURL:              getEnv("FRONTEND_URL", "http://localhost:3000"),
 		HoldInvoiceExpirySeconds: getEnvInt("LNBITS_HOLD_INVOICE_EXPIRY_SECONDS", 2_592_000),
+		HoldSweepIntervalSeconds: getEnvInt("LNBITS_HOLD_SWEEP_INTERVAL_SECONDS", 21_600),
 	}
 
 	return cfg
