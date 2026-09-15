@@ -22,7 +22,13 @@ func main() {
 	}
 	defer dbConn.Close()
 
-	router := setupRouter(cfg, dbConn)
+	router, dealService := setupRouter(cfg, dbConn)
+
+	// Hold-expiry sweep: periodically reconcile stale open deals with LNbits
+	// so expired/cancelled/unfunded holds don't stay awaiting_payment forever.
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	go runWorkers(runCtx, cfg, dealService)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

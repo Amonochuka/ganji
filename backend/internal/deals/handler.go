@@ -127,6 +127,7 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group.POST("/:dealID/submit", h.SubmitWork)
 	group.POST("/:dealID/approve", h.ApproveDeal)
 	group.POST("/:dealID/dispute", h.DisputeDeal)
+	group.PATCH("/:dealID/payee-invoice", h.UpdatePayeeInvoice)
 }
 
 func (h *Handler) UpdateDealStatus(c *gin.Context) {
@@ -269,6 +270,44 @@ func (h *Handler) DisputeDeal(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "dispute raised",
+		"deal":    deal,
+	})
+}
+
+type payeeInvoiceRequest struct {
+	PayeeInvoice string `json:"payee_invoice" binding:"required"`
+}
+
+func (h *Handler) UpdatePayeeInvoice(c *gin.Context) {
+	userID := c.GetString("userID")
+	dealID := c.Param("dealID")
+
+	var req payeeInvoiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	deal, err := h.service.UpdatePayeeInvoice(c.Request.Context(), userID, dealID, req.PayeeInvoice)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "payee invoice updated",
 		"deal":    deal,
 	})
 }

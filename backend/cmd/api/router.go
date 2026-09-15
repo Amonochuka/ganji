@@ -18,8 +18,9 @@ import (
 // setupRouter builds the Gin engine and registers all routes. As we add
 // deals, lightning, and cv, each one registers its own routes here via
 // its own RegisterRoutes-style function — this file should never grow
-// route logic directly, only wiring.
-func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
+// route logic directly, only wiring. The *deals.Service is returned so main
+// can run background workers (e.g. the hold-expiry sweep) against it.
+func setupRouter(cfg *config.Config, dbConn *sql.DB) (*gin.Engine, *deals.Service) {
 	router := gin.Default()
 
 	router.Use(cors.New(cors.Config{
@@ -66,5 +67,5 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 
 	// Future: cv.RegisterRoutes(protected, ...)
 
-	return router
+	return router, dealService
 }

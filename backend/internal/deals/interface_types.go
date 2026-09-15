@@ -3,6 +3,7 @@ package deals
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 type DealRepository interface {
@@ -13,6 +14,8 @@ type DealRepository interface {
 	ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error)
 	ListForUser(ctx context.Context, userID, email string) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
+	UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error
+	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)
 
 	// Artifacts
 	CreateArtifact(ctx context.Context, artifact *Artifact) error

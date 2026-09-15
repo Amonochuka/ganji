@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 type DBTX interface {
@@ -183,6 +184,58 @@ func (r *Repository) ListForUser(ctx context.Context, userID, email string) ([]D
 		return nil, fmt.Errorf("repository: list deals for user: %w", err)
 	}
 	defer rows.Close()
+	var deals []Deal
+	for rows.Next() {
+		deal, err := scanDeal(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repository: scan deal: %w", err)
+		}
+		deals = append(deals, *deal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate deals: %w", err)
+	}
+	return deals, nil
+}
+
+// UpdatePayeeInvoice swaps the freelancer's payout destination. Allowed for
+// any open deal — once released/refunded the money has already moved.
+func (r *Repository) UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error {
+	query := `UPDATE deals SET payee_invoice = $1 WHERE id = $2;`
+
+	result, err := r.q.ExecContext(ctx, query, payeeInvoice, dealID)
+	if err != nil {
+		return fmt.Errorf("repository: update payee invoice: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: update payee invoice: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+
+	return nil
+}
+
+// ListOpenBefore returns deals still awaiting payment or locked that were
+// created before the cutoff — the candidates for the hold-expiry sweep. Left
+// alone, a deal whose hold expired (or was never funded) would sit in the DB
+// forever even though the network has already returned the funds.
+func (r *Repository) ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error) {
+	query := "SELECT" + dealColumns + `
+		FROM deals
+		WHERE status IN ($1, $2) AND created_at < $3
+		ORDER BY created_at ASC;
+	`
+
+	rows, err := r.q.QueryContext(ctx, query, StatusAwaitingPayment, StatusLocked, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list open deals before cutoff: %w", err)
+	}
+	defer rows.Close()
+
 	var deals []Deal
 	for rows.Next() {
 		deal, err := scanDeal(rows)

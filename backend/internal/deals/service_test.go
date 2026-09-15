@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
@@ -113,6 +114,25 @@ func (f *fakeDealRepo) UpdateStatus(ctx context.Context, dealID string, status S
 	}
 	deal.Status = status
 	return nil
+}
+
+func (f *fakeDealRepo) UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error {
+	deal, ok := f.deals[dealID]
+	if !ok {
+		return ErrDealNotFound
+	}
+	deal.PayeeInvoice = payeeInvoice
+	return nil
+}
+
+func (f *fakeDealRepo) ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error) {
+	var out []Deal
+	for _, deal := range f.deals {
+		if (deal.Status == StatusAwaitingPayment || deal.Status == StatusLocked) && deal.CreatedAt.Before(cutoff) {
+			out = append(out, *deal)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeDealRepo) CreateArtifact(ctx context.Context, artifact *Artifact) error {
@@ -752,5 +772,121 @@ func TestCheckPaymentDoesNotRollBackLockedDeal(t *testing.T) {
 
 	if result.Status != StatusLocked {
 		t.Errorf("expected deal to remain locked, got %s", result.Status)
+	}
+}
+
+func TestSweepRefundsExpiredHold(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CreatedAt = time.Now().Add(-50 * 24 * time.Hour)
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"bb","status":"EXPIRED"}}`))
+	}))
+
+	swept, err := service.SweepExpiredHolds(context.Background(), time.Now().Add(-40*24*time.Hour))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if swept != 1 {
+		t.Fatalf("expected 1 swept, got %d", swept)
+	}
+	if repo.deals[deal.ID].Status != StatusRefunded {
+		t.Fatalf("expected refunded, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
+func TestSweepIgnoresHeldOrFreshDeals(t *testing.T) {
+	repo := newFakeDealRepo()
+	held := escrowDeal(repo, "held-1", "freelancer-1", "client@example.com")
+	held.Status = StatusLocked
+	held.CreatedAt = time.Now().Add(-50 * 24 * time.Hour)
+
+	fresh := escrowDeal(repo, "fresh-1", "freelancer-1", "client@example.com")
+	fresh.Status = StatusAwaitingPayment
+	fresh.CreatedAt = time.Now()
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/payments/" + held.CheckingID:
+			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"bb","status":"HOLD"}}`))
+		default:
+			t.Errorf("fresh deal must not be queried, got %s", r.URL.Path)
+		}
+	}))
+
+	swept, err := service.SweepExpiredHolds(context.Background(), time.Now().Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if swept != 0 {
+		t.Fatalf("expected nothing swept, got %d", swept)
+	}
+	if repo.deals["held-1"].Status != StatusLocked {
+		t.Fatalf("expected held deal to stay locked, got %s", repo.deals["held-1"].Status)
+	}
+}
+
+func TestSweepIgnoresUnreachableLNbits(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CreatedAt = time.Now().Add(-50 * 24 * time.Hour)
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: "http://127.0.0.1:1", APIKey: "k"}))
+
+	swept, err := service.SweepExpiredHolds(context.Background(), time.Now().Add(-40*24*time.Hour))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if swept != 0 {
+		t.Fatalf("expected nothing swept, got %d", swept)
+	}
+	if repo.deals[deal.ID].Status != StatusAwaitingPayment {
+		t.Fatalf("expected deal untouched, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
+func TestUpdatePayeeInvoiceAsFreelancer(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+
+	service := newTestService(repo)
+
+	updated, err := service.UpdatePayeeInvoice(context.Background(), "freelancer-1", deal.ID, "lnbcnew")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if updated.PayeeInvoice != "lnbcnew" {
+		t.Fatalf("expected updated payee invoice, got %q", updated.PayeeInvoice)
+	}
+}
+
+func TestUpdatePayeeInvoiceRejectsNonOwner(t *testing.T) {
+	repo := newFakeDealRepo()
+	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	service := newTestService(repo)
+
+	_, err := service.UpdatePayeeInvoice(context.Background(), "someone-else", "deal-1", "lnbcnew")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestUpdatePayeeInvoiceFrozenAfterRelease(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReleased
+
+	service := newTestService(repo)
+
+	_, err := service.UpdatePayeeInvoice(context.Background(), "freelancer-1", deal.ID, "lnbcnew")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
 }
