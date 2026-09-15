@@ -4,10 +4,10 @@ This document is a working reference for the Ganji backend: what the code does,
 which files implement it, what was recently changed and why, and what comes next.
 Read this first before touching code so you can find your way around.
 
-> **Current milestone: migrating from a custodial LNbits escrow to a
-> network-as-escrow (hold invoice) design.** Section 4 describes the old flow;
-> Section 4b documents the new hold-invoice flow and how far the migration has
-> progressed.
+> **Current milestone: the network-as-escrow (hold invoice) migration is
+> complete, including the follow-up robustness batch (webhook HMAC, hold-expiry
+> sweep, payee-invoice rotation).** Section 4 describes the old custodial flow;
+> Section 4b documents the new hold-invoice flow.
 
 ---
 
@@ -24,7 +24,7 @@ CreateDeal()
       ▼
 deals.Service.CreateDeal()
       │  generates a 32-byte preimage, hashes it (SHA-256)
-      │  calls LNbits CreateInvoice()  -> creates a Lightning invoice
+      │  calls LNbits CreateHoldInvoice()  -> creates a hold invoice
       ▼
 LNbits returns invoice + checking_id
       │  deal is INSERTed transactionally, status = awaiting_payment
@@ -53,17 +53,18 @@ a trigger; LNbits is the source of truth.
 
 ```
 backend/
-  cmd/api/                 entry point + router wiring
+  cmd/api/                 entry point + router wiring + background workers
   internal/
     auth/                  JWT + bcrypt auth (complete)
     config/                env/config loading
     cv/                    Live CV — EMPTY STUB (next big feature)
     db/                    connection pool + auto-migrations
-    deals/                 deal CRUD, state machine, artifacts, verifications
+    deals/                 deal CRUD, state machine, artifacts, verifications,
+                           hold-invoice escrow, expiry sweep
     health/                GET /health
-    lnbits/                LNbits HTTP client (CreateInvoice, CheckPayment)
+    lnbits/                LNbits HTTP client (hold invoices, check/settle/cancel)
     middleware/            auth (done); cors/ratelimit (empty)
-    webhook/               LNbits payment webhook (complete + tested)
+    webhook/               LNbits payment webhook + HMAC signature (complete)
     websocket/             EMPTY STUB
   migrations/              SQL schema (golang-migrate)
   pkg/
@@ -78,18 +79,21 @@ frontend/                  Next.js app — currently does NOT compile
 |---|---|
 | Server entry + graceful shutdown | `backend/cmd/api/main.go` |
 | Route wiring, CORS | `backend/cmd/api/router.go` |
+| Background workers (hold-expiry sweep) | `backend/cmd/api/workers.go` |
 | Deal struct + status constants + valid transitions | `backend/internal/deals/types.go` |
-| Deal business logic (preimage, LNbits invoice, ownership) | `backend/internal/deals/service.go` |
+| Deal business logic (preimage, LNbits hold invoice, ownership) | `backend/internal/deals/service.go` |
 | Deal DB queries (repos, transactions) | `backend/internal/deals/repository.go` |
 | Deal repository interface | `backend/internal/deals/interface_types.go` |
 | Deal sentinel errors | `backend/internal/deals/errors.go` |
 | Deal Gin handlers + routes | `backend/internal/deals/handler.go` |
+| Hold-expiry sweep loop + sweep logic | `backend/internal/deals/sweep.go` |
 | Deal service tests (submit/approve/dispute) | `backend/internal/deals/service_test.go` |
 | Client role schema (client_email) | `backend/migrations/000007_add_client_email_to_deals.up.sql` |
-| LNbits client (create invoice, check payment) | `backend/internal/lnbits/client.go` |
+| LNbits client (hold invoices, settle/cancel/payout) | `backend/internal/lnbits/client.go` |
 | LNbits request/response models | `backend/internal/lnbits/models.go` |
 | Webhook handler (`POST /webhooks/lnbits`) | `backend/internal/webhook/handler.go` |
 | Webhook service (verify + lock deal) | `backend/internal/webhook/service.go` |
+| Webhook HMAC signature verification | `backend/internal/webhook/signature.go` |
 | LNbits webhook payload model | `backend/internal/webhook/models.go` |
 | Webhook service tests | `backend/internal/webhook/service_test.go` |
 | Webhook handler tests | `backend/internal/webhook/handler_test.go` |
