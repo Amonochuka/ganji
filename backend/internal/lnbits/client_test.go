@@ -116,12 +116,23 @@ func TestSettleHoldUsesAdminKey(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true,"checking_id":"c1"}`))
 	})
 
-	if err := client.SettleHold(context.Background(), "deadbeef"); err != nil {
+	if _, err := client.SettleHold(context.Background(), "deadbeef"); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
 	if (*requests)[0] != "POST /api/v1/payments/settle" {
 		t.Fatalf("unexpected request %q", (*requests)[0])
+	}
+}
+
+func TestSettleHoldRefused(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":false,"checking_id":"c1","error_message":"invoice not held"}`))
+	})
+
+	if _, err := client.SettleHold(context.Background(), "deadbeef"); err == nil {
+		t.Fatal("expected error for refused settle, got nil")
 	}
 }
 
@@ -131,7 +142,7 @@ func TestSettleHoldError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"detail":"payment not accepted"}`))
 	})
 
-	err := client.SettleHold(context.Background(), "deadbeef")
+	_, err := client.SettleHold(context.Background(), "deadbeef")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -158,12 +169,23 @@ func TestCancelHoldUsesAdminKey(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true,"checking_id":"c1"}`))
 	})
 
-	if err := client.CancelHold(context.Background(), "ph1"); err != nil {
+	if _, err := client.CancelHold(context.Background(), "ph1"); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
 	if (*requests)[0] != "POST /api/v1/payments/cancel" {
 		t.Fatalf("unexpected request %q", (*requests)[0])
+	}
+}
+
+func TestCancelHoldRefused(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":false,"checking_id":"c1","error_message":"invoice not held"}`))
+	})
+
+	if _, err := client.CancelHold(context.Background(), "ph1"); err == nil {
+		t.Fatal("expected error for refused cancel, got nil")
 	}
 }
 

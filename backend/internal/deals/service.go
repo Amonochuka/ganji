@@ -198,9 +198,21 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 	return deal, nil
 }
 
-// ApproveDeal releases escrow to the freelancer. Only the client (matched
-// by the client_email recorded on the deal) can approve. Because released
-// is a terminal state, approving also stamps verified_at for the Live CV.
+// ApproveDeal settles the escrow on the network and forwards the funds to
+// the freelancer. Only the client (matched by the client_email recorded on
+// the deal) can approve. Because released is a terminal state, approving
+// also stamps verified_at for the Live CV.
+//
+// The two network legs are deliberate and non-atomic:
+//  1. SettleHold reveals the preimage, completing the held payment so the
+//     sats land in Ganji's LNbits wallet.
+//  2. PayInvoice forwards those sats onward to the freelancer's invoice.
+//
+// Idempotency: approving twice (or a crash between the two legs) re-settles
+// nothing and re-pays the freelancer's invoice. A settle that fails because
+// the hold is already settled is treated as success and we move straight to
+// the payout. Payout is only ever attempted after LNbits confirms the escrow
+// is actually settled.
 func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
@@ -219,6 +231,24 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
 	}
 
+	if deal.Preimage == "" {
+		return nil, fmt.Errorf("%w: cannot approve a deal without an escrow preimage", ErrInvalidInput)
+	}
+
+	if _, err := s.lnbits.SettleHold(ctx, deal.Preimage); err != nil {
+		// A previous approve may already have settled this hold (for
+		// example if we crashed between settle and the DB update). Confirm
+		// with LNbits that the funds really are settled before paying out.
+		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+		if checkErr != nil || payment.Details.Status != "SETTLED" {
+			return nil, fmt.Errorf("settling escrow for deal %s: %w", dealID, err)
+		}
+	}
+
+	if err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice); err != nil {
+		return nil, fmt.Errorf("paying freelancer for deal %s: %w", dealID, err)
+	}
+
 	if err := s.repo.UpdateStatus(ctx, dealID, StatusReleased); err != nil {
 		return nil, fmt.Errorf("releasing escrow for deal %s: %w", dealID, err)
 	}
@@ -227,7 +257,16 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 	return deal, nil
 }
 
-// DisputeDeal raises a dispute. Only the client can dispute.
+// DisputeDeal cancels the hold on the network (refunding the client) and
+// records the deal as refunded. Only the client can dispute.
+//
+// Cancelling a hold nobody ever funded succeeds trivially — if the client
+// disputes before paying, or the hold already expired/cancelled, there is
+// nothing held to return. But if LNbits still holds the funds and the cancel
+// fails, we refuse to mark the deal refunded: the escrow stays committed.
+// A hold that was already settled can no longer be cancelled (the sats are
+// in the wallet) and requires admin handling, so DisputeDeal refuses rather
+// than lying about the escrow.
 func (s *Service) DisputeDeal(ctx context.Context, email, dealID string) (*Deal, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
@@ -242,15 +281,35 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID string) (*Deal,
 		return nil, ErrForbidden
 	}
 
-	if !CanTransition(deal.Status, StatusDisputed) {
-		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusDisputed)
+	if !CanTransition(deal.Status, StatusRefunded) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusRefunded)
 	}
 
-	if err := s.repo.UpdateStatus(ctx, dealID, StatusDisputed); err != nil {
-		return nil, fmt.Errorf("disputing deal %s: %w", dealID, err)
+	if deal.PreimageHash == "" {
+		return nil, fmt.Errorf("%w: cannot dispute a deal without a payment hash", ErrInvalidInput)
 	}
 
-	deal.Status = StatusDisputed
+	if _, err := s.lnbits.CancelHold(ctx, deal.PreimageHash); err != nil {
+		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+		if checkErr != nil {
+			return nil, fmt.Errorf("cancelling escrow for deal %s (status check failed): %w", dealID, err)
+		}
+
+		switch payment.Details.Status {
+		case "SETTLED":
+			return nil, fmt.Errorf("%w: escrow already settled, refund must be handled by an operator", ErrInvalidTransition)
+		case "UNPAID", "EXPIRED", "CANCELLED":
+			// Nothing held — the refund already happened trivially.
+		default:
+			return nil, fmt.Errorf("cancelling escrow for deal %s: %w", dealID, err)
+		}
+	}
+
+	if err := s.repo.UpdateStatus(ctx, dealID, StatusRefunded); err != nil {
+		return nil, fmt.Errorf("refunding deal %s: %w", dealID, err)
+	}
+
+	deal.Status = StatusRefunded
 	return deal, nil
 }
 

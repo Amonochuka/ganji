@@ -168,25 +168,37 @@ func (c *Client) CreateHoldInvoice(ctx context.Context, req CreateHoldInvoiceReq
 }
 
 // SettleHold completes a held payment by revealing the preimage. Requires
-// the wallet admin key — this is the network-level release of escrow.
-func (c *Client) SettleHold(ctx context.Context, preimage string) error {
+// the wallet admin key — this is the network-level release of escrow. LNbits
+// answers with `ok:false` + an error_message for refused settles (e.g.
+// "payment already settled"); we surface that as an error so callers never
+// mistake a refused settle for a successful one.
+func (c *Client) SettleHold(ctx context.Context, preimage string) (*SimpleInvoiceResponse, error) {
+	var out SimpleInvoiceResponse
 	if err := c.postJSON(ctx, "/api/v1/payments/settle", c.adminKey, SettleHoldRequest{
 		Preimage: preimage,
-	}, nil); err != nil {
-		return fmt.Errorf("settle hold invoice: %w", err)
+	}, &out); err != nil {
+		return &out, err
 	}
-	return nil
+	if !out.OK {
+		return &out, fmt.Errorf("lnbits refused to settle: %s", out.ErrorMessage)
+	}
+	return &out, nil
 }
 
 // CancelHold tears down a held payment, returning the sats to the payer.
-// Requires the wallet admin key — this is the network-level refund.
-func (c *Client) CancelHold(ctx context.Context, paymentHash string) error {
+// Requires the wallet admin key — this is the network-level refund. A
+// cancelled/unknown invoice is reported via `ok:false`.
+func (c *Client) CancelHold(ctx context.Context, paymentHash string) (*SimpleInvoiceResponse, error) {
+	var out SimpleInvoiceResponse
 	if err := c.postJSON(ctx, "/api/v1/payments/cancel", c.adminKey, CancelHoldRequest{
 		PaymentHash: paymentHash,
-	}, nil); err != nil {
-		return fmt.Errorf("cancel hold invoice: %w", err)
+	}, &out); err != nil {
+		return &out, err
 	}
-	return nil
+	if !out.OK {
+		return &out, fmt.Errorf("lnbits refused to cancel: %s", out.ErrorMessage)
+	}
+	return &out, nil
 }
 
 // PayInvoice instructs LNbits to pay an outgoing invoice (out: true) from

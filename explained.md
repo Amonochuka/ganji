@@ -287,7 +287,31 @@ successful settle, which cannot happen if the client never funded the hold).
     stays `awaiting_payment` while held (LND case); a locked deal is never
     rolled back.
 - [ ] Approve = settle + payout; Dispute = cancel → refunded.
-- [ ] More tests + docs.
+- [x] **Approve = settle + payout; Dispute = cancel → refunded**
+  (`deals/service.go`, `lnbits/client.go`):
+  - `ApproveDeal` now moves money on the network, in two deliberate legs:
+    1. `SettleHold(preimage)` reveals the stored preimage, completing the
+       held payment into Ganji's LNbits wallet;
+    2. `PayInvoice(payee_invoice)` forwards the sats to the freelancer.
+    Payout is only attempted after LNbits confirms the escrow is actually
+    settled. Approval is idempotent: if the hold is already settled (e.g. a
+    retry after a crash between the legs), LNbits still reports `SETTLED`
+    and we move straight to the payout.
+  - `DisputeDeal` cancels the hold (`CancelHold(payment_hash)`) and records
+    the deal as **`refunded`**. Cancelling a hold that was never funded
+    (UNPAID/EXPIRED/CANCELLED) succeeds trivially and is still recorded as
+    refunded. If the cancel fails while funds are still held, or the escrow
+    is already settled, the deal is NOT marked refunded — the money is
+    committed and needs operator handling.
+  - `SettleHold`/`CancelHold` now decode LNbits's `ok:false` responses into
+    errors (LNbits answers 200 with `ok:false` for refusals like "already
+    settled" / "not held") so a refused settle can never be mistaken for a
+    successful one that releases money.
+  - Tests: settle+payout happy path, approve straight from submission,
+    idempotent already-settled retry, refused-payout-unless-settled,
+    dispute-cancel→refunded, dispute refuses while held / already settled,
+    and refund of an unfunded hold.
+- [ ] Docs sync (README / API_REFERENCE) + `.env` gets `LNBITS_ADMIN_KEY`.
 
 ## 5. Client Role & Submit / Approve / Dispute Flow
 
