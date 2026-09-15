@@ -1,12 +1,5 @@
 package lnbits
 
-type CreateInvoiceRequest struct {
-	Out     bool   `json:"out"`
-	Amount  int64  `json:"amount"`
-	Memo    string `json:"memo"`
-	Webhook string `json:"webhook,omitempty"`
-}
-
 // CreateHoldInvoiceRequest creates a hold (HODL) invoice on LNbits. The
 // payment hash is derived from the preimage Ganji generates, so LNbits
 // locks the incoming payment to exactly that hash. The funds sit held on
