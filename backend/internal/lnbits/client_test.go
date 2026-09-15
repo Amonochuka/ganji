@@ -79,6 +79,50 @@ func TestCreateHoldInvoice(t *testing.T) {
 	}
 }
 
+func TestCreateHoldInvoiceUsesConfiguredExpiry(t *testing.T) {
+	var expiry int64
+	var requests []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if req["unit"] != "sat" {
+			t.Errorf("expected default unit sat, got %v", req["unit"])
+		}
+		expiry = int64(req["expiry"].(float64))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"checking_id":"c1","payment_hash":"ph1","payment_request":"lnbc1"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		URL:           server.URL,
+		APIKey:        "invoice-key",
+		HoldExpirySec: 2_592_000,
+	})
+
+	if _, err := client.CreateHoldInvoice(context.Background(), CreateHoldInvoiceRequest{
+		Out:         false,
+		Amount:      5000,
+		PaymentHash: "aa",
+		Memo:        "Build a site",
+	}); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if expiry != 2_592_000 {
+		t.Errorf("expected configured 30-day expiry, got %d", expiry)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("expected exactly one request, got %v", requests)
+	}
+}
+
 func TestCreateHoldInvoiceError(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
