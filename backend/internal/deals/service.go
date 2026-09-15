@@ -144,10 +144,15 @@ func (s *Service) UpdateStatus(ctx context.Context, userID, dealID string, newSt
 		return ErrForbidden
 	}
 
-	// Releasing and disputing are client actions (ApproveDeal / DisputeDeal).
-	// The freelancer's generic status endpoint must not be able to reach them.
-	if newStatus == StatusReleased || newStatus == StatusDisputed {
-		return fmt.Errorf("%w: released and disputed must go through approve/dispute", ErrInvalidTransition)
+	// locked, released, disputed and refunded are money moves that must be
+	// driven by the backend — payment detection (webhook/poll), ApproveDeal,
+	// or DisputeDeal — never by the freelancer's generic status endpoint.
+	// Under the hold-invoice escrow, a freelancer self-marking a deal
+	// "locked" (or worse "refunded") would be able to fake that escrow
+	// funds are committed.
+	switch newStatus {
+	case StatusLocked, StatusReleased, StatusDisputed, StatusRefunded:
+		return fmt.Errorf("%w: %s is a backend-only money transition (payment detection, approve, dispute)", ErrInvalidTransition, newStatus)
 	}
 
 	if !CanTransition(deal.Status, newStatus) {
@@ -249,10 +254,17 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID string) (*Deal,
 	return deal, nil
 }
 
-// CheckPayment queries LNbits for the payment status of a deal's invoice.
-// If the payment has been received, the deal transitions from
-// awaiting_payment to locked. The caller should never be trusted to
-// set the status directly — the backend determines it from LNbits.
+// CheckPayment queries LNbits for the payment status of a deal's hold
+// invoice. If the payment is confirmed paid (held on the network under the
+// payment hash), the deal transitions from awaiting_payment to locked. The
+// caller should never be trusted to set the status directly — the backend
+// determines it from LNbits.
+//
+// Backend autodetection: on CLN-backed LNbits a held invoice already
+// reports paid=true, so this locks as soon as the client pays. On
+// LND-backed LNbits a held invoice stays unpaid (paid=false) until it is
+// settled, so the deal remains awaiting_payment and only moves on approve —
+// the settle itself then atomically proves the funds were held.
 func (s *Service) CheckPayment(ctx context.Context, userID, dealID string) (*Deal, error) {
 	deal, err := s.repo.GetDealByID(ctx, dealID)
 	if err != nil {

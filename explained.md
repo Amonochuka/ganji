@@ -270,7 +270,22 @@ successful settle, which cannot happen if the client never funded the hold).
     `payment_hash`, the stored hex preimage matches, and the deal is saved as
     `awaiting_payment`. (Unit tests get a working transaction via a small
     no-op `database/sql` driver so `BeginTx/Commit` flow works without a DB.)
-- [ ] Lock detection + transition changes.
+- [x] **Lock detection (webhook + poll gate on `paid`)** (`deals/service.go`,
+  `webhook/service.go`):
+  - `CheckPayment` and the LNbits webhook were already gated on LNbits
+    reporting `paid=true`. With hold invoices that now means: **CLN-backed
+    LNbits** → a held payment already reports `paid=true` and the deal locks
+    immediately on client payment; **LND-backed LNbits** → held stays
+    `paid=false`, no webhook fires, the deal remains `awaiting_payment` and
+    only moves on approve (settle proves the funds were held). No backend
+    flags/hacks needed — the backend is autodetected.
+  - The generic freelancer `PATCH /deals/:id/status` endpoint now refuses all
+    **money states** (`locked`, `released`, `disputed`, `refunded`): those
+    can only be set by the backend (payment detection, approve, dispute).
+    A freelancer can't fake that escrow is committed or refunded.
+  - New tests cover: block money states; `CheckPayment` locks when paid;
+    stays `awaiting_payment` while held (LND case); a locked deal is never
+    rolled back.
 - [ ] Approve = settle + payout; Dispute = cancel → refunded.
 - [ ] More tests + docs.
 

@@ -422,9 +422,93 @@ func TestUpdateStatusBlocksClientOnlyTransitions(t *testing.T) {
 
 	service := newTestService(repo)
 
-	for _, status := range []Status{StatusReleased, StatusDisputed} {
+	for _, status := range []Status{StatusLocked, StatusReleased, StatusDisputed, StatusRefunded} {
 		if err := service.UpdateStatus(context.Background(), "freelancer-1", deal.ID, status); !errors.Is(err, ErrInvalidTransition) {
 			t.Fatalf("expected UpdateStatus(%s) to be blocked, got %v", status, err)
 		}
+	}
+}
+
+func TestCheckPaymentLocksWhenPaid(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Api-Key"); got != "invoice-key" {
+			t.Errorf("expected invoice key, got %q", got)
+		}
+		if r.URL.Path != "/api/v1/payments/checking-1" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":true}`))
+	}))
+	defer server.Close()
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}))
+
+	result, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if result.Status != StatusLocked {
+		t.Errorf("expected the deal to be locked, got %s", result.Status)
+	}
+	if repo.deals[deal.ID].Status != StatusLocked {
+		t.Errorf("expected repo status locked, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
+func TestCheckPaymentKeepsAwaitingPaymentWhileHeld(t *testing.T) {
+	// LND-backed LNbits does not report a held invoice as paid. The deal
+	// must stay awaiting_payment — it only moves on approve, because settle
+	// is what atomically proves the funds were held.
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer server.Close()
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}))
+
+	result, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if result.Status != StatusAwaitingPayment {
+		t.Errorf("expected deal to stay awaiting_payment while held, got %s", result.Status)
+	}
+}
+
+func TestCheckPaymentDoesNotRollBackLockedDeal(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusLocked
+	deal.CheckingID = "checking-1"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer server.Close()
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}))
+
+	result, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if result.Status != StatusLocked {
+		t.Errorf("expected deal to remain locked, got %s", result.Status)
 	}
 }
