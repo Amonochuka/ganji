@@ -190,10 +190,28 @@ func TestSubmitWorkRejectsNonOwner(t *testing.T) {
 	}
 }
 
-func TestSubmitWorkRejectsInvalidTransition(t *testing.T) {
+func TestSubmitWorkFromAwaitingPayment(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
+	repo.artifacts[deal.ID] = []Artifact{{ID: "artifact-1"}}
+
+	service := newTestService(repo)
+
+	updated, err := service.SubmitWork(context.Background(), "freelancer-1", deal.ID)
+	if err != nil {
+		t.Fatalf("expected submit to be allowed from awaiting_payment, got %v", err)
+	}
+
+	if updated.Status != StatusWorkSubmitted {
+		t.Fatalf("expected status work_submitted, got %s", updated.Status)
+	}
+}
+
+func TestSubmitWorkRejectsInvalidTransition(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReleased
 	repo.artifacts[deal.ID] = []Artifact{{ID: "artifact-1"}}
 
 	service := newTestService(repo)

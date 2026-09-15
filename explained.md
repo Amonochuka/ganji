@@ -236,7 +236,21 @@ successful settle, which cannot happen if the client never funded the hold).
   - `PayInvoice(bolt11)` — POST `/api/v1/payments` `out:true` (payout leg).
   - `postJSON` helper for the new POST methods.
   - Tests cover happy path, key selection (invoice vs admin), and error bodies.
-- [ ] Deal model + migration (preimage storage, payee_invoice, `refunded`).
+- [x] **Deal model + migration** (`migrations/000008*`, `deals/types.go`,
+  `deals/repository.go`):
+  - `deals.preimage TEXT` — raw hex preimage Ganji generated, needed on LNbits
+    to settle later. `deals.payee_invoice TEXT` — freelancer's Lightning
+    destination for the payout leg.
+  - Status enum + DB CHECK gain **`refunded`** (terminal): dispute cancels the
+    hold on the network and refunds the client.
+  - `ValidTransitions` updated for the LND case: `awaiting_payment →
+    work_submitted` allowed (see the autodetect decision above); `refunded`
+    reachable from `awaiting_payment`, `locked`, `work_submitted`, `reviewing`,
+    `disputed`.
+  - `Deal` gains `Preimage` and `PayeeInvoice` (JSON `omitempty` so the secret
+    never leaks in API responses by default).
+  - Repository inserts/scans all new columns via one shared `dealColumns` +
+    `scanDeal` helper.
 - [ ] `CreateDeal` → hold invoice.
 - [ ] Lock detection + transition changes.
 - [ ] Approve = settle + payout; Dispute = cancel → refunded.

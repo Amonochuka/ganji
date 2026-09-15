@@ -34,12 +34,14 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 			amount_sats,
 			source_platform,
 			preimage_hash,
+			preimage,
+			payee_invoice,
 			invoice,
 			checking_id,
 			status
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 		)
 		RETURNING id, created_at;
 	`
@@ -53,6 +55,8 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		deal.AmountSats,
 		deal.SourcePlatform,
 		deal.PreimageHash,
+		nullString(deal.Preimage),
+		nullString(deal.PayeeInvoice),
 		deal.Invoice,
 		deal.CheckingID,
 		deal.Status,
@@ -65,26 +69,27 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 	return nil
 }
 
-func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) {
-	query := `
-		SELECT
-			id,
-			freelancer_id,
-			client_email,
-			title,
-			amount_sats,
-			source_platform,
-			preimage_hash,
-			invoice,
-			checking_id,
-			status,
-			created_at,
-			verified_at
-		FROM deals
-		WHERE id = $1;
+// dealColumns is the shared SELECT list for the deals table so the query
+// and scan lists stay in sync.
+const dealColumns = `
+		id,
+		freelancer_id,
+		client_email,
+		title,
+		amount_sats,
+		source_platform,
+		preimage_hash,
+		preimage,
+		payee_invoice,
+		invoice,
+		checking_id,
+		status,
+		created_at,
+		verified_at
 	`
+
+func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 	deal := &Deal{}
-	row := r.q.QueryRowContext(ctx, query, id)
 	if err := row.Scan(
 		&deal.ID,
 		&deal.FreelancerID,
@@ -93,12 +98,30 @@ func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) 
 		&deal.AmountSats,
 		&deal.SourcePlatform,
 		&deal.PreimageHash,
+		&deal.Preimage,
+		&deal.PayeeInvoice,
 		&deal.Invoice,
 		&deal.CheckingID,
 		&deal.Status,
 		&deal.CreatedAt,
 		&deal.VerifiedAt,
 	); err != nil {
+		return nil, err
+	}
+	return deal, nil
+}
+
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) {
+	query := "SELECT" + dealColumns + "FROM deals WHERE id = $1;"
+	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, id))
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrDealNotFound
 		}
@@ -108,39 +131,9 @@ func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) 
 }
 
 func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string) (*Deal, error) {
-	query := `
-		SELECT
-			id,
-			freelancer_id,
-			client_email,
-			title,
-			amount_sats,
-			source_platform,
-			preimage_hash,
-			invoice,
-			checking_id,
-			status,
-			created_at,
-			verified_at
-		FROM deals
-		WHERE checking_id = $1;
-	`
-	deal := &Deal{}
-	row := r.q.QueryRowContext(ctx, query, checkingID)
-	if err := row.Scan(
-		&deal.ID,
-		&deal.FreelancerID,
-		&deal.ClientEmail,
-		&deal.Title,
-		&deal.AmountSats,
-		&deal.SourcePlatform,
-		&deal.PreimageHash,
-		&deal.Invoice,
-		&deal.CheckingID,
-		&deal.Status,
-		&deal.CreatedAt,
-		&deal.VerifiedAt,
-	); err != nil {
+	query := "SELECT" + dealColumns + "FROM deals WHERE checking_id = $1;"
+	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, checkingID))
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrDealNotFound
 		}
@@ -150,20 +143,7 @@ func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string)
 }
 
 func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error) {
-	query := `
-		SELECT
-			id,
-			freelancer_id,
-			client_email,
-			title,
-			amount_sats,
-			source_platform,
-			preimage_hash,
-			invoice,
-			checking_id,
-			status,
-			created_at,
-			verified_at
+	query := "SELECT" + dealColumns + `
 		FROM deals
 		WHERE freelancer_id = $1
 		ORDER BY created_at DESC;
@@ -176,24 +156,11 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 	defer rows.Close()
 	var deals []Deal
 	for rows.Next() {
-		var deal Deal
-		if err := rows.Scan(
-			&deal.ID,
-			&deal.FreelancerID,
-			&deal.ClientEmail,
-			&deal.Title,
-			&deal.AmountSats,
-			&deal.SourcePlatform,
-			&deal.PreimageHash,
-			&deal.Invoice,
-			&deal.CheckingID,
-			&deal.Status,
-			&deal.CreatedAt,
-			&deal.VerifiedAt,
-		); err != nil {
+		deal, err := scanDeal(rows)
+		if err != nil {
 			return nil, fmt.Errorf("repository: scan deal: %w", err)
 		}
-		deals = append(deals, deal)
+		deals = append(deals, *deal)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("repository: iterate deals: %w", err)
@@ -205,20 +172,7 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 // client (matched by email). This is what the client needs to see the deals
 // they are asked to review and approve.
 func (r *Repository) ListForUser(ctx context.Context, userID, email string) ([]Deal, error) {
-	query := `
-		SELECT
-			id,
-			freelancer_id,
-			client_email,
-			title,
-			amount_sats,
-			source_platform,
-			preimage_hash,
-			invoice,
-			checking_id,
-			status,
-			created_at,
-			verified_at
+	query := "SELECT" + dealColumns + `
 		FROM deals
 		WHERE freelancer_id = $1 OR client_email = $2
 		ORDER BY created_at DESC;
@@ -231,24 +185,11 @@ func (r *Repository) ListForUser(ctx context.Context, userID, email string) ([]D
 	defer rows.Close()
 	var deals []Deal
 	for rows.Next() {
-		var deal Deal
-		if err := rows.Scan(
-			&deal.ID,
-			&deal.FreelancerID,
-			&deal.ClientEmail,
-			&deal.Title,
-			&deal.AmountSats,
-			&deal.SourcePlatform,
-			&deal.PreimageHash,
-			&deal.Invoice,
-			&deal.CheckingID,
-			&deal.Status,
-			&deal.CreatedAt,
-			&deal.VerifiedAt,
-		); err != nil {
+		deal, err := scanDeal(rows)
+		if err != nil {
 			return nil, fmt.Errorf("repository: scan deal: %w", err)
 		}
-		deals = append(deals, deal)
+		deals = append(deals, *deal)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("repository: iterate deals: %w", err)

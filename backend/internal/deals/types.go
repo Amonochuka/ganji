@@ -19,13 +19,17 @@ const (
 	StatusReviewing       Status = "reviewing"
 	StatusReleased        Status = "released"
 	StatusDisputed        Status = "disputed"
+	StatusRefunded        Status = "refunded"
 )
 
 // Deal mirrors the deals table. A deal is created before its Lightning
-// invoice exists — CheckingID starts NULL and gets filled in by
+// hold invoice exists — CheckingID starts NULL and gets filled in by
 // creation durable even if LNbits is briefly unavailable. Artifacts
 // (source code, sandboxes, previews) live in their own table — a Deal
-// only describes the transaction itself.
+// only describes the transaction itself. Preimage holds the raw hex
+// preimage (needed to settle the hold); PreimageHash is sha256(preimage)
+// for verification and CV anchoring. PayeeInvoice is the freelancer's
+// Lightning destination for the payout leg.
 type Deal struct {
 	ID             string       `json:"id"`
 	FreelancerID   string       `json:"freelancer_id"`
@@ -34,6 +38,8 @@ type Deal struct {
 	AmountSats     int64        `json:"amount_sats"`
 	SourcePlatform string       `json:"source_platform"`
 	PreimageHash   string       `json:"preimage_hash"`
+	Preimage       string       `json:"preimage,omitempty"`
+	PayeeInvoice   string       `json:"payee_invoice,omitempty"`
 	Invoice        string       `json:"invoice"`
 	CheckingID     string       `json:"checking_id"`
 	Status         Status       `json:"status"`
@@ -45,16 +51,25 @@ type Deal struct {
 // the enforcement point for the dispute flow design from Section 3.3 —
 // nothing can jump straight from awaiting_payment to released, for
 // example, and released is a terminal state with no transitions out.
+//
+// Network-as-escrow notes:
+//   - awaiting_payment -> work_submitted is allowed so LND-backed hold
+//     invoices (which never report "paid" while held) cannot deadlock:
+//     the freelancer submits, the client approves, and settle atomically
+//     proves the funds were held all along.
+//   - refunded is terminal: dispute cancels the hold on the network and
+//     the sats return to the client.
 var ValidTransitions = map[Status][]Status{
-	StatusAwaitingPayment: {StatusLocked},
-	StatusLocked:          {StatusWorkSubmitted},
-	// work_submitted -> released/disputed is allowed because the client can
-	// approve or dispute immediately on submission; reviewing is an optional
-	// formal phase (reachable via PATCH /status) before approve/dispute.
-	StatusWorkSubmitted: {StatusReviewing, StatusReleased, StatusDisputed},
-	StatusReviewing:     {StatusReleased, StatusDisputed},
-	StatusDisputed:      {StatusReleased},
+	StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusRefunded},
+	StatusLocked:          {StatusWorkSubmitted, StatusRefunded},
+	// work_submitted -> released/disputed/refunded is allowed because the
+	// client can approve, dispute, or cancel immediately on submission;
+	// reviewing is an optional formal phase before approve/dispute.
+	StatusWorkSubmitted: {StatusReviewing, StatusReleased, StatusDisputed, StatusRefunded},
+	StatusReviewing:     {StatusReleased, StatusDisputed, StatusRefunded},
+	StatusDisputed:      {StatusReleased, StatusRefunded},
 	StatusReleased:      {}, // terminal — no transitions out
+	StatusRefunded:      {}, // terminal — no transitions out
 }
 
 // CanTransition checks whether moving from one status to another is a
