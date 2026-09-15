@@ -10,10 +10,11 @@ import (
 )
 
 type Config struct {
-	URL        string
-	APIKey     string
-	AdminKey   string
-	WebhookURL string
+	URL           string
+	APIKey        string
+	AdminKey      string
+	WebhookURL    string
+	HoldExpirySec int64 // default expiry for hold invoices (0 = LNbits default)
 }
 
 type Client struct {
@@ -21,6 +22,7 @@ type Client struct {
 	apiKey     string
 	webhookURL string
 	adminKey   string
+	holdExpiry int64
 	http       *http.Client
 }
 
@@ -30,6 +32,7 @@ func NewClient(cfg Config) *Client {
 		apiKey:     cfg.APIKey,
 		webhookURL: cfg.WebhookURL,
 		adminKey:   cfg.AdminKey,
+		holdExpiry: cfg.HoldExpirySec,
 		http:       &http.Client{},
 	}
 }
@@ -147,6 +150,9 @@ func (c *Client) CreateHoldInvoice(ctx context.Context, req CreateHoldInvoiceReq
 	}
 	if req.Unit == "" {
 		req.Unit = "sat"
+	}
+	if req.Expiry == 0 {
+		req.Expiry = c.holdExpiry
 	}
 
 	var resp CreateInvoiceResponse

@@ -26,6 +26,7 @@ type createDealRequest struct {
 	AmountSats     int64  `json:"amount_sats" binding:"required"`
 	SourcePlatform string `json:"source_platform" binding:"required"`
 	ClientEmail    string `json:"client_email" binding:"required"`
+	PayeeInvoice   string `json:"payee_invoice" binding:"required"`
 }
 
 func (h *Handler) CreateDeal(c *gin.Context) {
@@ -46,6 +47,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 		Title:          req.Title,
 		AmountSats:     req.AmountSats,
 		SourcePlatform: req.SourcePlatform,
+		PayeeInvoice:   req.PayeeInvoice,
 	}
 
 	if err := h.service.CreateDeal(c.Request.Context(), deal); err != nil {

@@ -27,6 +27,7 @@ func NewService(repo DealRepository, lnbits *lnbits.Client) *Service {
 func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	deal.Title = strings.TrimSpace(deal.Title)
 	deal.SourcePlatform = strings.TrimSpace(deal.SourcePlatform)
+	deal.PayeeInvoice = strings.TrimSpace(deal.PayeeInvoice)
 
 	if deal.FreelancerID == "" {
 		return fmt.Errorf("%w: freelancer id is required", ErrInvalidInput)
@@ -49,30 +50,40 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 		return fmt.Errorf("%w: source platform is required", ErrInvalidInput)
 	}
 
+	if deal.PayeeInvoice == "" {
+		return fmt.Errorf("%w: payee invoice is required", ErrInvalidInput)
+	}
+
 	if deal.Status == "" {
 		deal.Status = StatusAwaitingPayment
 	}
 
+	// Generate the preimage that controls the escrow. LNbits holds the
+	// payment against sha256(preimage); only a successful settle (reveal)
+	// releases it to the freelancer, and only a cancel returns it to the
+	// client. We keep the raw preimage in the DB because LNbits's settle
+	// endpoint takes the preimage body.
 	preimage := make([]byte, 32)
 	if _, err := rand.Read(preimage); err != nil {
-		return fmt.Errorf("generating preimage hash: %w", err)
+		return fmt.Errorf("generating escrow preimage: %w", err)
 	}
 
 	hash := sha256.Sum256(preimage)
+	deal.Preimage = hex.EncodeToString(preimage[:])
 	deal.PreimageHash = hex.EncodeToString(hash[:])
 
-	invoice, err := s.lnbits.CreateInvoice(ctx, lnbits.CreateInvoiceRequest{
-		Out:    false,
-		Amount: deal.AmountSats,
-		Memo:   deal.Title,
+	hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
+		Out:         false,
+		Amount:      deal.AmountSats,
+		Memo:        deal.Title,
+		PaymentHash: deal.PreimageHash,
 	})
-
 	if err != nil {
-		return fmt.Errorf("creating LNBits invoice: %w", err)
+		return fmt.Errorf("creating LNBits hold invoice: %w", err)
 	}
 
-	deal.Invoice = invoice.PaymentRequest
-	deal.CheckingID = invoice.CheckingID
+	deal.Invoice = hold.PaymentRequest
+	deal.CheckingID = hold.CheckingID
 
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {

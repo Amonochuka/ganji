@@ -251,7 +251,25 @@ successful settle, which cannot happen if the client never funded the hold).
     never leaks in API responses by default).
   - Repository inserts/scans all new columns via one shared `dealColumns` +
     `scanDeal` helper.
-- [ ] `CreateDeal` → hold invoice.
+- [x] **`CreateDeal` → hold invoice** (`deals/service.go`, `handler.go`,
+  `lnbits/client.go`, `config.go`):
+  - `deals.CreateDeal` now requires `PayeeInvoice` (freelancer's payout
+    destination) and no longer uses the custodial `CreateInvoice` path. It
+    generates a fresh 32-byte **preimage** per deal, hashes it with sha256,
+    and creates an LNBits hold invoice: `payment_hash = sha256(preimage)`,
+    `out=false`, amount = `deal.amount_sats`, memo = title.
+  - The raw preimage is stored (`deals.preimage`) because LNBits settles a
+    hold with the preimage in the request body; only a money path (approve)
+    or cancel (dispute) may later move the stuck funds.
+  - Hold invoices are created with a **long expiry**
+    (`LNBITS_HOLD_INVOICE_EXPIRY_SECONDS`, default 30 days) — LNBits' default
+    1h invoice lifetime is far too short for escrow deals.
+  - API: `POST /deals` now accepts `"payee_invoice"` (required).
+  - New test `TestCreateDealCreatesHoldInvoice` verifies against an
+    `httptest` LNBits server: `out=false`, correct amount/memo, a 64-hex
+    `payment_hash`, the stored hex preimage matches, and the deal is saved as
+    `awaiting_payment`. (Unit tests get a working transaction via a small
+    no-op `database/sql` driver so `BeginTx/Commit` flow works without a DB.)
 - [ ] Lock detection + transition changes.
 - [ ] Approve = settle + payout; Dispute = cancel → refunded.
 - [ ] More tests + docs.

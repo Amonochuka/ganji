@@ -3,11 +3,40 @@ package deals
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
+
+// noopConnector hands back a real *sql.DB whose transactions commit/rollback
+// as no-ops. The fake repo doesn't execute SQL, so this is only needed so
+// Service.CreateDeal's BeginTx/Commit/Rollback flow works in unit tests.
+type noopConnector struct{}
+
+func (noopConnector) Connect(context.Context) (driver.Conn, error) { return noopConn{}, nil }
+func (noopConnector) Driver() driver.Driver                        { return noopDriver{} }
+
+type noopDriver struct{}
+
+func (noopDriver) Open(string) (driver.Conn, error) { return noopConn{}, nil }
+
+type noopConn struct{}
+
+func (noopConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("no statements in the no-op driver")
+}
+func (noopConn) Close() error              { return nil }
+func (noopConn) Begin() (driver.Tx, error) { return noopTx{}, nil }
+
+type noopTx struct{}
+
+func (noopTx) Commit() error   { return nil }
+func (noopTx) Rollback() error { return nil }
 
 // fakeDealRepo is a minimal in-memory DealRepository for service tests.
 type fakeDealRepo struct {
@@ -126,7 +155,8 @@ func (f *fakeDealRepo) ListVerificationsByArtifact(ctx context.Context, artifact
 }
 
 func (f *fakeDealRepo) BeginTx(ctx context.Context) (*sql.Tx, error) {
-	return nil, errors.New("not supported in tests")
+	db := sql.OpenDB(noopConnector{})
+	return db.BeginTx(ctx, nil)
 }
 
 func (f *fakeDealRepo) WithTx(tx *sql.Tx) DealRepository {
@@ -135,6 +165,79 @@ func (f *fakeDealRepo) WithTx(tx *sql.Tx) DealRepository {
 
 func newTestService(repo DealRepository) *Service {
 	return NewService(repo, &lnbits.Client{})
+}
+
+func TestCreateDealCreatesHoldInvoice(t *testing.T) {
+	var received struct {
+		paymentHash string
+		amount      int64
+		memo        string
+		out         bool
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode lnbits request: %v", err)
+		}
+		received.out = body["out"].(bool)
+		received.amount = int64(body["amount"].(float64))
+		received.memo = body["memo"].(string)
+		received.paymentHash = body["payment_hash"].(string)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"checking_id":"chk-1","payment_hash":"` + received.paymentHash + `","payment_request":"lnbc1"}`))
+	}))
+	defer server.Close()
+
+	client := lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"})
+
+	repo := newFakeDealRepo()
+	service := NewService(repo, client)
+
+	deal := &Deal{
+		FreelancerID:   "freelancer-1",
+		ClientEmail:    "client@example.com",
+		Title:          "Build a site",
+		AmountSats:     5000,
+		SourcePlatform: "telegram",
+		PayeeInvoice:   "lnbc5000n1...",
+	}
+
+	if err := service.CreateDeal(context.Background(), deal); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if received.out {
+		t.Error("expected LNbits request to be an incoming invoice (out=false)")
+	}
+	if received.amount != 5000 {
+		t.Errorf("expected amount 5000, got %d", received.amount)
+	}
+	if received.memo != "Build a site" {
+		t.Errorf("expected memo to be the deal title, got %q", received.memo)
+	}
+	if len(received.paymentHash) != 64 {
+		t.Fatalf("expected 64-char payment hash, got %q", received.paymentHash)
+	}
+
+	if len(deal.Preimage) != 64 {
+		t.Fatalf("expected 64-char hex preimage stored, got %q", deal.Preimage)
+	}
+	if received.paymentHash != deal.PreimageHash {
+		t.Errorf("LNbits was given %s but deal hash is %s", received.paymentHash, deal.PreimageHash)
+	}
+	if deal.CheckingID != "chk-1" || deal.Invoice != "lnbc1" {
+		t.Errorf("unexpected invoice details: %+v", deal)
+	}
+
+	stored, ok := repo.deals[deal.ID]
+	if !ok {
+		t.Fatal("expected the deal to be saved in the repo")
+	}
+	if stored.Status != StatusAwaitingPayment {
+		t.Errorf("expected awaiting_payment, got %s", stored.Status)
+	}
 }
 
 func lockedDeal(repo *fakeDealRepo, id, freelancerID, clientEmail string) *Deal {

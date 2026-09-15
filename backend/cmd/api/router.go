@@ -41,10 +41,11 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) *gin.Engine {
 	dealRepo := deals.NewRepository(dbConn)
 	lnbitsClient := lnbits.NewClient(
 		lnbits.Config{
-			URL:        cfg.LNBitsURL,
-			APIKey:     cfg.LNBitsAPIKey,
-			AdminKey:   cfg.LNBitsAdminKey,
-			WebhookURL: cfg.WebhookURL,
+			URL:           cfg.LNBitsURL,
+			APIKey:        cfg.LNBitsAPIKey,
+			AdminKey:      cfg.LNBitsAdminKey,
+			WebhookURL:    cfg.WebhookURL,
+			HoldExpirySec: cfg.HoldInvoiceExpirySeconds,
 		},
 	)
 
