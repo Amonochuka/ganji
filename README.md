@@ -2,7 +2,7 @@
 
 Bitcoin Lightning escrow + an unfakeable, cryptographically anchored freelancer reputation layer.
 
-Ganji ("money" in Sheng) lets a freelancer and a client transact safely over any channel — WhatsApp, Telegram, X, LinkedIn DM — with no platform lock-in and no bank account required. Funds are held in a Lightning invoice until the client reviews the delivered work in a sandboxed preview and approves release. Every completed deal becomes a permanent, hash-verified entry on the freelancer's public **Live CV**.
+Ganji ("money" in Sheng) lets a freelancer and a client transact safely over any channel — WhatsApp, Telegram, X, LinkedIn DM — with no platform lock-in and no bank account required. Escrow is drawn directly on Lightning: Ganji creates a `hold invoice` the client pays into, funds stay held on the network, and only the client's approval settles + forwards them to the freelancer. Every completed deal becomes a permanent, hash-verified entry on the freelancer's public **Live CV**.
 
 Full product spec lives in [`docs/Ganji-Build-Documentation.docx`](./docs/Ganji-Build-Documentation.docx). Team workflow and build order live in [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md).
 
@@ -48,9 +48,9 @@ Frontend runs on `http://localhost:3000`.
 
 ### Required environment variables
 
-See Section 11 of the build documentation for the full list. At minimum, backend needs `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `LNBITS_URL`, `LNBITS_API_KEY`. Frontend needs `NEXT_PUBLIC_API_URL` pointed at the running backend.
+See Section 11 of the build documentation for the full list. At minimum, backend needs `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `LNBITS_URL`, `LNBITS_API_KEY`, and `LNBITS_ADMIN_KEY`. `LNBITS_ADMIN_KEY` is the router's **admin** key — it is required for the escrow money moves (settle/cancel/payout); the invoice key alone can only create the hold invoice. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (default 30 days) must comfortably exceed a deal's lifetime. Frontend needs `NEXT_PUBLIC_API_URL` pointed at the running backend.
 
-For Lightning testing, run LNbits against a Bitcoin Core regtest node — do not point dev environments at mainnet.
+For Lightning testing, run LNbits against a Bitcoin Core regtest node — do not point dev environments at mainnet. Any hold invoice drawn to a given wallet belongs to that wallet's pool, so use the dedicated Ganji wallet/keys and never paste an admin key somewhere public.
 
 ---
 

@@ -128,16 +128,21 @@ All deal endpoints require `Authorization: Bearer <access_token>`.
 
 ### `POST /deals`
 
-Create a new deal. Generates a preimage hash, creates a LNbits invoice, and stores the deal.
+Create a new deal. Generates a fresh escrow preimage, draws a **hold invoice** on LNbits (`payment_hash = sha256(preimage)`), and stores the deal. No money moves on creation — the funds stay held on the network until approve/dispute.
 
 **Request**
 ```json
 {
   "title": "Landing page redesign",
   "amount_sats": 50000,
-  "source_platform": "Telegram"
+  "source_platform": "Telegram",
+  "client_email": "client@example.com",
+  "payee_invoice": "lnbc50000n1..."
 }
 ```
+
+- `client_email` — the client's email (who gets to approve/dispute).
+- `payee_invoice` — the freelancer's Lightning invoice; it's where the settled escrow is forwarded on approve.
 
 **Response `201`**
 ```json
@@ -145,6 +150,7 @@ Create a new deal. Generates a preimage hash, creates a LNbits invoice, and stor
   "deal": {
     "id": "uuid",
     "freelancer_id": "uuid",
+    "client_email": "client@example.com",
     "title": "Landing page redesign",
     "amount_sats": 50000,
     "source_platform": "Telegram",
@@ -157,6 +163,8 @@ Create a new deal. Generates a preimage hash, creates a LNbits invoice, and stor
   }
 }
 ```
+
+The raw `preimage` (the network secret that can settle the escrow) and the freelancer's `payee_invoice` are stored server-side but intentionally **omitted** from API responses.
 
 ### `GET /deals`
 
@@ -182,7 +190,9 @@ Get a single deal. Ownership enforced.
 
 ### `GET /deals/:dealID/payment`
 
-Poll LNbits for payment status. If the invoice has been paid and the deal is still `awaiting_payment`, it transitions to `locked`.
+Poll LNbits for the hold invoice's status. If LNbits reports the payment `paid` and the deal is still `awaiting_payment`, it transitions to `locked`.
+
+Backend autodetect: on a CLN-backed LNbits a held invoice already reports `paid`, so this locks as soon as the client pays. On an LND-backed LNbits a held invoice stays `paid=false` until it's settled, so the deal stays `awaiting_payment` — approve then settles and proves the funds were held.
 
 **Response `200`**
 ```json
@@ -195,9 +205,50 @@ Poll LNbits for payment status. If the invoice has been paid and the deal is sti
 }
 ```
 
+### `POST /deals/:dealID/submit`
+
+Freelancer marks their work as delivered (requires at least one artifact). Legal from `locked` and from `awaiting_payment` — the latter keeps LND-flow deals from deadlocking before the client can approve.
+
+**Response `200`**
+```json
+{
+  "deal": { ... }
+}
+```
+
+### `POST /deals/:dealID/approve`
+
+Client approves → money moves on the network in two legs: `settle` the hold (reveal the stored preimage, funds land in the Ganji wallet) then `pay` the freelancer's `payee_invoice`. Idempotent: re-approving an already-settled deal pays out without double-settling. On success the deal is `released` and `verified_at` is stamped (Live CV entry).
+
+**Response `200`**
+```json
+{
+  "deal": {
+    "id": "uuid",
+    "status": "released",
+    ...
+  }
+}
+```
+
+### `POST /deals/:dealID/dispute`
+
+Client disputes → the hold is cancelled on the network (sats return to the client) and the deal is recorded **`refunded`** (terminal). Disputing before payment, or a hold that already expired/cancelled, still records the refunded state (nothing was held). If the cancel fails while funds are still held — or the escrow was already settled — the deal is **not** marked refunded and the money needs operator handling.
+
+**Response `200`**
+```json
+{
+  "deal": {
+    "id": "uuid",
+    "status": "refunded",
+    ...
+  }
+}
+```
+
 ### `PATCH /deals/:dealID/status`
 
-Transition deal status. Validates against the state machine.
+Transition deal status (freelancer). Validated against the state machine.
 
 **Request**
 ```json
@@ -213,15 +264,14 @@ Transition deal status. Validates against the state machine.
 }
 ```
 
-**Valid transitions:**
+**Valid transitions (freelancer-driven workflow only):**
 ```
-awaiting_payment → locked
+awaiting_payment → work_submitted
 locked → work_submitted
 work_submitted → reviewing
-reviewing → released | disputed
-disputed → released
-released → (terminal)
 ```
+
+The **money states** (\`locked\`, \`released\`, \`disputed\`, \`refunded\`) are backend-only: they are set by payment detection, approve, and dispute, never by this endpoint.
 
 ---
 
@@ -391,9 +441,6 @@ These are planned per the build spec but not yet implemented:
 | `GET` | `/cv/:slug` | Public freelancer Live CV page |
 | `GET` | `/cv/:slug/verify/:entryID` | Verify a CV entry's hash |
 | `WS` | `/ws/deals/:dealID` | Real-time deal state updates |
-| `POST` | `/deals/:dealID/submit` | Freelancer submits work (transitions to `work_submitted`) |
-| `POST` | `/deals/:dealID/approve` | Client approves release |
-| `POST` | `/deals/:dealID/dispute` | Client raises dispute |
 
 ---
 
@@ -419,36 +466,31 @@ All error responses follow this shape:
 
 ## State Machine
 
+Network-as-escrow flow (hold invoices). `awaiting_payment → work_submitted` is allowed so LND-backed LNbits (which never reports a held payment as paid) can't deadlock: the freelancer submits, the client approves, and the settle atomically proves the funds were held. `refunded` — reached by dispute cancelling the hold — is terminal, as is `released`.
+
 ```
-                  ┌──────────────────┐
-                  │ awaiting_payment │
-                  └────────┬─────────┘
-                           │ payment received (webhook or poll)
-                           ▼
-                  ┌────────────────┐
-                  │     locked     │
-                  └────────┬───────┘
-                           │ freelancer submits work
-                           ▼
-                  ┌──────────────────┐
-                  │  work_submitted  │
-                  └────────┬─────────┘
-                           │ client begins review
-                           ▼
-                  ┌────────────────┐
-                  │    reviewing    │
-                  └───┬────────┬───┘
-                      │        │
-               approve│        │dispute
-                      ▼        ▼
-            ┌──────────┐  ┌──────────┐
-            │ released │  │ disputed │
-            └──────────┘  └────┬─────┘
-                               │ arbiter resolves
-                               ▼
-                        ┌──────────┐
-                        │ released │
-                        └──────────┘
+                ┌──────────────────────────────┐
+                │  awaiting_payment            │  ← client pays hold invoice
+                └──┬───────────────────────────┘  (funds held on the network)
+        paid (CLN) │            │ freelancer submits
+                   ▼            ▼
+              ┌────────┐  ┌──────────────────┐
+              │ locked │  │  work_submitted  │
+              └───┬────┘  └───┬─────────┬────┘
+   freelancer     │           │ client  │ client disputes
+   submits        ▼           │ checks  ▼
+              ┌────────────────┐   approve │
+              │ work_submitted │◄─────────┘
+              └───┬────────┬───┘
+          dispute │        │ approve (settle hold → released)
+                  ▼        ▼
+             ┌────────┐┌──────────┐
+             │refunded││ released │   terminal ×2
+             └────────┘└──────────┘
+
+  * reviewing is an optional formal phase between submitted and approve.
+  * disputed is a reserved arbitration state (future); today DisputeDeal
+    goes straight to refunded via a network cancel.
 ```
 
-`released` is terminal — no transitions out.
+`released` and `refunded` are terminal — no transitions out.

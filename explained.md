@@ -176,7 +176,7 @@ invoice is paid; if `Paid` and status is `awaiting_payment`, updates to `locked`
 
 ---
 
-## 4b. Network-As-Escrow Migration (Hold Invoices) — IN PROGRESS
+## 4b. Network-As-Escrow Migration (Hold Invoices)
 
 **What we are replacing:** Section 4 above is the **custodial** design. Ganji
 generates a preimage but never uses it (LNbits mints its own), the client pays a
@@ -311,7 +311,19 @@ successful settle, which cannot happen if the client never funded the hold).
     idempotent already-settled retry, refused-payout-unless-settled,
     dispute-cancel→refunded, dispute refuses while held / already settled,
     and refund of an unfunded hold.
-- [ ] Docs sync (README / API_REFERENCE) + `.env` gets `LNBITS_ADMIN_KEY`.
+- [x] Docs + env sync (`README.md`, `API_REFERENCE.md`, `.env`):
+  - `README.md` describes the hold-invoice (network-as-escrow) model and the
+    new `LNBITS_ADMIN_KEY` (required for settle/cancel/payout) +
+    `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` env vars.
+  - `API_REFERENCE.md`: `POST /deals` documents required `client_email` /
+    `payee_invoice` and that the raw preimage stays server-side; new
+    `submit`/`approve`/`dispute` endpoint docs (approve = settle + payout,
+    dispute = cancel → refunded); `PATCH status` only drives workflow states;
+    state-machine diagram updated with `refunded` and the LND-safe
+    `awaiting_payment → work_submitted` edge.
+  - `.env` (gitignored, updated locally) has `LNBITS_ADMIN_KEY` and
+    `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS=2592000` — **you must paste your
+    LNbits router admin key** into `.env` before approve/dispute will work.
 
 ## 5. Client Role & Submit / Approve / Dispute Flow
 
