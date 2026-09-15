@@ -246,6 +246,25 @@ Client disputes → the hold is cancelled on the network (sats return to the cli
 }
 ```
 
+### `PATCH /deals/:dealID/payee-invoice`
+
+Freelancer replaces the payout destination while the deal is still open. If the original `payee_invoice` expired mid-deal and the approve-time payout leg failed, this unsticks release: re-approving settles (already-settled is idempotent) and forwards the funds to the fresh invoice. Frozen once the deal is `released` or `refunded`.
+
+**Request**
+```json
+{
+  "payee_invoice": "lnbc50000n1..."
+}
+```
+
+**Response `200`**
+```json
+{
+  "message": "payee invoice updated",
+  "deal": { ... }
+}
+```
+
 ### `PATCH /deals/:dealID/status`
 
 Transition deal status (freelancer). Validated against the state machine.

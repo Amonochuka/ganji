@@ -325,6 +325,49 @@ successful settle, which cannot happen if the client never funded the hold).
     `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS=2592000` — **you must paste your
     LNbits router admin key** into `.env` before approve/dispute will work.
 
+#### Robustness fixes batch (`4b7e33e`..`ba1b3ff`)
+
+- [x] **Webhook HMAC verification** (`internal/webhook/signature.go`,
+  `handler.go`, `cmd/api/router.go`, `config.go`):
+  - LNbits signs webhooks with header `LNbits-Signature: t=<unix>,v1=<mac>`
+    where `mac` = HMAC-SHA256(key=`LNBITS_WEBHOOK_SECRET`) over
+    `"{t}.{raw_body}"`, gated by LNbits' `LNBITS_WEBHOOK_SIGNING_ENABLED`
+    (default on; wallets created before the feature have no secret).
+  - `VerifyLNbitsSignature` checks `t` is within ±5 minutes (replay + clock
+    skew protection) and recomputes the MAC. When `LNBITS_WEBHOOK_SECRET` is
+    empty (pre-existing wallets / signing disabled), verification is skipped
+    so unsigned webhooks keep working.
+  - `NewHandler(service, secret)` 401s on a missing/invalid signature.
+  - Tests: `TestVerifyLNbitsSignature`, valid-signature accept, bad-signature
+    reject in `handler_test.go` (`signBody` helper).
+- [x] **Hold-expiry sweep** (`internal/deals/sweep.go`, `service.go`
+  `SweepExpiredHolds`, `repository.go` `ListOpenBefore`, `cmd/api/workers.go`,
+  `config.go`):
+  - New background worker starts on boot and every
+    `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` (default 21600 = 6h). It lists deals
+    still `awaiting_payment`/`locked` but older than the hold lifetime
+    (`LNBITS_HOLD_INVOICE_EXPIRY_SECONDS`) and re-checks their LNbits hold.
+  - Only when LNbits reports `UNPAID`/`EXPIRED`/`CANCELLED` — i.e. the network
+    already returned any funds — is the deal marked **`refunded`**. Holds still
+    reported `HOLD`/`ACCEPTED`/`SETTLED` are left untouched; the sweep never
+    pays anything out and stops on LNbits errors (retries next tick).
+  - This is the expiry backstop for the network-as-escrow model: without it an
+    expired hold would sit in the DB as `awaiting_payment` forever even though
+    the sats went back to the client.
+  - Tests: refunds an expired hold, ignores still-held and freshly-created
+    deals, ignores unreachable LNbits.
+- [x] **Payee-invoice rotation** (`internal/deals/service.go`
+  `UpdatePayeeInvoice`, `handler.go`, `repository.go`):
+  - `PATCH /deals/:dealID/payee-invoice` (freelancer only). If the original
+    `payee_invoice` expired mid-deal, the approve payout leg can fail even
+    though the hold settles; setting a fresh invoice + re-approving unsticks
+    release (already-settled settle is idempotent, new invoice gets paid).
+  - Frozen once the deal is `released`/`refunded` (money already moved).
+  - Tests: owner updates, non-owner → `ErrForbidden`, frozen after release.
+- [x] **Dead-code removal** (`internal/lnbits`): deleted the abandoned
+  custodial `CreateInvoice` method, its `CreateInvoiceRequest`, and
+  `ErrCreateInvoice` — every deal now goes through `CreateHoldInvoice`.
+
 ## 5. Client Role & Submit / Approve / Dispute Flow
 
 ### Identity model (email link, no forced sign-up)

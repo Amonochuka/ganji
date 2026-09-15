@@ -142,6 +142,9 @@ Payment-not-successful returns `200` because the webhook was received and unders
 | `LNBITS_API_KEY` | Yes | LNbits invoice/admin key |
 | `LNBITS_WEBHOOK_SECRET` | No* | HMAC secret for webhook verification (*recommended) |
 | `WEBHOOK_URL` | No** | Public URL for webhook endpoint (**required for webhooks to work) |
+| `LNBITS_ADMIN_KEY` | Yes | Router admin key — required for settle/cancel/payout money moves |
+| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | No | Hold invoice lifetime (default: 30 days) |
+| `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | No | Hold-expiry sweep cadence (default: 21600s = 6h) |
 | `FRONTEND_URL` | No | CORS origin (default: `http://localhost:3000`) |
 | `PORT` | No | Server port (default: `8080`) |
 

@@ -165,4 +165,3 @@ func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) e
 	}
 	return nil
 }
-

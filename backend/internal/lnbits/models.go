@@ -5,13 +5,13 @@ package lnbits
 // locks the incoming payment to exactly that hash. The funds sit held on
 // the network until Ganji settles (reveals the preimage) or cancels.
 type CreateHoldInvoiceRequest struct {
-	Out        bool   `json:"out"`
-	Amount     int64  `json:"amount"`
-	Memo       string `json:"memo"`
+	Out         bool   `json:"out"`
+	Amount      int64  `json:"amount"`
+	Memo        string `json:"memo"`
 	PaymentHash string `json:"payment_hash"`
-	Expiry     int64  `json:"expiry,omitempty"`
-	Webhook    string `json:"webhook,omitempty"`
-	Unit       string `json:"unit,omitempty"`
+	Expiry      int64  `json:"expiry,omitempty"`
+	Webhook     string `json:"webhook,omitempty"`
+	Unit        string `json:"unit,omitempty"`
 }
 
 // SettleHoldRequest is the body for POST /api/v1/payments/settle. LNbits

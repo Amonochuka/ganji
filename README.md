@@ -48,7 +48,7 @@ Frontend runs on `http://localhost:3000`.
 
 ### Required environment variables
 
-See Section 11 of the build documentation for the full list. At minimum, backend needs `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `LNBITS_URL`, `LNBITS_API_KEY`, and `LNBITS_ADMIN_KEY`. `LNBITS_ADMIN_KEY` is the router's **admin** key — it is required for the escrow money moves (settle/cancel/payout); the invoice key alone can only create the hold invoice. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (default 30 days) must comfortably exceed a deal's lifetime. Frontend needs `NEXT_PUBLIC_API_URL` pointed at the running backend.
+See Section 11 of the build documentation for the full list. At minimum, backend needs `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `LNBITS_URL`, `LNBITS_API_KEY`, and `LNBITS_ADMIN_KEY`. `LNBITS_ADMIN_KEY` is the router's **admin** key — it is required for the escrow money moves (settle/cancel/payout); the invoice key alone can only create the hold invoice. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (default 30 days) must comfortably exceed a deal's lifetime. `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` (default 6 hours) controls how often a background job reconciles stale open deals against LNbits. If webhook signing is enabled in LNbits, set `LNBITS_WEBHOOK_SECRET` to the wallet's webhook secret so the backend verifies the `LNbits-Signature` header. Frontend needs `NEXT_PUBLIC_API_URL` pointed at the running backend.
 
 For Lightning testing, run LNbits against a Bitcoin Core regtest node — do not point dev environments at mainnet. Any hold invoice drawn to a given wallet belongs to that wallet's pool, so use the dedicated Ganji wallet/keys and never paste an admin key somewhere public.
 
