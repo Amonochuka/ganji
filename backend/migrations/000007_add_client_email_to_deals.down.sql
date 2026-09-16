@@ -1,1 +1,0 @@
-ALTER TABLE deals DROP COLUMN client_email;
