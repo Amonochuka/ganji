@@ -124,7 +124,35 @@ Public. Revoke a refresh token.
 
 ## 3. Deals
 
-All deal endpoints require `Authorization: Bearer <access_token>`.
+All deal endpoints require `Authorization: Bearer <access_token>` **except the public shareable link endpoint** (`GET /public/deals/:dealID`), which is intentionally unauthenticated so the freelancer can share a link the client can open without an account.
+
+### `GET /public/deals/:dealID`
+
+Public. Returns a safe, limited view of the deal for the shareable payment link. Anyone with the link can view the deal title, amount, status, and the bolt11 invoice to pay. Sensitive fields (preimage, preimage_hash, payee_invoice, freelancer_id, client_email, checking_id, verified_at) are never exposed.
+
+**Response `200`**
+```json
+{
+  "deal": {
+    "id": "uuid",
+    "title": "Landing page redesign",
+    "amount_sats": 50000,
+    "source_platform": "Telegram",
+    "invoice": "lnbc50000n1...",
+    "status": "awaiting_payment",
+    "created_at": "2026-08-26T12:00:00Z"
+  }
+}
+```
+
+**Response `404`**
+```json
+{
+  "error": "deal not found"
+}
+```
+
+---
 
 ### `POST /deals`
 

@@ -57,6 +57,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) (*gin.Engine, *deals.Servic
 	protected.Use(middleware.AuthRequired(tokenManager))
 
 	deals.RegisterRoutes(protected, dealHandler)
+	deals.RegisterPublicRoutes(router, dealHandler)
 	deals.RegisterArtifactRoutes(protected, dealHandler)
 	deals.RegisterVerificationRoutes(protected, dealHandler)
 

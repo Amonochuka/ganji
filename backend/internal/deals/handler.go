@@ -130,6 +130,12 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group.PATCH("/:dealID/payee-invoice", h.UpdatePayeeInvoice)
 }
 
+// RegisterPublicRoutes registers the public (unauthenticated) deal routes.
+// These are mounted on the root router, not the protected group.
+func RegisterPublicRoutes(router gin.IRouter, h *Handler) {
+	router.GET("/public/deals/:dealID", h.GetPublicDeal)
+}
+
 func (h *Handler) UpdateDealStatus(c *gin.Context) {
 	userID := c.GetString("userID")
 	dealID := c.Param("dealID")
@@ -309,5 +315,28 @@ func (h *Handler) UpdatePayeeInvoice(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "payee invoice updated",
 		"deal":    deal,
+	})
+}
+
+func (h *Handler) GetPublicDeal(c *gin.Context) {
+	dealID := c.Param("dealID")
+
+	deal, err := h.service.GetPublicDeal(c.Request.Context(), dealID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"deal": deal,
 	})
 }

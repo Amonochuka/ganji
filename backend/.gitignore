@@ -1,4 +1,3 @@
-cat > .gitignore << 'EOF'
 # Environment files
 .env
 .env.local
@@ -19,4 +18,3 @@ vendor/
 
 # OS
 .DS_Store
-EOF

@@ -1,0 +1,14 @@
+# Qodo AI agent local state
+.qodo/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

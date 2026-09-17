@@ -890,3 +890,86 @@ func TestUpdatePayeeInvoiceFrozenAfterRelease(t *testing.T) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
 }
+
+func TestGetPublicDealReturnsSafeView(t *testing.T) {
+	repo := newFakeDealRepo()
+	repo.deals["deal-1"] = &Deal{
+		ID:             "deal-1",
+		FreelancerID:   "freelancer-1",
+		ClientEmail:    "client@example.com",
+		Title:          "Build a site",
+		AmountSats:     5000,
+		SourcePlatform: "telegram",
+		PreimageHash:   "bb",
+		Preimage:       "aa",
+		PayeeInvoice:   "lnbcpayee",
+		Invoice:        "lnbc5000n1...",
+		CheckingID:     "chk-1",
+		Status:         StatusLocked,
+		CreatedAt:      time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+	}
+
+	service := newTestService(repo)
+
+	publicDeal, err := service.GetPublicDeal(context.Background(), "deal-1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if publicDeal.ID != "deal-1" {
+		t.Errorf("expected ID deal-1, got %q", publicDeal.ID)
+	}
+	if publicDeal.Title != "Build a site" {
+		t.Errorf("expected title Build a site, got %q", publicDeal.Title)
+	}
+	if publicDeal.AmountSats != 5000 {
+		t.Errorf("expected amount 5000, got %d", publicDeal.AmountSats)
+	}
+	if publicDeal.SourcePlatform != "telegram" {
+		t.Errorf("expected source platform telegram, got %q", publicDeal.SourcePlatform)
+	}
+	if publicDeal.Invoice != "lnbc5000n1..." {
+		t.Errorf("expected invoice lnbc5000n1..., got %q", publicDeal.Invoice)
+	}
+	if publicDeal.Status != StatusLocked {
+		t.Errorf("expected status locked, got %s", publicDeal.Status)
+	}
+	// Verify sensitive fields are NOT exposed
+	if publicDeal.Preimage != "" {
+		t.Errorf("preimage should not be exposed in public view")
+	}
+	if publicDeal.PreimageHash != "" {
+		t.Errorf("preimage_hash should not be exposed in public view")
+	}
+	if publicDeal.PayeeInvoice != "" {
+		t.Errorf("payee_invoice should not be exposed in public view")
+	}
+	if publicDeal.FreelancerID != "" {
+		t.Errorf("freelancer_id should not be exposed in public view")
+	}
+	if publicDeal.ClientEmail != "" {
+		t.Errorf("client_email should not be exposed in public view")
+	}
+	if publicDeal.CheckingID != "" {
+		t.Errorf("checking_id should not be exposed in public view")
+	}
+}
+
+func TestGetPublicDealRejectsEmptyID(t *testing.T) {
+	repo := newFakeDealRepo()
+	service := newTestService(repo)
+
+	_, err := service.GetPublicDeal(context.Background(), "")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestGetPublicDealReturnsNotFound(t *testing.T) {
+	repo := newFakeDealRepo()
+	service := newTestService(repo)
+
+	_, err := service.GetPublicDeal(context.Background(), "unknown")
+	if !errors.Is(err, ErrDealNotFound) {
+		t.Fatalf("expected ErrDealNotFound, got %v", err)
+	}
+}

@@ -47,6 +47,21 @@ type Deal struct {
 	VerifiedAt     sql.NullTime `json:"verified_at"`
 }
 
+// PublicDeal is the safe view of a deal exposed on the public shareable
+// link (GET /public/deals/:dealID). It carries only what anyone with the
+// link needs to pay and track the deal: the bolt11 invoice, title, amount,
+// platform and status. Everything else — preimage, preimage_hash, payee
+// invoice, freelancer id, client email, LNbits checking id — stays private.
+type PublicDeal struct {
+	ID             string    `json:"id"`
+	Title          string    `json:"title"`
+	AmountSats     int64     `json:"amount_sats"`
+	SourcePlatform string    `json:"source_platform"`
+	Invoice        string    `json:"invoice"`
+	Status         Status    `json:"status"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 // ValidTransitions defines which status transitions are allowed. This is
 // the enforcement point for the dispute flow design from Section 3.3 —
 // nothing can jump straight from awaiting_payment to released, for

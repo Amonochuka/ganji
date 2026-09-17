@@ -631,6 +631,29 @@ func (s *Service) ListVerificationsByArtifact(ctx context.Context, userID, artif
 	return s.repo.ListVerificationsByArtifact(ctx, artifactID)
 }
 
+// GetPublicDeal returns a safe, public view of the deal for the shareable
+// link. No auth required — anyone with the link can see it. We expose only
+// the fields needed to pay and track the deal, never secrets (preimage,
+// payee_invoice, client_email, checking_id, etc.).
+func (s *Service) GetPublicDeal(ctx context.Context, dealID string) (*PublicDeal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	return &PublicDeal{
+		ID:             deal.ID,
+		Title:          deal.Title,
+		AmountSats:     deal.AmountSats,
+		SourcePlatform: deal.SourcePlatform,
+		Invoice:        deal.Invoice,
+		Status:         deal.Status,
+		CreatedAt:      deal.CreatedAt,
+	}, nil
+}
+
 // isValidEmail does a light syntactic check using the standard library. The
 // authoritative validation happens when the client actually registers with
 // this email (auth.Service lowercases + enforces a stricter pattern).
