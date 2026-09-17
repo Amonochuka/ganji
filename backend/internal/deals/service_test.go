@@ -1085,3 +1085,58 @@ func TestRotateShareLinkFrozenAfterRelease(t *testing.T) {
 		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
 }
+
+// fakeCVAnchorer records CV anchoring calls made by the deals service.
+type fakeCVAnchorer struct {
+	anchored []string
+	err      error
+}
+
+func (f *fakeCVAnchorer) AnchorReleasedDeal(ctx context.Context, freelancerID, dealID string) error {
+	f.anchored = append(f.anchored, dealID)
+	return f.err
+}
+
+func TestApproveDealAnchorsReleasedWork(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReviewing
+
+	anchorer := &fakeCVAnchorer{}
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
+	}), WithCVAnchorer(anchorer))
+
+	if _, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(anchorer.anchored) != 1 || anchorer.anchored[0] != deal.ID {
+		t.Fatalf("expected the released deal to be anchored, got %v", anchorer.anchored)
+	}
+}
+
+func TestApproveDealSurvivesAnchorFailure(t *testing.T) {
+	// CV anchoring is derived data, not on the money path: if it fails the
+	// release must still complete (the public CV self-heals on next read).
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReviewing
+
+	anchorer := &fakeCVAnchorer{err: errors.New("cv down")}
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
+	}), WithCVAnchorer(anchorer))
+
+	updated, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if err != nil {
+		t.Fatalf("anchoring must not block the release, got %v", err)
+	}
+	if updated.Status != StatusReleased {
+		t.Fatalf("expected released, got %s", updated.Status)
+	}
+}

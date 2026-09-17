@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/mail"
 	"strings"
 	"time"
@@ -14,16 +15,39 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
+// CVAnchorer persists Live CV hash anchors for delivered work. It is
+// implemented by the cv package and injected through WithCVAnchorer so the
+// deals service never depends on cv directly (and cv never depends on deals).
+type CVAnchorer interface {
+	// AnchorReleasedDeal writes CV entries for a released deal's artifacts.
+	// It is called after the escrow is released and must be safe to fail:
+	// CV anchoring is derived data, not on the money path.
+	AnchorReleasedDeal(ctx context.Context, freelancerID, dealID string) error
+}
+
 type Service struct {
 	repo   DealRepository
 	lnbits *lnbits.Client
+	cv     CVAnchorer
 }
 
-func NewService(repo DealRepository, lnbits *lnbits.Client) *Service {
-	return &Service{
+type Option func(*Service)
+
+// WithCVAnchorer injects the Live CV anchoring hook. Once wired, approving a
+// deal anchors its artifacts as verified entries on the freelancer's CV.
+func WithCVAnchorer(a CVAnchorer) Option {
+	return func(s *Service) { s.cv = a }
+}
+
+func NewService(repo DealRepository, lnbits *lnbits.Client, opts ...Option) *Service {
+	s := &Service{
 		repo:   repo,
 		lnbits: lnbits,
 	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
@@ -265,6 +289,16 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 	}
 
 	deal.Status = StatusReleased
+
+	// Live CV anchoring. Best-effort and deliberately off the money path:
+	// a failed anchor must never roll back a completed release, and the
+	// public CV self-heals any missing anchors on its next read anyway.
+	if s.cv != nil {
+		if err := s.cv.AnchorReleasedDeal(ctx, deal.FreelancerID, dealID); err != nil {
+			log.Printf("cv: anchoring released deal %s: %v", dealID, err)
+		}
+	}
+
 	return deal, nil
 }
 

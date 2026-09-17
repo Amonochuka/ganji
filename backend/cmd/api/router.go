@@ -8,6 +8,7 @@ import (
 
 	"github.com/Amonochuka/ganji-backend/internal/auth"
 	"github.com/Amonochuka/ganji-backend/internal/config"
+	"github.com/Amonochuka/ganji-backend/internal/cv"
 	"github.com/Amonochuka/ganji-backend/internal/deals"
 	"github.com/Amonochuka/ganji-backend/internal/health"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
@@ -40,6 +41,8 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) (*gin.Engine, *deals.Servic
 	auth.RegisterRoutes(router, authHandler)
 
 	dealRepo := deals.NewRepository(dbConn)
+	cvService := cv.NewService(cv.NewRepository(dbConn))
+
 	lnbitsClient := lnbits.NewClient(
 		lnbits.Config{
 			URL:           cfg.LNBitsURL,
@@ -50,7 +53,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) (*gin.Engine, *deals.Servic
 		},
 	)
 
-	dealService := deals.NewService(dealRepo, lnbitsClient)
+	dealService := deals.NewService(dealRepo, lnbitsClient, deals.WithCVAnchorer(cvService))
 	dealHandler := deals.NewHandler(dealService)
 
 	protected := router.Group("/")
@@ -66,7 +69,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) (*gin.Engine, *deals.Servic
 	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret)
 	webhook.RegisterRoutes(router, webhookHandler)
 
-	// Future: cv.RegisterRoutes(protected, ...)
+	cv.RegisterRoutes(router, cv.NewHandler(cvService))
 
 	return router, dealService
 }
