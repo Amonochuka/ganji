@@ -21,6 +21,8 @@ type Config struct {
 	FrontendURL              string
 	HoldInvoiceExpirySeconds int64
 	HoldSweepIntervalSeconds int64
+	StoragePath              string
+	MaxUploadBytes           int64
 }
 
 func Load() *Config {
@@ -41,6 +43,8 @@ func Load() *Config {
 		FrontendURL:              getEnv("FRONTEND_URL", "http://localhost:3000"),
 		HoldInvoiceExpirySeconds: getEnvInt("LNBITS_HOLD_INVOICE_EXPIRY_SECONDS", 2_592_000),
 		HoldSweepIntervalSeconds: getEnvInt("LNBITS_HOLD_SWEEP_INTERVAL_SECONDS", 21_600),
+		StoragePath:              getEnv("STORAGE_PATH", "./uploads"),
+		MaxUploadBytes:           getEnvInt("MAX_UPLOAD_BYTES", 10*1024*1024),
 	}
 
 	return cfg

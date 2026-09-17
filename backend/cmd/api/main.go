@@ -11,6 +11,7 @@ import (
 
 	"github.com/Amonochuka/ganji-backend/internal/config"
 	"github.com/Amonochuka/ganji-backend/internal/db"
+	"github.com/Amonochuka/ganji-backend/internal/storage"
 )
 
 func main() {
@@ -22,7 +23,14 @@ func main() {
 	}
 	defer dbConn.Close()
 
-	router, dealService := setupRouter(cfg, dbConn)
+	// Artifact blob backend. Owned here so it is closed on shutdown.
+	uploadStore, err := storage.NewLocal(cfg.StoragePath)
+	if err != nil {
+		log.Fatalf("failed to set up artifact storage: %v", err)
+	}
+	defer uploadStore.Close()
+
+	router, dealService := setupRouter(cfg, dbConn, uploadStore)
 
 	// Hold-expiry sweep: periodically reconcile stale open deals with LNbits
 	// so expired/cancelled/unfunded holds don't stay awaiting_payment forever.

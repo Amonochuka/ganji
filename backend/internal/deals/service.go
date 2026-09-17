@@ -6,13 +6,17 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/mail"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
+	"github.com/Amonochuka/ganji-backend/internal/storage"
 )
 
 // CVAnchorer persists Live CV hash anchors for delivered work. It is
@@ -26,9 +30,11 @@ type CVAnchorer interface {
 }
 
 type Service struct {
-	repo   DealRepository
-	lnbits *lnbits.Client
-	cv     CVAnchorer
+	repo           DealRepository
+	lnbits         *lnbits.Client
+	cv             CVAnchorer
+	storage        storage.Storage
+	maxUploadBytes int64
 }
 
 type Option func(*Service)
@@ -37,6 +43,15 @@ type Option func(*Service)
 // deal anchors its artifacts as verified entries on the freelancer's CV.
 func WithCVAnchorer(a CVAnchorer) Option {
 	return func(s *Service) { s.cv = a }
+}
+
+// WithStorage wires the artifact blob backend and the per-upload size cap.
+// Uploaded files are streamed into storage; DownloadArtifact reads them back.
+func WithStorage(st storage.Storage, maxUploadBytes int64) Option {
+	return func(s *Service) {
+		s.storage = st
+		s.maxUploadBytes = maxUploadBytes
+	}
 }
 
 func NewService(repo DealRepository, lnbits *lnbits.Client, opts ...Option) *Service {
@@ -500,28 +515,40 @@ func (s *Service) UpdatePayeeInvoice(ctx context.Context, userID, dealID, bolt11
 }
 
 // Artifacts
-func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *Artifact) error {
-	if artifact.DealID == "" {
-		return fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+//
+// UploadArtifact persists a deliverable (the file) for a deal and records its
+// storage reference. Only the freelancer can upload, and only while the deal
+// is still open to the work — once submitted (or released/disputed/refunded)
+// the deliverable set is frozen. The file is streamed straight into storage:
+// the reader is size-capped so an oversized upload is rejected without a byte
+// being committed. If the DB record cannot be written afterwards, the
+// just-saved blob is best-effort deleted so storage never accumulates orphans.
+func (s *Service) UploadArtifact(ctx context.Context, userID, dealID string, kind ArtifactKind, filename string, r io.Reader) (*Artifact, error) {
+	if s.storage == nil {
+		return nil, fmt.Errorf("%w: artifact storage is not configured", ErrInvalidInput)
 	}
-
-	if artifact.StorageKey == "" {
-		return fmt.Errorf("%w: storage key is required", ErrInvalidInput)
+	if s.maxUploadBytes <= 0 {
+		return nil, fmt.Errorf("%w: artifact upload limit is not configured", ErrInvalidInput)
 	}
-
-	switch artifact.Kind {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+	switch kind {
 	case ArtifactSourceCode, ArtifactSourceFile:
 	default:
-		return fmt.Errorf("%w: invalid artifact kind", ErrInvalidInput)
+		return nil, fmt.Errorf("%w: invalid artifact kind", ErrInvalidInput)
+	}
+	if r == nil {
+		return nil, fmt.Errorf("%w: artifact content is required", ErrInvalidInput)
 	}
 
-	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
+	deal, err := s.repo.GetDealByID(ctx, dealID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if deal.FreelancerID != userID {
-		return ErrForbidden
+		return nil, ErrForbidden
 	}
 
 	// TEMP: Allow uploads before LNBits escrow integration.
@@ -531,10 +558,130 @@ func (s *Service) CreateArtifact(ctx context.Context, userID string, artifact *A
 		StatusReviewing,
 		StatusReleased,
 		StatusDisputed:
-		return fmt.Errorf("%w: uploads are no longer allowed", ErrInvalidInput)
+		return nil, fmt.Errorf("%w: uploads are no longer allowed", ErrInvalidInput)
 	}
 
-	return s.repo.CreateArtifact(ctx, artifact)
+	key, err := artifactStorageKey(dealID, filename)
+	if err != nil {
+		return nil, fmt.Errorf("generating artifact storage key: %w", err)
+	}
+
+	// Size cap: read at most max+1 bytes so we can tell an oversized upload
+	// apart from a legal one (io.Reader yields nil after the cap), and reject
+	// before the blob is committed.
+	counted := &countingReader{r: r}
+	if err := s.storage.Save(ctx, key, io.LimitReader(counted, s.maxUploadBytes+1)); err != nil {
+		return nil, fmt.Errorf("storing artifact: %w", err)
+	}
+	if counted.n > s.maxUploadBytes {
+		_ = s.storage.Delete(ctx, key)
+		return nil, fmt.Errorf("%w: upload exceeds %d bytes", ErrInvalidInput, s.maxUploadBytes)
+	}
+
+	artifact := &Artifact{DealID: dealID, Kind: kind, StorageKey: key}
+	if err := s.repo.CreateArtifact(ctx, artifact); err != nil {
+		_ = s.storage.Delete(ctx, key) // best-effort cleanup on DB failure
+		return nil, err
+	}
+	return artifact, nil
+}
+
+// DownloadArtifact opens a deal artifact's stored content for streaming to the
+// caller. Both the freelancer and the client (matched by the recorded
+// client_email) may download — the client is precisely who has to review the
+// work. Anyone else is forbidden. Returns the artifact metadata plus a reader
+// and its size so the handler can send accurate headers.
+func (s *Service) DownloadArtifact(ctx context.Context, userID, email, dealID, artifactID string) (*Artifact, io.ReadCloser, int64, error) {
+	if s.storage == nil {
+		return nil, nil, 0, fmt.Errorf("%w: artifact storage is not configured", ErrInvalidInput)
+	}
+	if dealID == "" {
+		return nil, nil, 0, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+	if artifactID == "" {
+		return nil, nil, 0, fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
+	}
+
+	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	if artifact.DealID != dealID {
+		return nil, nil, 0, ErrArtifactNotFound
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, artifact.DealID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
+		return nil, nil, 0, ErrForbidden
+	}
+
+	reader, err := s.storage.Open(ctx, artifact.StorageKey)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, nil, 0, ErrArtifactNotFound
+		}
+		return nil, nil, 0, fmt.Errorf("opening stored artifact: %w", err)
+	}
+
+	size, err := s.storage.Size(ctx, artifact.StorageKey)
+	if err != nil {
+		_ = reader.Close()
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, nil, 0, ErrArtifactNotFound
+		}
+		return nil, nil, 0, fmt.Errorf("sizing stored artifact: %w", err)
+	}
+
+	return artifact, reader, size, nil
+}
+
+// artifactStorageKey mints a unique key for an uploaded file:
+// deals/<dealID>/<32-random-hex><safe-extension>. The extension is preserved
+// (sanitized) so download responses can pick a usable Content-Type; the
+// original filename is never carried into the key.
+func artifactStorageKey(dealID, filename string) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	key := "deals/" + dealID + "/" + hex.EncodeToString(b)
+	if ext := sanitizeExt(filename); ext != "" {
+		key += ext
+	}
+	return key, nil
+}
+
+// sanitizeExt returns the lowercase ".ext" of a filename only when it is a
+// safe-looking alphanumeric extension (2–10 chars); otherwise "".
+func sanitizeExt(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if len(ext) < 2 || len(ext) > 10 {
+		return ""
+	}
+	for _, r := range ext[1:] {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return ext
+}
+
+// countingReader counts bytes as they are streamed so the size cap can be
+// enforced after Save without buffering the whole payload in memory.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }
 
 func (s *Service) GetArtifactByID(

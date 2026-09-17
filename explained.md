@@ -65,11 +65,14 @@ backend/
                       trust-score derivation
     db/               pool + auto-migration on boot
     deals/            deal model, state machine, share link, escrow service,
-                      artifacts, verifications, expiry sweep
+                      artifacts (streamed upload/download), verifications,
+                      expiry sweep
     health/           GET /health
     lnbits/           LNbits HTTP client (hold invoices, check/settle/cancel,
                       pay out, webhook-url attachment)
     middleware/       auth (done); cors via gin-contrib; ratelimit is a stub
+    storage/          artifact blob backend (Storage iface + Local disk impl,
+                      traversal-safe keys, S3-ready)
     webhook/          LNbits payment webhook + HMAC signature verification
     websocket/        STUB (real-time updates planned)
   migrations/         numbered SQL schema (golang-migrate, run at boot)
@@ -86,6 +89,8 @@ frontend/             Next.js app (out of scope here)
 | Background workers (hold-expiry sweep) | `backend/cmd/api/workers.go` |
 | Deal struct, statuses, valid transitions | `backend/internal/deals/types.go` |
 | Deal business logic (escrow, ownership, share link) | `backend/internal/deals/service.go` |
+| Artifact upload/download (streamed to storage) | `backend/internal/deals/service.go` + `artifact_handler.go` |
+| Artifact blob backend (`Storage` iface + `Local`) | `backend/internal/storage/` |
 | Deal SQL (repos, transactions) | `backend/internal/deals/repository.go` |
 | Deal repository interface | `backend/internal/deals/interface_types.go` |
 | Deal sentinel errors | `backend/internal/deals/errors.go` |
@@ -352,6 +357,10 @@ go test ./...    # all packages
   refresh, LNbits-down fallback, rotation owner/frozen). Transactions are
   simulated via a no-op `database/sql` driver so `BeginTx/Commit` flows without
   a DB.
+- `internal/deals/artifact_upload_test.go` / `artifact_handler_test.go` +
+  `internal/storage/local_test.go` — streaming upload/download, size-cap
+  rejection leaves no blob, owner/party gating, multipart handler round-trips,
+  traversal-safe storage keys, delete semantics.
 - `internal/webhook/service_test.go` / `handler_test.go` — payment → locked,
   unpaid ignored, missing deal, bad signature, HMAC verification.
 - `internal/cv/service_test.go` — profile read self-heals missing anchors and
@@ -372,9 +381,13 @@ Backend:
   its artifacts as SHA-256 entries (`verified_at` → release), and the CV
   self-heals any anchors that were missed on its next read. `trust_score`
   is now derived on CV read (`100 + 25·released`, capped at 1000).
+- **Artifact storage** (`internal/storage/`): done. `Storage` is an interface
+  (S3-ready) with a `Local` disk backend; `POST /deals/:dealID/artifacts`
+  streams a multipart upload to disk (size-capped by `MAX_UPLOAD_BYTES`,
+  oversized rejected with no blob left behind, DB-failure rollback deletes the
+  blob) and `GET /deals/:dealID/artifacts/:artifactID/download` streams it
+  back to the freelancer or client. Keys are `deals/<dealID>/<random-hex><sanitized-ext>`.
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
-- **File upload**: artifacts only record a `storage_key` string; no storage
-  backend yet.
 - **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
 - **Hardening (future): `client_email` masking.** Already excluded from the
   public share-link view, but the authed deal payloads (`POST /deals`,
@@ -399,3 +412,5 @@ critical ones:
   public webhook URL.
 - `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (30 d) / `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` (6 h).
 - `FRONTEND_URL` — CORS origin.
+- `STORAGE_PATH` — where artifact blobs live on disk (default `./uploads`).
+- `MAX_UPLOAD_BYTES` — per-artifact size cap (default 10 MB).

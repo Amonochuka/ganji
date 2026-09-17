@@ -13,6 +13,7 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/health"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 	"github.com/Amonochuka/ganji-backend/internal/middleware"
+	"github.com/Amonochuka/ganji-backend/internal/storage"
 	"github.com/Amonochuka/ganji-backend/internal/webhook"
 )
 
@@ -21,7 +22,8 @@ import (
 // its own RegisterRoutes-style function — this file should never grow
 // route logic directly, only wiring. The *deals.Service is returned so main
 // can run background workers (e.g. the hold-expiry sweep) against it.
-func setupRouter(cfg *config.Config, dbConn *sql.DB) (*gin.Engine, *deals.Service) {
+// uploadStore is the artifact blob backend, owned (and closed) by main.
+func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage) (*gin.Engine, *deals.Service) {
 	router := gin.Default()
 
 	router.Use(cors.New(cors.Config{
@@ -53,7 +55,10 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB) (*gin.Engine, *deals.Servic
 		},
 	)
 
-	dealService := deals.NewService(dealRepo, lnbitsClient, deals.WithCVAnchorer(cvService))
+	dealService := deals.NewService(dealRepo, lnbitsClient,
+		deals.WithCVAnchorer(cvService),
+		deals.WithStorage(uploadStore, cfg.MaxUploadBytes),
+	)
 	dealHandler := deals.NewHandler(dealService)
 
 	protected := router.Group("/")

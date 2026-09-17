@@ -24,10 +24,19 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   entries; the public `GET /cv/:slug` profile and `GET /cv/:slug/verify/:entryID`
   hash check are live, and `trust_score` is derived from released deals
   (`100 + 25·released`, capped at 1000).
+- **File upload / download shipped.** Artifacts are now real files, not just a
+  `storage_key` string: `POST /deals/:dealID/artifacts` streams a multipart
+  upload to a disk backend (`internal/storage/` — `Storage` interface, `Local`
+  impl, traversal-safe keys, S3-ready), size-capped by `MAX_UPLOAD_BYTES` with
+  oversized blobs rejected before commit, and
+  `GET /deals/:dealID/artifacts/:artifactID/download` streams them back to the
+  freelancer or client.
 - **Tests now exist.** `internal/deals/service_test.go`,
   `internal/cv/service_test.go`,
   `internal/webhook/service_test.go`+`handler_test.go`,
-  `internal/lnbits/client_test.go`; `go test ./...` passes.
+  `internal/lnbits/client_test.go`,
+  `internal/storage/local_test.go`, and the artifact upload/download handler
+  and service tests; `go test ./...` passes.
 - Still stubbed (unchanged): `internal/websocket`,
   `internal/middleware/ratelimit.go`, `pkg/sanitize`.
   Frontend still does not compile.
@@ -105,7 +114,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 
 ### Critical (blocks Phase 4+)
 1. **WebSocket server** (`internal/websocket/`) — empty stubs. Needed for real-time deal state updates to the frontend.
-2. **File upload handling** — artifacts store a `storage_key` but there's no actual upload endpoint or storage backend (S3, local disk, etc.).
+2. ~~**File upload handling**~~ — *(done: multipart upload + download streamed through `internal/storage/`; see "Updates since 2026-08-26".)*
 
 ### Important (Phase 5)
 4. **Sanitize package** — needed for output encoding, XSS prevention.
@@ -174,6 +183,8 @@ Payment-not-successful returns `200` because the webhook was received and unders
 | `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | No | Hold invoice lifetime (default: 30 days) |
 | `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | No | Hold-expiry sweep cadence (default: 21600s = 6h) |
 | `FRONTEND_URL` | No | CORS origin (default: `http://localhost:3000`) |
+| `STORAGE_PATH` | No | Artifact blob directory (default: `./uploads`) |
+| `MAX_UPLOAD_BYTES` | No | Per-artifact upload cap (default: 10 MB) |
 | `PORT` | No | Server port (default: `8080`) |
 
 ---

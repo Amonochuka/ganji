@@ -358,17 +358,20 @@ All artifact endpoints require auth. Ownership is enforced via the parent deal.
 
 ### `POST /deals/:dealID/artifacts`
 
-Register an artifact (source code or file) with a storage key.
+Upload an artifact (source code or file) as a **multipart form**. The file is
+streamed to the storage backend (`STORAGE_PATH`, local disk by default); the DB
+row records the generated storage key. Only the freelancer can upload, and only
+while the deal is still open to work (not after `work_submitted` /
+`reviewing` / `released` / `disputed` / `refunded`).
 
-**Request**
-```json
-{
-  "kind": "source_code",
-  "storage_key": "s3://bucket/key"
-}
-```
+**Request** — `multipart/form-data`
+| Fields |
+|---|
+| `kind` — `"source_code"` or `"source_file"` (required) |
+| `artifact` — the file itself (required) |
 
-`kind` must be one of: `"source_code"`, `"source_file"`.
+Uploads larger than `MAX_UPLOAD_BYTES` (default 10 MB) are rejected with `400`
+and no blob is committed.
 
 **Response `201`**
 ```json
@@ -377,7 +380,7 @@ Register an artifact (source code or file) with a storage key.
     "id": "uuid",
     "deal_id": "uuid",
     "kind": "source_code",
-    "storage_key": "s3://bucket/key",
+    "storage_key": "deals/<dealID>/<32-hex-random><sanitized-extension>",
     "uploaded_at": "2026-08-26T12:00:00Z"
   }
 }
@@ -404,6 +407,18 @@ Get a specific artifact.
   "artifact": { ... }
 }
 ```
+
+### `GET /deals/:dealID/artifacts/:artifactID/download`
+
+Stream the stored artifact content to the caller. Both the freelancer and the
+client (matched by the deal's recorded `client_email`) may download; anyone
+else gets `403`. The file is served with its content-type guessed from the
+sanitized extension and an `attachment` `Content-Disposition`.
+
+**Response `200`** — the raw file bytes (`Content-Length` = stored size).
+
+**Response codes**: `403` if neither party, `404` if the artifact is unknown
+or its blob is missing from storage.
 
 ---
 
