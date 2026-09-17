@@ -80,6 +80,15 @@ func (f *fakeDealRepo) GetDealByCheckingID(ctx context.Context, checkingID strin
 	return nil, ErrDealNotFound
 }
 
+func (f *fakeDealRepo) GetDealByShareToken(ctx context.Context, shareToken string) (*Deal, error) {
+	for _, deal := range f.deals {
+		if deal.ShareToken == shareToken {
+			return deal, nil
+		}
+	}
+	return nil, ErrDealNotFound
+}
+
 func (f *fakeDealRepo) ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error) {
 	var out []Deal
 	for _, deal := range f.deals {
@@ -122,6 +131,15 @@ func (f *fakeDealRepo) UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvo
 		return ErrDealNotFound
 	}
 	deal.PayeeInvoice = payeeInvoice
+	return nil
+}
+
+func (f *fakeDealRepo) UpdateShareToken(ctx context.Context, dealID, shareToken string) error {
+	deal, ok := f.deals[dealID]
+	if !ok {
+		return ErrDealNotFound
+	}
+	deal.ShareToken = shareToken
 	return nil
 }
 
@@ -258,6 +276,9 @@ func TestCreateDealCreatesHoldInvoice(t *testing.T) {
 	if stored.Status != StatusAwaitingPayment {
 		t.Errorf("expected awaiting_payment, got %s", stored.Status)
 	}
+	if stored.ShareToken == "" {
+		t.Error("expected a share token to be generated for the public link")
+	}
 }
 
 func lockedDeal(repo *fakeDealRepo, id, freelancerID, clientEmail string) *Deal {
@@ -265,6 +286,7 @@ func lockedDeal(repo *fakeDealRepo, id, freelancerID, clientEmail string) *Deal 
 		ID:           id,
 		FreelancerID: freelancerID,
 		ClientEmail:  clientEmail,
+		ShareToken:   "share-" + id,
 		Status:       StatusLocked,
 	}
 	repo.deals[id] = deal
@@ -350,6 +372,7 @@ func escrowDeal(repo *fakeDealRepo, id, freelancerID, clientEmail string) *Deal 
 		ID:           id,
 		FreelancerID: freelancerID,
 		ClientEmail:  clientEmail,
+		ShareToken:   "share-" + id,
 		Status:       StatusLocked,
 		Preimage:     "aa",
 		PreimageHash: "bb",
@@ -905,18 +928,16 @@ func TestGetPublicDealReturnsSafeView(t *testing.T) {
 		PayeeInvoice:   "lnbcpayee",
 		Invoice:        "lnbc5000n1...",
 		CheckingID:     "chk-1",
+		ShareToken:     "abc123",
 		Status:         StatusLocked,
 		CreatedAt:      time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 	}
 
 	service := newTestService(repo)
 
-	publicDeal, err := service.GetPublicDeal(context.Background(), "deal-1")
+	publicDeal, err := service.GetPublicDeal(context.Background(), "abc123")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	}
-	if publicDeal.ID != "deal-1" {
-		t.Errorf("expected ID deal-1, got %q", publicDeal.ID)
 	}
 	if publicDeal.Title != "Build a site" {
 		t.Errorf("expected title Build a site, got %q", publicDeal.Title)
@@ -933,28 +954,28 @@ func TestGetPublicDealReturnsSafeView(t *testing.T) {
 	if publicDeal.Status != StatusLocked {
 		t.Errorf("expected status locked, got %s", publicDeal.Status)
 	}
-	// Verify sensitive fields are NOT exposed
-	if publicDeal.Preimage != "" {
-		t.Errorf("preimage should not be exposed in public view")
+
+	// Verify sensitive and internal fields are NOT present on the wire.
+	buf, err := json.Marshal(publicDeal)
+	if err != nil {
+		t.Fatalf("marshal public deal: %v", err)
 	}
-	if publicDeal.PreimageHash != "" {
-		t.Errorf("preimage_hash should not be exposed in public view")
+	var raw map[string]any
+	if err := json.Unmarshal(buf, &raw); err != nil {
+		t.Fatalf("unmarshal public deal: %v", err)
 	}
-	if publicDeal.PayeeInvoice != "" {
-		t.Errorf("payee_invoice should not be exposed in public view")
-	}
-	if publicDeal.FreelancerID != "" {
-		t.Errorf("freelancer_id should not be exposed in public view")
-	}
-	if publicDeal.ClientEmail != "" {
-		t.Errorf("client_email should not be exposed in public view")
-	}
-	if publicDeal.CheckingID != "" {
-		t.Errorf("checking_id should not be exposed in public view")
+	for _, key := range []string{
+		"id", "freelancer_id", "client_email",
+		"preimage_hash", "preimage", "payee_invoice",
+		"checking_id", "share_token", "verified_at",
+	} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("sensitive key %q must not appear in the public view", key)
+		}
 	}
 }
 
-func TestGetPublicDealRejectsEmptyID(t *testing.T) {
+func TestGetPublicDealRejectsEmptyToken(t *testing.T) {
 	repo := newFakeDealRepo()
 	service := newTestService(repo)
 
@@ -971,5 +992,48 @@ func TestGetPublicDealReturnsNotFound(t *testing.T) {
 	_, err := service.GetPublicDeal(context.Background(), "unknown")
 	if !errors.Is(err, ErrDealNotFound) {
 		t.Fatalf("expected ErrDealNotFound, got %v", err)
+	}
+}
+
+func TestRotateShareLinkRegeneratesToken(t *testing.T) {
+	repo := newFakeDealRepo()
+	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	service := newTestService(repo)
+
+	updated, err := service.RotateShareLink(context.Background(), "freelancer-1", "deal-1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if updated.ShareToken == "share-deal-1" {
+		t.Error("expected the share token to change")
+	}
+	if repo.deals["deal-1"].ShareToken != updated.ShareToken {
+		t.Error("expected the repo to store the rotated token")
+	}
+}
+
+func TestRotateShareLinkRejectsNonOwner(t *testing.T) {
+	repo := newFakeDealRepo()
+	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	service := newTestService(repo)
+
+	_, err := service.RotateShareLink(context.Background(), "someone-else", "deal-1")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestRotateShareLinkFrozenAfterRelease(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReleased
+
+	service := newTestService(repo)
+
+	_, err := service.RotateShareLink(context.Background(), "freelancer-1", "deal-1")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
 }

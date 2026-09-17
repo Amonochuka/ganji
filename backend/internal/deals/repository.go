@@ -39,10 +39,11 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 			payee_invoice,
 			invoice,
 			checking_id,
+			share_token,
 			status
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 		)
 		RETURNING id, created_at;
 	`
@@ -60,6 +61,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		nullString(deal.PayeeInvoice),
 		deal.Invoice,
 		deal.CheckingID,
+		deal.ShareToken,
 		deal.Status,
 	)
 
@@ -84,6 +86,7 @@ const dealColumns = `
 		payee_invoice,
 		invoice,
 		checking_id,
+		share_token,
 		status,
 		created_at,
 		verified_at
@@ -103,6 +106,7 @@ func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 		&deal.PayeeInvoice,
 		&deal.Invoice,
 		&deal.CheckingID,
+		&deal.ShareToken,
 		&deal.Status,
 		&deal.CreatedAt,
 		&deal.VerifiedAt,
@@ -139,6 +143,22 @@ func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string)
 			return nil, ErrDealNotFound
 		}
 		return nil, fmt.Errorf("repository: get deal by checking_id: %w", err)
+	}
+	return deal, nil
+}
+
+// GetDealByShareToken looks a deal up by its public share-link token.
+// share_token is a high-entropy, per-deal random value (separate from the
+// DB id) so the public payment link is revocable: regenerating it kills the
+// old link without ever exposing the internal UUID.
+func (r *Repository) GetDealByShareToken(ctx context.Context, shareToken string) (*Deal, error) {
+	query := "SELECT" + dealColumns + "FROM deals WHERE share_token = $1;"
+	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, shareToken))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrDealNotFound
+		}
+		return nil, fmt.Errorf("repository: get deal by share_token: %w", err)
 	}
 	return deal, nil
 }
@@ -211,6 +231,29 @@ func (r *Repository) UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoic
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("repository: update payee invoice: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+
+	return nil
+}
+
+// UpdateShareToken replaces a deal's public share-link token. Used by the
+// freelancer's "regenerate link" endpoint: the old token stops resolving
+// immediately, so a leaked link can be revoked. Empty token is rejected by
+// the service layer (never store an un-guessable-but-empty token).
+func (r *Repository) UpdateShareToken(ctx context.Context, dealID, shareToken string) error {
+	query := `UPDATE deals SET share_token = $1 WHERE id = $2;`
+
+	result, err := r.q.ExecContext(ctx, query, shareToken, dealID)
+	if err != nil {
+		return fmt.Errorf("repository: update share token: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: update share token: %w", err)
 	}
 	if rowsAffected == 0 {
 		return ErrDealNotFound

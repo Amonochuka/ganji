@@ -11,10 +11,12 @@ type DealRepository interface {
 	CreateDeal(ctx context.Context, deal *Deal) error
 	GetDealByID(ctx context.Context, id string) (*Deal, error)
 	GetDealByCheckingID(ctx context.Context, checkingID string) (*Deal, error)
+	GetDealByShareToken(ctx context.Context, shareToken string) (*Deal, error)
 	ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error)
 	ListForUser(ctx context.Context, userID, email string) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
 	UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error
+	UpdateShareToken(ctx context.Context, dealID, shareToken string) error
 	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)
 
 	// Artifacts

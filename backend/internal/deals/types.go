@@ -42,18 +42,21 @@ type Deal struct {
 	PayeeInvoice   string       `json:"payee_invoice,omitempty"`
 	Invoice        string       `json:"invoice"`
 	CheckingID     string       `json:"checking_id"`
+	ShareToken     string       `json:"share_token"`
 	Status         Status       `json:"status"`
 	CreatedAt      time.Time    `json:"created_at"`
 	VerifiedAt     sql.NullTime `json:"verified_at"`
 }
 
 // PublicDeal is the safe view of a deal exposed on the public shareable
-// link (GET /public/deals/:dealID). It carries only what anyone with the
+// link (GET /public/deals/:shareToken). It carries only what anyone with the
 // link needs to pay and track the deal: the bolt11 invoice, title, amount,
-// platform and status. Everything else — preimage, preimage_hash, payee
-// invoice, freelancer id, client email, LNbits checking id — stays private.
+// platform and status. Everything else — the internal deal id, preimage,
+// preimage_hash, payee invoice, freelancer id, client email, LNbits checking
+// id and the share token itself — stays private. The internal id is kept out
+// of the response on purpose so a shared link never leaks the DB row handle
+// (rotation would otherwise be pointless if the UUID leaked inside the body).
 type PublicDeal struct {
-	ID             string    `json:"id"`
 	Title          string    `json:"title"`
 	AmountSats     int64     `json:"amount_sats"`
 	SourcePlatform string    `json:"source_platform"`

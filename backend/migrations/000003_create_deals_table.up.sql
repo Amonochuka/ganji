@@ -14,6 +14,11 @@ CREATE TABLE deals (
     payee_invoice TEXT,
     invoice TEXT NOT NULL,
     checking_id TEXT,
+    -- Shareable payment-link token: a separate high-entropy random value from
+    -- the deal's UUID so the public link can be revoked/rotated without
+    -- exposing the internal id. NOT NULL DEFAULT backfills existing deals;
+    -- UNIQUE doubles as the lookup index for GET /public/deals/:shareToken.
+    share_token TEXT NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex'),
     status TEXT NOT NULL DEFAULT 'awaiting_payment',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     verified_at TIMESTAMPTZ,

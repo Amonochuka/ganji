@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/mail"
@@ -72,6 +73,15 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	hash := sha256.Sum256(preimage)
 	deal.Preimage = hex.EncodeToString(preimage[:])
 	deal.PreimageHash = hex.EncodeToString(hash[:])
+
+	// High-entropy, revocable share token for the public payment link. Kept
+	// separate from the deal's DB id so a leaked link can be rotated without
+	// exposing (or changing) the internal row handle.
+	shareToken, err := generateShareToken()
+	if err != nil {
+		return fmt.Errorf("generating share token: %w", err)
+	}
+	deal.ShareToken = shareToken
 
 	hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
 		Out:         false,
@@ -632,19 +642,19 @@ func (s *Service) ListVerificationsByArtifact(ctx context.Context, userID, artif
 }
 
 // GetPublicDeal returns a safe, public view of the deal for the shareable
-// link. No auth required — anyone with the link can see it. We expose only
-// the fields needed to pay and track the deal, never secrets (preimage,
-// payee_invoice, client_email, checking_id, etc.).
-func (s *Service) GetPublicDeal(ctx context.Context, dealID string) (*PublicDeal, error) {
-	if dealID == "" {
-		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+// link. No auth required — anyone holding the (unguessable, rotatable)
+// share_token can see it. We expose only the fields needed to pay and track
+// the deal, never secrets (preimage, payee_invoice, client_email,
+// checking_id, the internal deal id, or the share token itself).
+func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*PublicDeal, error) {
+	if shareToken == "" {
+		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
 	}
-	deal, err := s.repo.GetDealByID(ctx, dealID)
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
 	if err != nil {
 		return nil, err
 	}
 	return &PublicDeal{
-		ID:             deal.ID,
 		Title:          deal.Title,
 		AmountSats:     deal.AmountSats,
 		SourcePlatform: deal.SourcePlatform,
@@ -652,6 +662,55 @@ func (s *Service) GetPublicDeal(ctx context.Context, dealID string) (*PublicDeal
 		Status:         deal.Status,
 		CreatedAt:      deal.CreatedAt,
 	}, nil
+}
+
+// RotateShareLink mints a fresh share token for a deal, immediately killing
+// any previously shared link (the old token no longer resolves). Freelancer
+// only, and frozen once the deal is released/refunded — after the money has
+// moved there is nothing left to share. Returns the updated deal so the
+// caller can rebuild the link from deal.ShareToken.
+func (s *Service) RotateShareLink(ctx context.Context, userID, dealID string) (*Deal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.FreelancerID != userID {
+		return nil, ErrForbidden
+	}
+
+	switch deal.Status {
+	case StatusReleased, StatusRefunded:
+		return nil, fmt.Errorf("%w: share link is frozen once the deal is %s", ErrInvalidInput, deal.Status)
+	}
+
+	token, err := generateShareToken()
+	if err != nil {
+		return nil, fmt.Errorf("generating share token: %w", err)
+	}
+
+	if err := s.repo.UpdateShareToken(ctx, dealID, token); err != nil {
+		return nil, fmt.Errorf("rotating share token: %w", err)
+	}
+
+	deal.ShareToken = token
+	return deal, nil
+}
+
+// generateShareToken returns a URL-safe random token for the public payment
+// link. 32 random bytes (~256 bits of entropy) base64url-encoded without
+// padding. It is independent of the preimage and the deal id: rotating it
+// revokes the old link with no effect on the escrow.
+func generateShareToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // isValidEmail does a light syntactic check using the standard library. The

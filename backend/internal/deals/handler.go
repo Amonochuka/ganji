@@ -128,12 +128,13 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group.POST("/:dealID/approve", h.ApproveDeal)
 	group.POST("/:dealID/dispute", h.DisputeDeal)
 	group.PATCH("/:dealID/payee-invoice", h.UpdatePayeeInvoice)
+	group.POST("/:dealID/share-link", h.RotateShareLink)
 }
 
 // RegisterPublicRoutes registers the public (unauthenticated) deal routes.
 // These are mounted on the root router, not the protected group.
 func RegisterPublicRoutes(router gin.IRouter, h *Handler) {
-	router.GET("/public/deals/:dealID", h.GetPublicDeal)
+	router.GET("/public/deals/:shareToken", h.GetPublicDeal)
 }
 
 func (h *Handler) UpdateDealStatus(c *gin.Context) {
@@ -319,9 +320,9 @@ func (h *Handler) UpdatePayeeInvoice(c *gin.Context) {
 }
 
 func (h *Handler) GetPublicDeal(c *gin.Context) {
-	dealID := c.Param("dealID")
+	shareToken := c.Param("shareToken")
 
-	deal, err := h.service.GetPublicDeal(c.Request.Context(), dealID)
+	deal, err := h.service.GetPublicDeal(c.Request.Context(), shareToken)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -338,5 +339,33 @@ func (h *Handler) GetPublicDeal(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"deal": deal,
+	})
+}
+
+func (h *Handler) RotateShareLink(c *gin.Context) {
+	userID := c.GetString("userID")
+	dealID := c.Param("dealID")
+
+	deal, err := h.service.RotateShareLink(c.Request.Context(), userID, dealID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "share link regenerated",
+		"deal":    deal,
 	})
 }
