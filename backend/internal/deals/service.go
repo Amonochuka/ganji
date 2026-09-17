@@ -349,19 +349,36 @@ func (s *Service) CheckPayment(ctx context.Context, userID, dealID string) (*Dea
 		return nil, ErrNoCheckingID
 	}
 
-	payment, err := s.lnbits.CheckPayment(ctx, deal.CheckingID)
-	if err != nil {
+	if err := s.refreshPaymentStatus(ctx, deal); err != nil {
 		return nil, fmt.Errorf("checking payment with lnbits: %w", err)
 	}
 
-	if payment.Paid && deal.Status == StatusAwaitingPayment {
-		if err := s.repo.UpdateStatus(ctx, dealID, StatusLocked); err != nil {
-			return nil, fmt.Errorf("updating deal status after payment: %w", err)
+	return deal, nil
+}
+
+// refreshPaymentStatus asks LNbits for the hold's current state and moves an
+// awaiting_payment deal to locked once the payment is confirmed. It is the
+// single "paid => locked" reconciliation shared by the authed poll endpoint
+// and the public share link. LNbits errors are returned so the authed caller
+// can surface them; the public link treats them as best-effort.
+func (s *Service) refreshPaymentStatus(ctx context.Context, deal *Deal) error {
+	payment, err := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+	if err != nil {
+		return err
+	}
+
+	if !payment.Paid {
+		return nil
+	}
+
+	if deal.Status == StatusAwaitingPayment {
+		if err := s.repo.UpdateStatus(ctx, deal.ID, StatusLocked); err != nil {
+			return err
 		}
 		deal.Status = StatusLocked
 	}
 
-	return deal, nil
+	return nil
 }
 
 // SweepExpiredHolds reconciles DB state with LNbits for old open deals.
@@ -646,6 +663,13 @@ func (s *Service) ListVerificationsByArtifact(ctx context.Context, userID, artif
 // share_token can see it. We expose only the fields needed to pay and track
 // the deal, never secrets (preimage, payee_invoice, client_email,
 // checking_id, the internal deal id, or the share token itself).
+//
+// Before answering, GetPublicDeal re-checks the hold's status with LNbits and
+// locks the deal if the payment landed. The client who opens this link has no
+// account, so they can never hit the freelancer-only poll endpoint — without
+// this refresh the page would stay "awaiting_payment" if the webhook was
+// delayed, lost, or never configured. LNbits being down is not a visitor
+// error: we just fall back to the last known status.
 func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*PublicDeal, error) {
 	if shareToken == "" {
 		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
@@ -653,6 +677,9 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
 	if err != nil {
 		return nil, err
+	}
+	if deal.CheckingID != "" && deal.Status == StatusAwaitingPayment {
+		_ = s.refreshPaymentStatus(ctx, deal)
 	}
 	return &PublicDeal{
 		Title:          deal.Title,

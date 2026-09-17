@@ -975,6 +975,54 @@ func TestGetPublicDealReturnsSafeView(t *testing.T) {
 	}
 }
 
+func TestGetPublicDealLocksWhenPaymentConfirmed(t *testing.T) {
+	// The client who opens the share link has no account and can never call
+	// the freelancer-only poll endpoint — the public view itself must refresh
+	// the LNbits hold status and lock the deal when the payment landed.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.ShareToken = "abc123"
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/payments/bb" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"paid":true,"details":{"status":"HOLD"}}`))
+	}))
+
+	publicDeal, err := service.GetPublicDeal(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if publicDeal.Status != StatusLocked {
+		t.Errorf("expected public view to show locked, got %s", publicDeal.Status)
+	}
+	if repo.deals[deal.ID].Status != StatusLocked {
+		t.Errorf("expected deal to be locked in the repo, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
+func TestGetPublicDealIgnoresLNbitsErrors(t *testing.T) {
+	// LNbits down must not 500 the public share link — the visitor still gets
+	// the deal with the last known status.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.ShareToken = "abc123"
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: "http://127.0.0.1:1", APIKey: "k"}))
+
+	publicDeal, err := service.GetPublicDeal(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if publicDeal.Status != StatusAwaitingPayment {
+		t.Errorf("expected deal to keep its last known status, got %s", publicDeal.Status)
+	}
+}
+
 func TestGetPublicDealRejectsEmptyToken(t *testing.T) {
 	repo := newFakeDealRepo()
 	service := newTestService(repo)
