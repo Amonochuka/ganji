@@ -15,6 +15,7 @@ type DealRepository interface {
 	ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error)
 	ListForUser(ctx context.Context, userID, email string) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
+	UpdateDispute(ctx context.Context, dealID, reason string) error
 	UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error
 	UpdateShareToken(ctx context.Context, dealID, shareToken string) error
 	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)

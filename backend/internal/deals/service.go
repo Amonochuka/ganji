@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -28,6 +29,11 @@ type CVAnchorer interface {
 	// CV anchoring is derived data, not on the money path.
 	AnchorReleasedDeal(ctx context.Context, freelancerID, dealID string) error
 }
+
+// maxDisputeReasonRunes caps how much the client can write when raising a
+// dispute. Enough to explain the problem, short enough to not become an
+// attachments dump.
+const maxDisputeReasonRunes = 2000
 
 type Service struct {
 	repo           DealRepository
@@ -317,19 +323,27 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 	return deal, nil
 }
 
-// DisputeDeal cancels the hold on the network (refunding the client) and
-// records the deal as refunded. Only the client can dispute.
+// DisputeDeal raises a dispute: the client must state, in writing, why they
+// refuse the work, and the deal freezes in the 'disputed' arbitration state.
+// Only the client (matched by client_email) can dispute.
 //
-// Cancelling a hold nobody ever funded succeeds trivially — if the client
-// disputes before paying, or the hold already expired/cancelled, there is
-// nothing held to return. But if LNbits still holds the funds and the cancel
-// fails, we refuse to mark the deal refunded: the escrow stays committed.
-// A hold that was already settled can no longer be cancelled (the sats are
-// in the wallet) and requires admin handling, so DisputeDeal refuses rather
-// than lying about the escrow.
-func (s *Service) DisputeDeal(ctx context.Context, email, dealID string) (*Deal, error) {
+// Disputing here does NOT move money. The hold stays held on the network —
+// neither refunding the client nor paying the freelancer — until an arbiter
+// resolves the dispute to released or refunded. This is the deliberate
+// safeguard against pay → take the work → cancel: the funds are frozen and
+// only an operator can release them. A client who changes their mind can
+// still approve the deal instead (disputed -> released settles and pays).
+func (s *Service) DisputeDeal(ctx context.Context, email, dealID, reason string) (*Deal, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, fmt.Errorf("%w: a dispute reason is required", ErrInvalidInput)
+	}
+	if length := len([]rune(reason)); length > maxDisputeReasonRunes {
+		return nil, fmt.Errorf("%w: dispute reason must be at most %d characters", ErrInvalidInput, maxDisputeReasonRunes)
 	}
 
 	deal, err := s.repo.GetDealByID(ctx, dealID)
@@ -341,35 +355,17 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID string) (*Deal,
 		return nil, ErrForbidden
 	}
 
-	if !CanTransition(deal.Status, StatusRefunded) {
-		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusRefunded)
+	if !CanTransition(deal.Status, StatusDisputed) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusDisputed)
 	}
 
-	if deal.PreimageHash == "" {
-		return nil, fmt.Errorf("%w: cannot dispute a deal without a payment hash", ErrInvalidInput)
+	if err := s.repo.UpdateDispute(ctx, dealID, reason); err != nil {
+		return nil, fmt.Errorf("raising dispute for deal %s: %w", dealID, err)
 	}
 
-	if _, err := s.lnbits.CancelHold(ctx, deal.PreimageHash); err != nil {
-		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
-		if checkErr != nil {
-			return nil, fmt.Errorf("cancelling escrow for deal %s (status check failed): %w", dealID, err)
-		}
-
-		switch payment.Details.Status {
-		case "SETTLED":
-			return nil, fmt.Errorf("%w: escrow already settled, refund must be handled by an operator", ErrInvalidTransition)
-		case "UNPAID", "EXPIRED", "CANCELLED":
-			// Nothing held — the refund already happened trivially.
-		default:
-			return nil, fmt.Errorf("cancelling escrow for deal %s: %w", dealID, err)
-		}
-	}
-
-	if err := s.repo.UpdateStatus(ctx, dealID, StatusRefunded); err != nil {
-		return nil, fmt.Errorf("refunding deal %s: %w", dealID, err)
-	}
-
-	deal.Status = StatusRefunded
+	deal.Status = StatusDisputed
+	deal.DisputeReason = reason
+	deal.DisputedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	return deal, nil
 }
 
@@ -868,6 +864,7 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 		SourcePlatform: deal.SourcePlatform,
 		Invoice:        deal.Invoice,
 		Status:         deal.Status,
+		DisputeReason:  deal.DisputeReason,
 		CreatedAt:      deal.CreatedAt,
 	}, nil
 }

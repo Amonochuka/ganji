@@ -253,11 +253,23 @@ func (h *Handler) ApproveDeal(c *gin.Context) {
 	})
 }
 
+type disputeRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
 func (h *Handler) DisputeDeal(c *gin.Context) {
 	email := c.GetString("email")
 	dealID := c.Param("dealID")
 
-	deal, err := h.service.DisputeDeal(c.Request.Context(), email, dealID)
+	var req disputeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "dispute reason is required",
+		})
+		return
+	}
+
+	deal, err := h.service.DisputeDeal(c.Request.Context(), email, dealID, req.Reason)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
@@ -276,7 +288,7 @@ func (h *Handler) DisputeDeal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "dispute raised",
+		"message": "dispute raised — funds frozen pending arbitration",
 		"deal":    deal,
 	})
 }

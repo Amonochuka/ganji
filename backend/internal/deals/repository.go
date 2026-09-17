@@ -88,6 +88,8 @@ const dealColumns = `
 		checking_id,
 		share_token,
 		status,
+		dispute_reason,
+		disputed_at,
 		created_at,
 		verified_at
 	`
@@ -108,6 +110,8 @@ func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 		&deal.CheckingID,
 		&deal.ShareToken,
 		&deal.Status,
+		&deal.DisputeReason,
+		&deal.DisputedAt,
 		&deal.CreatedAt,
 		&deal.VerifiedAt,
 	); err != nil {
@@ -308,6 +312,33 @@ func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Sta
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("repository: update deal status: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+
+	return nil
+}
+
+// UpdateDispute raises a dispute: it moves the deal into the 'disputed'
+// arbitration state and records the client's written reason. No money moves
+// here — the hold stays held until an arbiter resolves the dispute.
+func (r *Repository) UpdateDispute(ctx context.Context, dealID, reason string) error {
+	query := `
+		UPDATE deals
+		SET status = 'disputed',
+			dispute_reason = $1,
+			disputed_at = NOW()
+		WHERE id = $2;
+	`
+	result, err := r.q.ExecContext(ctx, query, reason, dealID)
+	if err != nil {
+		return fmt.Errorf("repository: raise dispute: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: raise dispute: %w", err)
 	}
 	if rowsAffected == 0 {
 		return ErrDealNotFound

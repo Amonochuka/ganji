@@ -28,7 +28,8 @@ freelancer creates deal   ──►  Ganji draws a hold invoice for amount_sats
   freelancer submits work ──►  client views artifacts
   client approves         ──►  settle (reveal preimage) → funds to Ganji wallet
                                ──► pay freelancer's payee_invoice ──► released
-  client disputes         ──►  cancel hold → sats return to client ──► refunded
+  client disputes         ──►  deal freezes 'disputed', funds stay held
+                               ──► arbiter: released (pay) or refunded
 ```
 
 Every released deal stamps `verified_at` and its artifacts become hash-verified
@@ -130,34 +131,45 @@ by the DB `CHECK` constraint in
               └───┬────────┬───┘
           dispute │        │ approve (settle hold → released)
                   ▼        ▼
-             ┌────────┐┌──────────┐
-             │refunded││ released │   terminal ×2
-             └────────┘└──────────┘
+             ┌──────────┐┌──────────┐
+             │ disputed ││ released │
+             └────┬─────┘└──────────┘
+       arbiter    │  (terminal)
+       resolves   ▼
+             ┌────────┐
+             │refunded│  terminal
+             └────────┘
 
   * reviewing is an optional formal phase between submitted and approve.
-  * disputed is a reserved arbitration state (future); today DisputeDeal
-    goes straight to refunded via a network cancel.
+  * disputed = money frozen pending arbitration. DisputeDeal requires a
+    written reason and cancels nothing — the hold stays on the network.
+    A client who changes their mind can still approve from disputed.
+  * refunded is reached by arbitration (disputed → refunded) or by the
+    hold-expiry sweep for deals that were never funded.
 ```
 
 | From | Allowed To | Set by | Money move? |
 |---|---|---|---|
-| `awaiting_payment` | `locked`, `work_submitted`, `refunded` | backend / freelancer / client | locked = funds held |
-| `locked` | `work_submitted`, `refunded` | — | — |
-| `work_submitted` | `reviewing`, `released`, `disputed`(reserved), `refunded` | — | — |
-| `reviewing` | `released`, `refunded` | — | — |
+| `awaiting_payment` | `locked`, `work_submitted`, `disputed`, `refunded` | backend / freelancer / client | locked = funds held |
+| `locked` | `work_submitted`, `disputed` | — | — |
+| `work_submitted` | `reviewing`, `released`, `disputed` | — | — |
+| `reviewing` | `released`, `disputed` | — | — |
+| `disputed` | `released`, `refunded` | client approve / arbiter | settle + payout, or cancel hold |
 | `released` | *(terminal)* | client approve | settle + payout |
-| `refunded` | *(terminal)* | client dispute / sweep | cancel hold |
+| `refunded` | *(terminal)* | arbiter / sweep | cancel hold |
 
 Rules that keep the money honest:
 
 - The freelancer's generic `PATCH /deals/:dealID/status` **cannot** set
   `locked`, `released`, `disputed`, or `refunded`. Those money states are set
-  only by the backend: payment detection, approve, or dispute.
+  only by the backend: payment detection, approve, dispute, or arbitration.
 - `released` is only reachable through a **successful network settle**
   (revealing the preimage proves the client really funded the hold).
-- `refunded` is only recorded when the hold was cancelled (or trivially was
-  never funded). If funds are still held and cancellation fails — or the escrow
-  already settled — the deal is **not** marked refunded; it needs an operator.
+- `refunded` is **never** reachable directly from a client-facing state. A
+  dispute freezes the funds in `disputed` instead; the sats only return via
+  arbitration, or via the hold-expiry sweep for deals that were never funded
+  (expired/cancelled/unpaid holds). This closes the pay → take the work →
+  cancel loop.
 
 If you add a status constant, update the DB `CHECK` constraint too or Postgres
 rejects the writes.
@@ -231,10 +243,14 @@ on LNbits actually reporting `paid`. No backend flags or hacks.
   success (verified via `CheckPayment`), so a retry after a crash between the
   legs just pays out without double-settling. Payout is **never** attempted
   unless LNbits confirms the escrow is settled.
-- **Dispute** (`POST /deals/:dealID/dispute`, client-by-email):
-  `CancelHold(preimage_hash)`; the deal is recorded `refunded` even if nothing
-  was ever held (trivial refund), but **not** if the hold is still held and
-  cancel fails, nor if already settled (needs operator handling).
+- **Dispute** (`POST /deals/:dealID/dispute`, client-by-email): **moves no
+  money.** The client must provide a written `reason` (trimmed, ≤ 2000 chars);
+  the deal enters `disputed` with `dispute_reason` + `disputed_at` and the
+  hold **stays held** on the network, frozen pending arbitration. Only an
+  arbiter resolves it to `released` (settle + payout) or `refunded` (cancel
+  hold). A client who changes their mind can still approve from `disputed`.
+  This is the safeguard against pay → take the work → cancel: the funds can't
+  be clawed back by the client alone.
 - **Payee-invoice rotation** (`PATCH /deals/:dealID/payee-invoice`,
   freelancer): swaps the payout destination while the deal is open. Unsticks a
   release where the original invoice expired mid-deal. Frozen after
@@ -352,8 +368,9 @@ go test ./...    # all packages
 - `internal/deals/service_test.go` — service-level tests using an in-memory
   fake `DealRepository` plus `httptest` LNbits servers: create→hold-invoice,
   submit rules, approve settle+payout (+ idempotent already-settled, refusal
-  unless settled), dispute cancel/refund (+ refusal while held / settled),
-  sweep, payee-invoice rotation, share-link (public view safe fields, lock-on-
+  unless settled), arbitration disputes (freeze funds, write reason + reject
+  empty/overlong, no network move, non-client forbidden, invalid-transition
+  refusals, approve-after-dispute releases), sweep, payee-invoice rotation, share-link (public view safe fields, lock-on-
   refresh, LNbits-down fallback, rotation owner/frozen). Transactions are
   simulated via a no-op `database/sql` driver so `BeginTx/Commit` flows without
   a DB.
@@ -387,6 +404,14 @@ Backend:
   oversized rejected with no blob left behind, DB-failure rollback deletes the
   blob) and `GET /deals/:dealID/artifacts/:artifactID/download` streams it
   back to the freelancer or client. Keys are `deals/<dealID>/<random-hex><sanitized-ext>`.
+- **Arbitration (next): dispute → resolution.** Disputes now freeze the
+  funds with the client's written reason (`disputed` state; see §3/§4). The
+  missing piece is the **arbiter side**: an operator-gated
+  `POST /disputes/:dealID/resolve` (`released` → settle+payout, `refunded` →
+  cancel hold), a dispute queue (`GET /disputes`), and a request–response
+  round with the client. Requires an operator/admin role in auth (none today).
+  Also consider: an automated resolution for `awaiting_payment` disputes where
+  nothing was ever funded (sweep already covers stale open deals).
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
 - **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
 - **Hardening (future): `client_email` masking.** Already excluded from the

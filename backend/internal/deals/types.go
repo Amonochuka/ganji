@@ -44,6 +44,8 @@ type Deal struct {
 	CheckingID     string       `json:"checking_id"`
 	ShareToken     string       `json:"share_token"`
 	Status         Status       `json:"status"`
+	DisputeReason  string       `json:"dispute_reason"`
+	DisputedAt     sql.NullTime `json:"disputed_at"`
 	CreatedAt      time.Time    `json:"created_at"`
 	VerifiedAt     sql.NullTime `json:"verified_at"`
 }
@@ -62,6 +64,7 @@ type PublicDeal struct {
 	SourcePlatform string    `json:"source_platform"`
 	Invoice        string    `json:"invoice"`
 	Status         Status    `json:"status"`
+	DisputeReason  string    `json:"dispute_reason"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -75,16 +78,24 @@ type PublicDeal struct {
 //     invoices (which never report "paid" while held) cannot deadlock:
 //     the freelancer submits, the client approves, and settle atomically
 //     proves the funds were held all along.
-//   - refunded is terminal: dispute cancels the hold on the network and
-//     the sats return to the client.
+//   - dispute freezes the money: a client who disputes sends the deal to
+//     'disputed' (funds stay held on the network, awaiting arbitration),
+//     it does NOT refund. The client-facing states have no direct path to
+//     refunded — that terminal state is reached only by arbitration
+//     (disputed -> refunded) or by the hold-expiry sweep for deals that
+//     were never funded.
+//   - a client who changes their mind after disputing can still approve:
+//     disputed -> released settles the hold and pays the freelancer.
 var ValidTransitions = map[Status][]Status{
-	StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusRefunded},
-	StatusLocked:          {StatusWorkSubmitted, StatusRefunded},
-	// work_submitted -> released/disputed/refunded is allowed because the
-	// client can approve, dispute, or cancel immediately on submission;
-	// reviewing is an optional formal phase before approve/dispute.
-	StatusWorkSubmitted: {StatusReviewing, StatusReleased, StatusDisputed, StatusRefunded},
-	StatusReviewing:     {StatusReleased, StatusDisputed, StatusRefunded},
+	StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusDisputed, StatusRefunded},
+	// refunded stays reachable from awaiting_payment for the hold-expiry
+	// sweep (expired/cancelled/unfunded holds). Clients cannot reach it.
+	StatusLocked: {StatusWorkSubmitted, StatusDisputed},
+	// work_submitted -> released/disputed is allowed because the client can
+	// approve or dispute immediately on submission; reviewing is an optional
+	// formal phase before approve/dispute.
+	StatusWorkSubmitted: {StatusReviewing, StatusReleased, StatusDisputed},
+	StatusReviewing:     {StatusReleased, StatusDisputed},
 	StatusDisputed:      {StatusReleased, StatusRefunded},
 	StatusReleased:      {}, // terminal — no transitions out
 	StatusRefunded:      {}, // terminal — no transitions out

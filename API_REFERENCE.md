@@ -291,14 +291,31 @@ Client approves → money moves on the network in two legs: `settle` the hold (r
 
 ### `POST /deals/:dealID/dispute`
 
-Client disputes → the hold is cancelled on the network (sats return to the client) and the deal is recorded **`refunded`** (terminal). Disputing before payment, or a hold that already expired/cancelled, still records the refunded state (nothing was held). If the cancel fails while funds are still held — or the escrow was already settled — the deal is **not** marked refunded and the money needs operator handling.
+Client disputes the delivered work. The client must state **why** in writing;
+the deal then freezes in the **`disputed`** arbitration state. This is a
+freeze, **not a refund**: the hold stays held on the network (neither paying
+the freelancer nor returning the sats) until an arbiter resolves the dispute
+to `released` or `refunded`. A client who changes their mind can still
+approve (`disputed → released`) to settle and pay.
+
+**Request**
+```json
+{
+  "reason": "deliverable does not match the agreement"
+}
+```
+
+`reason` is required, trimmed, and capped at 2000 characters.
 
 **Response `200`**
 ```json
 {
+  "message": "dispute raised — funds frozen pending arbitration",
   "deal": {
     "id": "uuid",
-    "status": "refunded",
+    "status": "disputed",
+    "dispute_reason": "deliverable does not match the agreement",
+    "disputed_at": "2026-09-17T12:00:00Z",
     ...
   }
 }
@@ -612,6 +629,8 @@ These are planned per the build spec but not yet implemented:
 | Method | Path | Description |
 |---|---|---|
 | `WS` | `/ws/deals/:dealID` | Real-time deal state updates |
+| `GET` | `/disputes` | Arbitration queue — list disputed deals (operator only) |
+| `POST` | `/disputes/:dealID/resolve` | Arbiter resolves a dispute → `released` (settle+payout) or `refunded` (cancel hold); requires an operator/admin role (not built yet) |
 
 ---
 
@@ -637,7 +656,7 @@ All error responses follow this shape:
 
 ## State Machine
 
-Network-as-escrow flow (hold invoices). `awaiting_payment → work_submitted` is allowed so LND-backed LNbits (which never reports a held payment as paid) can't deadlock: the freelancer submits, the client approves, and the settle atomically proves the funds were held. `refunded` — reached by dispute cancelling the hold — is terminal, as is `released`.
+Network-as-escrow flow (hold invoices). `awaiting_payment → work_submitted` is allowed so LND-backed LNbits (which never reports a held payment as paid) can't deadlock: the freelancer submits, the client approves, and the settle atomically proves the funds were held. Disputing **freezes** the deal in `disputed` (funds stay held, awaiting arbitration); only an arbiter moves it to terminal `released` or `refunded`.
 
 ```
                 ┌──────────────────────────────┐
@@ -655,13 +674,20 @@ Network-as-escrow flow (hold invoices). `awaiting_payment → work_submitted` is
               └───┬────────┬───┘
           dispute │        │ approve (settle hold → released)
                   ▼        ▼
-             ┌────────┐┌──────────┐
-             │refunded││ released │   terminal ×2
-             └────────┘└──────────┘
+             ┌──────────┐┌──────────┐
+             │ disputed ││ released │
+             └────┬─────┘└──────────┘
+       arbiter    │  (terminal)
+       resolves   ▼
+             ┌────────┐
+             │refunded│  terminal
+             └────────┘
 
   * reviewing is an optional formal phase between submitted and approve.
-  * disputed is a reserved arbitration state (future); today DisputeDeal
-    goes straight to refunded via a network cancel.
+  * disputed = money frozen pending arbitration; a client who changes their
+    mind can still approve from disputed.
+  * refunded is reached by arbitration (disputed → refunded) or by the
+    hold-expiry sweep for deals that were never funded.
 ```
 
 `released` and `refunded` are terminal — no transitions out.

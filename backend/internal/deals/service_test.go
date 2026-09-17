@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +123,16 @@ func (f *fakeDealRepo) UpdateStatus(ctx context.Context, dealID string, status S
 		return ErrDealNotFound
 	}
 	deal.Status = status
+	return nil
+}
+
+func (f *fakeDealRepo) UpdateDispute(ctx context.Context, dealID, reason string) error {
+	deal, ok := f.deals[dealID]
+	if !ok {
+		return ErrDealNotFound
+	}
+	deal.Status = StatusDisputed
+	deal.DisputeReason = reason
 	return nil
 }
 
@@ -566,124 +577,56 @@ func TestApproveDealRefusesPayoutUnlessSettled(t *testing.T) {
 	}
 }
 
-func TestDisputeDealCancelsAndRefunds(t *testing.T) {
+func TestDisputeDealRaisesDisputeAndFreezesFunds(t *testing.T) {
+	// Disputing must NOT move money: the deal enters the disputed arbitration
+	// state with the client's written reason, and LNbits is never touched.
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusReviewing
 
-	var cancelled bool
+	// &lnbits.Client{} with an empty URL: any network call would fail, so the
+	// test passing proves DisputeDeal made zero network moves.
+	service := NewService(repo, &lnbits.Client{})
 
-	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/payments/cancel":
-			var req lnbits.CancelHoldRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				t.Fatalf("decode cancel body: %v", err)
-			}
-			if req.PaymentHash != "bb" {
-				t.Errorf("expected payment hash, got %q", req.PaymentHash)
-			}
-			cancelled = true
-			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
-		}
-	}))
-
-	updated, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID)
+	updated, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID, "  deliverable does not match the agreement  ")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if updated.Status != StatusRefunded {
-		t.Fatalf("expected status refunded, got %s", updated.Status)
+	if updated.Status != StatusDisputed {
+		t.Fatalf("expected status disputed, got %s", updated.Status)
 	}
-	if !cancelled {
-		t.Error("expected the hold to be cancelled")
+	if updated.DisputeReason != "deliverable does not match the agreement" {
+		t.Errorf("expected trimmed reason to be persisted, got %q", updated.DisputeReason)
 	}
-}
-
-func TestDisputeDealRefusesWhenEscrowStillHeldAndCancelFails(t *testing.T) {
-	repo := newFakeDealRepo()
-	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
-	deal.Status = StatusLocked
-
-	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/payments/cancel":
-			_, _ = w.Write([]byte(`{"ok":false,"checking_id":"bb","error_message":"cancel failed"}`))
-		case "/api/v1/payments/bb":
-			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"bb","status":"HOLD"}}`))
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
-		}
-	}))
-
-	_, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !updated.DisputedAt.Valid {
+		t.Error("expected disputed_at to be set")
 	}
-
-	if repo.deals[deal.ID].Status == StatusRefunded {
-		t.Fatal("expected the deal not to be marked refunded")
+	if repo.deals[deal.ID].Status != StatusDisputed {
+		t.Fatal("expected the deal to be frozen in disputed")
 	}
 }
 
-func TestDisputeDealRefusesWhenAlreadySettled(t *testing.T) {
+func TestDisputeDealRequiresReason(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusWorkSubmitted
 
-	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/payments/cancel":
-			_, _ = w.Write([]byte(`{"ok":false,"checking_id":"bb","error_message":"already settled"}`))
-		case "/api/v1/payments/bb":
-			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"bb","status":"SETTLED"}}`))
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
+	service := newTestService(repo)
+
+	for _, reason := range []string{"", "   "} {
+		if _, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID, reason); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("expected ErrInvalidInput for reason %q, got %v", reason, err)
 		}
-	}))
-
-	_, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID)
-	if err == nil {
-		t.Fatal("expected error, got nil")
 	}
 
-	if repo.deals[deal.ID].Status == StatusRefunded {
-		t.Fatal("expected the deal not to be marked refunded")
-	}
-}
-
-func TestDisputeDealRefundsUnpaidHold(t *testing.T) {
-	// Cancelling a hold that was never funded succeeds trivially: there is
-	// nothing held to return, so the deal is simply recorded as refunded.
-	repo := newFakeDealRepo()
-	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
-	deal.Status = StatusAwaitingPayment
-
-	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/payments/cancel":
-			_, _ = w.Write([]byte(`{"ok":false,"checking_id":"bb","error_message":"invoice not held"}`))
-		case "/api/v1/payments/bb":
-			_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"bb","status":"UNPAID"}}`))
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
-		}
-	}))
-
-	updated, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	long := strings.Repeat("x", maxDisputeReasonRunes+1)
+	if _, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID, long); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for over-long reason, got %v", err)
 	}
 
-	if updated.Status != StatusRefunded {
-		t.Fatalf("expected status refunded, got %s", updated.Status)
+	if repo.deals[deal.ID].Status != StatusWorkSubmitted {
+		t.Fatal("expected the deal to be untouched after rejected disputes")
 	}
 }
 
@@ -694,9 +637,59 @@ func TestDisputeDealRejectsNonClient(t *testing.T) {
 
 	service := newTestService(repo)
 
-	_, err := service.DisputeDeal(context.Background(), "different@example.com", deal.ID)
+	_, err := service.DisputeDeal(context.Background(), "different@example.com", deal.ID, "not good")
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestDisputeDealRejectsInvalidTransition(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	service := newTestService(repo)
+
+	for _, status := range []Status{StatusReleased, StatusRefunded, StatusDisputed} {
+		deal.Status = status
+		if _, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID, "not good"); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("expected ErrInvalidTransition for %s, got %v", status, err)
+		}
+	}
+}
+
+func TestApproveAfterDisputeReleasesEscrow(t *testing.T) {
+	// A client who raised a dispute can still change their mind and approve:
+	// the hold settles, the freelancer is paid, and the deal is released.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusDisputed
+
+	var settled, paidOut bool
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/payments/settle":
+			settled = true
+			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
+		case "/api/v1/payments":
+			paidOut = true
+			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb","payment_hash":"cc"}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+
+	updated, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if updated.Status != StatusReleased {
+		t.Fatalf("expected status released, got %s", updated.Status)
+	}
+	if !settled || !paidOut {
+		t.Error("expected settle and payout to run")
 	}
 }
 

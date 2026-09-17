@@ -12,8 +12,9 @@ and the snapshot below is only history — **read [`explained.md`](./explained.m
 and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
 
 - **Network-as-escrow (hold invoices) is live.** Deals create LNbits hold
-  invoices; approve = settle + payout, dispute = cancel → refunded. See
-  `internal/deals/service.go`, `internal/lnbits/client.go`.
+  invoices; approve = settle + payout, dispute = **freeze + arbitration** (no
+  more instant cancel → refunded). See `internal/deals/service.go`,
+  `internal/lnbits/client.go`.
 - **Webhook HMAC verification, hold-expiry sweep, and payee-invoice rotation**
   shipped (robustness batch).
 - **Shareable payment link shipped.** Each deal has a revocable `share_token`;
