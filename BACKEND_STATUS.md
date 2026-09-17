@@ -1,7 +1,31 @@
 # Ganji Backend — Status Report
 
-**Date:** 2026-08-26
+**Date:** 2026-08-26 (updated 2026-09-17)
 **Author:** opencode
+
+---
+
+## Updates since 2026-08-26
+
+This report was written early in the build. Since then the escrow core shipped
+and the snapshot below is only history — **read [`explained.md`](./explained.md)
+and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
+
+- **Network-as-escrow (hold invoices) is live.** Deals create LNbits hold
+  invoices; approve = settle + payout, dispute = cancel → refunded. See
+  `internal/deals/service.go`, `internal/lnbits/client.go`.
+- **Webhook HMAC verification, hold-expiry sweep, and payee-invoice rotation**
+  shipped (robustness batch).
+- **Shareable payment link shipped.** Each deal has a revocable `share_token`;
+  `GET /public/deals/:shareToken` shows a safe public view and refreshes the
+  hold status (locks when paid) so the client sees the payment land without an
+  account. `POST /deals/:dealID/share-link` rotates the token.
+- **Tests now exist.** `internal/deals/service_test.go`,
+  `internal/webhook/service_test.go`+`handler_test.go`,
+  `internal/lnbits/client_test.go`; `go test ./...` passes.
+- Still stubbed (unchanged): `internal/cv`, `internal/websocket`,
+  `internal/middleware/{cors,ratelimit}.go`, `pkg/hash`, `pkg/sanitize`.
+  Frontend still does not compile.
 
 ---
 
@@ -68,7 +92,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 | Rate limiting middleware | ❌ Empty stub | `internal/middleware/ratelimit.go` |
 | CORS middleware | ❌ Empty stub | `internal/middleware/cors.go` |
 | Input sanitization hardening | ❌ Not done | — |
-| Tests | ❌ Zero test files | — |
+| ~~Tests~~ *(tests now exist — see deals/webhook/lnbits `_test.go`)* | ✅ Done | `backend/internal/*/*_test.go` |
 
 ---
 
@@ -86,7 +110,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 7. **CORS middleware** — currently inline in `router.go` via `gin-contrib/cors`.
 
 ### Nice to Have
-8. **Tests** — zero `_test.go` files anywhere. Auth and deal logic are highly testable with the existing interface-based repository design.
+8. ~~Tests~~ — *(outdated: now covered by service/handler/client `_test.go` files across deals, webhook, and lnbits — see the "Updates since 2026-08-26" section).*
 9. **Webhook retry logic** — the current handler processes once; LNbits retries automatically but we could add idempotency tracking.
 10. **Structured logging** — currently uses `log.Printf`. Should move to `slog` or `zerolog` for production.
 

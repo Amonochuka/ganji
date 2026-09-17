@@ -124,22 +124,29 @@ Public. Revoke a refresh token.
 
 ## 3. Deals
 
-All deal endpoints require `Authorization: Bearer <access_token>` **except the public shareable link endpoint** (`GET /public/deals/:dealID`), which is intentionally unauthenticated so the freelancer can share a link the client can open without an account.
+All deal endpoints require `Authorization: Bearer <access_token>` **except the public shareable link endpoint** (`GET /public/deals/:shareToken`), which is intentionally unauthenticated so the freelancer can share a link the client can open without an account.
 
-### `GET /public/deals/:dealID`
+Every deal carries a unique **`share_token`** — a high-entropy random value, separate from the deal's UUID. It is the only thing that identifies a deal on the public endpoint, so:
 
-Public. Returns a safe, limited view of the deal for the shareable payment link. Anyone with the link can view the deal title, amount, status, and the bolt11 invoice to pay. Sensitive fields (preimage, preimage_hash, payee_invoice, freelancer_id, client_email, checking_id, verified_at) are never exposed.
+- a leaked link can be **revoked** by regenerating the token (`POST /deals/:dealID/share-link`) — the old link dies immediately;
+- the internal deal UUID is **never exposed** unauthenticated;
+- a freelancer can re-share (rotate) the link if a client loses it.
+
+### `GET /public/deals/:shareToken`
+
+Public. Returns a safe, limited view of the deal for the shareable payment link. Anyone with the link can view the deal title, amount, status, and the bolt11 invoice to pay. The internal deal id and all sensitive fields (preimage, preimage_hash, payee_invoice, freelancer_id, client_email, checking_id, share_token, verified_at) are never exposed.
+
+The endpoint **refreshes the hold status with LNbits before answering**: if the client already paid but the webhook was delayed or lost, the deal is locked on the spot. LNbits being unreachable is not an error — the visitor gets the last known status.
 
 **Response `200`**
 ```json
 {
   "deal": {
-    "id": "uuid",
     "title": "Landing page redesign",
     "amount_sats": 50000,
     "source_platform": "Telegram",
     "invoice": "lnbc50000n1...",
-    "status": "awaiting_payment",
+    "status": "locked",
     "created_at": "2026-08-26T12:00:00Z"
   }
 }
@@ -151,6 +158,26 @@ Public. Returns a safe, limited view of the deal for the shareable payment link.
   "error": "deal not found"
 }
 ```
+
+### `POST /deals/:dealID/share-link`
+
+Freelancer (owner) only. Regenerates the deal's `share_token`, immediately invalidating any previously shared link. The share link is frozen once the deal is `released` or `refunded`.
+
+**Response `200`**
+```json
+{
+  "message": "share link regenerated",
+  "deal": {
+    "id": "uuid",
+    "title": "Landing page redesign",
+    "share_token": "abc123...",
+    "status": "awaiting_payment",
+    "...": "..."
+  }
+}
+```
+
+The frontend renders the link from `share_token` (e.g. `FRONTEND_URL/deal/<share_token>`).
 
 ---
 
@@ -185,6 +212,7 @@ Create a new deal. Generates a fresh escrow preimage, draws a **hold invoice** o
     "preimage_hash": "hex",
     "invoice": "lnbc...",
     "checking_id": "lnbits_checking_id",
+    "share_token": "abc123...",
     "status": "awaiting_payment",
     "created_at": "2026-08-26T12:00:00Z",
     "verified_at": null
@@ -193,6 +221,8 @@ Create a new deal. Generates a fresh escrow preimage, draws a **hold invoice** o
 ```
 
 The raw `preimage` (the network secret that can settle the escrow) and the freelancer's `payee_invoice` are stored server-side but intentionally **omitted** from API responses.
+
+`share_token` is the token for the public payment link (`GET /public/deals/:shareToken`) — there is one per deal from creation, rotatable via `POST /deals/:dealID/share-link`.
 
 ### `GET /deals`
 

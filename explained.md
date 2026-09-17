@@ -1,76 +1,78 @@
-# Ganji — What's Been Built and Where (Session Reference)
+# Ganji — How It Works (Working Reference)
 
-This document is a working reference for the Ganji backend: what the code does,
-which files implement it, what was recently changed and why, and what comes next.
-Read this first before touching code so you can find your way around.
-
-> **Current milestone: the network-as-escrow (hold invoice) migration is
-> complete, including the follow-up robustness batch (webhook HMAC, hold-expiry
-> sweep, payee-invoice rotation).** Section 4 describes the old custodial flow;
-> Section 4b documents the new hold-invoice flow.
+A living reference for the Ganji backend: what the product does, how the money
+and deal flows work, where each concern lives, and what is still missing.
+Read this before touching code — it is kept in sync with `API_REFERENCE.md`
+(the authoritative endpoint contract) and the migrations.
 
 ---
 
 ## 1. What Ganji Is
 
-Ganji ("money" in Sheng) is a **Bitcoin / Lightning Network escrow platform for
-freelancers** with a cryptographically-anchored reputation layer ("Live CV").
+Ganji ("money" in Sheng) is a **Bitcoin / Lightning escrow app for
+freelancers**. A freelancer and a client transact over any channel (WhatsApp,
+Telegram, X, email) — Ganji just provides the escrow, the payment link, and a
+cryptographically anchored reputation layer (the **Live CV**).
 
-The flow that has been built so far (the escrow core):
+The escrow is **network-as-escrow**: instead of holding sats in a hot wallet,
+Ganji draws a Lightning **hold invoice** and the Lightning Network itself keeps
+the funds until the client approves. Nothing is custodial.
 
 ```
-CreateDeal()
-      │  posts to POST /deals
-      ▼
-deals.Service.CreateDeal()
-      │  generates a 32-byte preimage, hashes it (SHA-256)
-      │  calls LNbits CreateHoldInvoice()  -> creates a hold invoice
-      ▼
-LNbits returns invoice + checking_id
-      │  deal is INSERTed transactionally, status = awaiting_payment
-      ▼
-User pays the invoice in their wallet
-      │  (or explicitly polls GET /deals/:dealID/payment)
-      ▼
-LNbits POSTs a payment webhook  ->  POST /webhooks/lnbits
-      │  webhook.Service.HandlePayment()
-      │    → CheckPayment() with LNbits (authoritative confirmation)
-      │    → GetDealByCheckingID()
-      │    → transition awaiting_payment → locked
-      ▼
-Deal is LOCKED — escrow secured, freelancer can deliver work
+freelancer creates deal   ──►  Ganji draws a hold invoice for amount_sats
+                               (payment_hash = sha256(preimage Ganji holds))
+
+  client opens share link ──►  sees title, amount, bolt11 invoice, status
+  client pays invoice     ──►  sats HELD on the network (escrowed)
+
+  freelancer submits work ──►  client views artifacts
+  client approves         ──►  settle (reveal preimage) → funds to Ganji wallet
+                               ──► pay freelancer's payee_invoice ──► released
+  client disputes         ──►  cancel hold → sats return to client ──► refunded
 ```
 
-Key point: **the webhook does not trust LNbits' webhook body.** It re-verifies
-the payment with `CheckPayment()` before locking the deal. The webhook is just
-a trigger; LNbits is the source of truth.
+Every released deal stamps `verified_at` and becomes a hash-verified line on
+the freelancer's Live CV (CV itself is a future milestone — see §7).
 
 ---
 
-## 2. Where Each Piece Lives
+## 2. Architecture
 
-### Modules in the repo
+A classic layering: **Gin router → Handler → Service → Repository → Postgres**,
+with the `Service` also talking to LNbits for anything network-related.
+
+```
+ Request → gin router → handler (HTTP concerns, auth context, status mapping)
+                       → service   (business rules, ownership, state machine,
+                                    LNbits money moves, share-link logic)
+                       → repository (pure SQL: one struct per row)
+                       → PostgreSQL
+
+ service ──► lnbits.Client (hold create/check/settle/cancel, payout)
+ webhook.HandlePayment ──► deals repo (lookup by checking_id, lock)
+```
+
+### Module layout
 
 ```
 backend/
-  cmd/api/                 entry point + router wiring + background workers
+  cmd/api/            entry point, router wiring, background workers
   internal/
-    auth/                  JWT + bcrypt auth (complete)
-    config/                env/config loading
-    cv/                    Live CV — EMPTY STUB (next big feature)
-    db/                    connection pool + auto-migrations
-    deals/                 deal CRUD, state machine, artifacts, verifications,
-                           hold-invoice escrow, expiry sweep
-    health/                GET /health
-    lnbits/                LNbits HTTP client (hold invoices, check/settle/cancel)
-    middleware/            auth (done); cors/ratelimit (empty)
-    webhook/               LNbits payment webhook + HMAC signature (complete)
-    websocket/             EMPTY STUB
-  migrations/              SQL schema (golang-migrate)
-  pkg/
-    hash/                  preimage hashing — EMPTY STUB
-    sanitize/              input sanitizing — EMPTY STUB
-frontend/                  Next.js app — currently does NOT compile
+    auth/             JWT + refresh rotation + bcrypt (complete)
+    config/           env/config loading (godotenv)
+    cv/               Live CV — STUB (next major feature)
+    db/               pool + auto-migration on boot
+    deals/            deal model, state machine, share link, escrow service,
+                      artifacts, verifications, expiry sweep
+    health/           GET /health
+    lnbits/           LNbits HTTP client (hold invoices, check/settle/cancel,
+                      pay out, webhook-url attachment)
+    middleware/       auth (done); cors via gin-contrib; ratelimit is a stub
+    webhook/          LNbits payment webhook + HMAC signature verification
+    websocket/        STUB (real-time updates planned)
+  migrations/         numbered SQL schema (golang-migrate, run at boot)
+  pkg/                hash/, sanitize/ — empty stubs
+frontend/             Next.js app (out of scope here)
 ```
 
 ### Key files
@@ -78,490 +80,308 @@ frontend/                  Next.js app — currently does NOT compile
 | Concern | File |
 |---|---|
 | Server entry + graceful shutdown | `backend/cmd/api/main.go` |
-| Route wiring, CORS | `backend/cmd/api/router.go` |
+| Route wiring + CORS + dependency construction | `backend/cmd/api/router.go` |
 | Background workers (hold-expiry sweep) | `backend/cmd/api/workers.go` |
-| Deal struct + status constants + valid transitions | `backend/internal/deals/types.go` |
-| Deal business logic (preimage, LNbits hold invoice, ownership) | `backend/internal/deals/service.go` |
-| Deal DB queries (repos, transactions) | `backend/internal/deals/repository.go` |
+| Deal struct, statuses, valid transitions | `backend/internal/deals/types.go` |
+| Deal business logic (escrow, ownership, share link) | `backend/internal/deals/service.go` |
+| Deal SQL (repos, transactions) | `backend/internal/deals/repository.go` |
 | Deal repository interface | `backend/internal/deals/interface_types.go` |
 | Deal sentinel errors | `backend/internal/deals/errors.go` |
-| Deal Gin handlers + routes | `backend/internal/deals/handler.go` |
-| Hold-expiry sweep loop + sweep logic | `backend/internal/deals/sweep.go` |
-| Deal service tests (submit/approve/dispute) | `backend/internal/deals/service_test.go` |
-| Client role schema (client_email) | `backend/migrations/000003_create_deals_table.up.sql` |
-| LNbits client (hold invoices, settle/cancel/payout) | `backend/internal/lnbits/client.go` |
-| LNbits request/response models | `backend/internal/lnbits/models.go` |
-| Webhook handler (`POST /webhooks/lnbits`) | `backend/internal/webhook/handler.go` |
-| Webhook service (verify + lock deal) | `backend/internal/webhook/service.go` |
-| Webhook HMAC signature verification | `backend/internal/webhook/signature.go` |
-| LNbits webhook payload model | `backend/internal/webhook/models.go` |
-| Webhook service tests | `backend/internal/webhook/service_test.go` |
-| Webhook handler tests | `backend/internal/webhook/handler_test.go` |
+| Deal HTTP handlers + route registration | `backend/internal/deals/handler.go` |
+| Hold-expiry sweep worker logic | `backend/internal/deals/sweep.go` |
+| LNbits client | `backend/internal/lnbits/client.go` + `models.go` |
+| Webhook endpoint + HMAC | `backend/internal/webhook/` |
+| Deal service tests | `backend/internal/deals/service_test.go` |
+
+Design constants to keep: constructor-injected dependencies
+(`NewService(repo, lnbitsClient)`), narrow consumer interfaces (webhook uses
+`DealReader`/`PaymentChecker`) so unit tests need no real DB or LNbits,
+sentinel errors + `errors.Is` for HTTP mapping, and a single `DBTX` for
+transactional operations.
 
 ---
 
 ## 3. The Deal Lifecycle (State Machine)
 
 Defined in `backend/internal/deals/types.go` (`ValidTransitions`) and mirrored
-in the DB CHECK constraint (`backend/migrations/000003_create_deals_table.up.sql`).
+by the DB `CHECK` constraint in
+`backend/migrations/000003_create_deals_table.up.sql`.
 
 ```
-awaiting_payment ──payment confirmed──► locked ──► work_submitted ──► reviewing
-                                                                    │
-                                          reviewing ──┬───────► released (terminal)
-                                                      └───────► disputed ──► released
+                ┌──────────────────────────────┐
+                │  awaiting_payment            │  ← client pays hold invoice
+                └──┬───────────────────────────┘  (funds held on the network)
+        paid (CLN) │            │ freelancer submits
+                   ▼            ▼
+              ┌────────┐  ┌──────────────────┐
+              │ locked │  │  work_submitted  │
+              └───┬────┘  └───┬─────────┬────┘
+   freelancer     │           │ client  │ client disputes
+   submits        ▼           │ checks  ▼
+              ┌────────────────┐   approve │
+              │ work_submitted │◄─────────┘
+              └───┬────────┬───┘
+          dispute │        │ approve (settle hold → released)
+                  ▼        ▼
+             ┌────────┐┌──────────┐
+             │refunded││ released │   terminal ×2
+             └────────┘└──────────┘
+
+  * reviewing is an optional formal phase between submitted and approve.
+  * disputed is a reserved arbitration state (future); today DisputeDeal
+    goes straight to refunded via a network cancel.
 ```
 
-Note: `work_submitted` may also go **directly** to `released` or `disputed`
-(the client can approve or dispute right after submission; `reviewing` is an
-optional formal phase reached via `PATCH /deals/:dealID/status`).
-
-| From | Allowed To |
-|---|---|
-| `awaiting_payment` | `locked` |
-| `locked` | `work_submitted` |
-| `work_submitted` | `reviewing`, `released`, `disputed` |
-| `reviewing` | `released`, `disputed` |
-| `disputed` | `released` |
-| `released` | *(terminal — nothing)* |
-
-If you add a status constant, you must update the DB CHECK constraint too, or
-Postgres will reject inserts/updates.
-
----
-
-## 4. Payment Flow — Implemented Details
-
-### LNbits client (`backend/internal/lnbits/client.go`)
-
-- `CreateInvoice(ctx, req)` — `POST {url}/api/v1/payments` with header
-  `X-Api-Key`. If no per-request webhook URL is set, it attaches the configured
-  `webhookURL`. Non-2xx responses are read and returned as error text.
-- `CheckPayment(ctx, checkingID)` — `GET {url}/api/v1/payments/{checkingID}`,
-  returns `CheckPaymentResponse{Paid, Details}`.
-
-### Deal creation (`backend/internal/deals/service.go::CreateDeal`)
-
-1. Trim + validate input (`ErrInvalidInput` on missing/bad fields).
-2. Generate 32 random bytes as the **preimage**; store `SHA-256(preimage)` hex
-   as `PreimageHash`.
-3. Call LNbits to create the invoice (memo = deal title).
-4. In a DB transaction, insert the deal with `status = awaiting_payment`.
-   Rollback if anything fails.
-
-### Payment polling (`deals/service.go::CheckPayment`)
-
-`GET /deals/:dealID/payment` (authed, ownership-checked): asks LNbits if the
-invoice is paid; if `Paid` and status is `awaiting_payment`, updates to `locked`.
-
-### Webhook (`backend/internal/webhook/`)
-
-- `Handler.HandleLNbitsWebhook` (`handler.go`) — public endpoint, no JWT.
-  Reads raw body → unmarshals into `PaymentNotification` → calls service.
-  Maps errors to status codes:
-  | Error | HTTP |
-  |---|---|
-  | `ErrMalformedPayload` | 400 |
-  | `ErrPaymentFailed` | 200 `{"status":"ignored","reason":"payment not successful"}` |
-  | `ErrDealNotFound` | 404 |
-  | anything else | 500 |
-  | success | 200 `{"status":"ok"}` |
-
-- `Service.HandlePayment` (`service.go`):
-  1. Requires `checking_id`.
-  2. `CheckPayment()` against LNbits — if it errors or `Paid == false`, stop.
-  3. `GetDealByCheckingID()` — if not found, `ErrDealNotFound`.
-  4. Only transitions a deal currently in `awaiting_payment` → `locked`.
-     Already-locked deals are **idempotent** (returns nil, 200) so LNbits
-     retries don't corrupt state.
-
-- Narrow interfaces for easy testing: `DealReader` and `PaymentChecker`
-  (`service.go`). This is why the tests need no real DB or LNbits.
-
----
-
-## 4b. Network-As-Escrow Migration (Hold Invoices)
-
-**What we are replacing:** Section 4 above is the **custodial** design. Ganji
-generates a preimage but never uses it (LNbits mints its own), the client pays a
-regular invoice and the sats land **immediately in Ganji's LNbits wallet
-balance**, and `ApproveDeal` only flips a DB column — there is no payout leg and
-no way for the client to be refunded automatically. Ganji is the custodian of
-every escrowed sat.
-
-**Target:** use **hold invoices** so the Lightning Network itself is the escrow.
-
-### How a hold invoice works (vetted against LNbits source, v1.5.6/v1.6.1/[dev])
-
-Current LNbits endpoints (differ from old docs — the code is authoritative):
-
-| Action | Endpoint | Auth |
-|---|---|---|
-| Create hold invoice | `POST /api/v1/payments` `{out:false, amount, memo, payment_hash, webhook}` | invoice/admin |
-| Check status | `GET /api/v1/payments/{payment_hash}` | invoice/admin |
-| **Settle** (release) | `POST /api/v1/payments/settle` `{preimage}` | **admin** |
-| **Cancel** (refund) | `POST /api/v1/payments/cancel` `{payment_hash}` | **admin** |
-| Pay out | `POST /api/v1/payments` `{out:true, bolt11}` | **admin** |
-
-To create a hold invoice you pass `payment_hash = sha256(preimage)`. LNbits
-stores the preimage internally and the incoming HTLC sits **held** — it cannot
-complete until LNbits reveals the preimage (settle) or tears it down (cancel).
-
-### Backend-dependent "held" detection — IMPORTANT
-
-Whether LNbits reports a held-but-unsettled invoice as `paid` depends on the
-funding source (`lnbits/wallets/*.py` `get_invoice_status`):
-
-- **CLN / corelightning / clnrest**: maps invoice status `"paid"` → `paid=true`
-  while held. So a webhook/poll can lock a deal the moment the client pays.
-- **LND / lndrest / lndgrpc**: only `SETTLED` returns success; a held invoice
-  stays `ACCEPTED` → LNbits reports `paid=false` until **settled**, and LND's
-  `paid_invoices_stream` skips anything not `SETTLED` (so **no webhook fires
-  while held**).
-
-**Decision (with product):** autodetect — no backend config, no hacks.
-Locking is always gated on `paid == true`. On CLN the deal locks immediately on
-payment; on LND it stays `awaiting_payment` until the client approves, at which
-point `SettleHold` atomically proves the funds were really held. To avoid a
-deadlock on LND, `awaiting_payment → work_submitted` is an allowed transition
-(submit before confirmed payment is safe: `released` is only reachable via a
-successful settle, which cannot happen if the client never funded the hold).
-
-### Progress so far
-
-- [x] **LNbits hold-invoice client** (`internal/lnbits/client.go`,
-  `models.go`, `client_test.go`):
-  - `Client.adminKey` added; `Config{AdminKey}` wired from `LNBITS_ADMIN_KEY`
-    (new env var, required for settle/cancel/send).
-  - `CreateHoldInvoice` — POST `/api/v1/payments` with `payment_hash`,
-    attaches the configured webhook, defaults `unit` to `sat`.
-  - `SettleHold(preimage)` — POST `/api/v1/payments/settle`.
-  - `CancelHold(payment_hash)` — POST `/api/v1/payments/cancel`.
-  - `PayInvoice(bolt11)` — POST `/api/v1/payments` `out:true` (payout leg).
-  - `postJSON` helper for the new POST methods.
-  - Tests cover happy path, key selection (invoice vs admin), and error bodies.
-- [x] **Deal model + migration** (`migrations/000003_create_deals_table*`,
-  `deals/types.go`, `deals/repository.go`):
-  - `deals.preimage TEXT` — raw hex preimage Ganji generated, needed on LNbits
-    to settle later. `deals.payee_invoice TEXT` — freelancer's Lightning
-    destination for the payout leg (folded into the fresh CREATE TABLE since
-    the escrow work landed before this environment existed).
-  - Status enum + DB CHECK gain **`refunded`** (terminal): dispute cancels the
-    hold on the network and refunds the client.
-  - `ValidTransitions` updated for the LND case: `awaiting_payment →
-    work_submitted` allowed (see the autodetect decision above); `refunded`
-    reachable from `awaiting_payment`, `locked`, `work_submitted`, `reviewing`,
-    `disputed`.
-  - `Deal` gains `Preimage` and `PayeeInvoice` (JSON `omitempty` so the secret
-    never leaks in API responses by default).
-  - Repository inserts/scans all new columns via one shared `dealColumns` +
-    `scanDeal` helper.
-- [x] **`CreateDeal` → hold invoice** (`deals/service.go`, `handler.go`,
-  `lnbits/client.go`, `config.go`):
-  - `deals.CreateDeal` now requires `PayeeInvoice` (freelancer's payout
-    destination) and no longer uses the custodial `CreateInvoice` path. It
-    generates a fresh 32-byte **preimage** per deal, hashes it with sha256,
-    and creates an LNBits hold invoice: `payment_hash = sha256(preimage)`,
-    `out=false`, amount = `deal.amount_sats`, memo = title.
-  - The raw preimage is stored (`deals.preimage`) because LNBits settles a
-    hold with the preimage in the request body; only a money path (approve)
-    or cancel (dispute) may later move the stuck funds.
-  - Hold invoices are created with a **long expiry**
-    (`LNBITS_HOLD_INVOICE_EXPIRY_SECONDS`, default 30 days) — LNBits' default
-    1h invoice lifetime is far too short for escrow deals.
-  - API: `POST /deals` now accepts `"payee_invoice"` (required).
-  - New test `TestCreateDealCreatesHoldInvoice` verifies against an
-    `httptest` LNBits server: `out=false`, correct amount/memo, a 64-hex
-    `payment_hash`, the stored hex preimage matches, and the deal is saved as
-    `awaiting_payment`. (Unit tests get a working transaction via a small
-    no-op `database/sql` driver so `BeginTx/Commit` flow works without a DB.)
-- [x] **Lock detection (webhook + poll gate on `paid`)** (`deals/service.go`,
-  `webhook/service.go`):
-  - `CheckPayment` and the LNbits webhook were already gated on LNbits
-    reporting `paid=true`. With hold invoices that now means: **CLN-backed
-    LNbits** → a held payment already reports `paid=true` and the deal locks
-    immediately on client payment; **LND-backed LNbits** → held stays
-    `paid=false`, no webhook fires, the deal remains `awaiting_payment` and
-    only moves on approve (settle proves the funds were held). No backend
-    flags/hacks needed — the backend is autodetected.
-  - The generic freelancer `PATCH /deals/:id/status` endpoint now refuses all
-    **money states** (`locked`, `released`, `disputed`, `refunded`): those
-    can only be set by the backend (payment detection, approve, dispute).
-    A freelancer can't fake that escrow is committed or refunded.
-  - New tests cover: block money states; `CheckPayment` locks when paid;
-    stays `awaiting_payment` while held (LND case); a locked deal is never
-    rolled back.
-- [ ] Approve = settle + payout; Dispute = cancel → refunded.
-- [x] **Approve = settle + payout; Dispute = cancel → refunded**
-  (`deals/service.go`, `lnbits/client.go`):
-  - `ApproveDeal` now moves money on the network, in two deliberate legs:
-    1. `SettleHold(preimage)` reveals the stored preimage, completing the
-       held payment into Ganji's LNbits wallet;
-    2. `PayInvoice(payee_invoice)` forwards the sats to the freelancer.
-    Payout is only attempted after LNbits confirms the escrow is actually
-    settled. Approval is idempotent: if the hold is already settled (e.g. a
-    retry after a crash between the legs), LNbits still reports `SETTLED`
-    and we move straight to the payout.
-  - `DisputeDeal` cancels the hold (`CancelHold(payment_hash)`) and records
-    the deal as **`refunded`**. Cancelling a hold that was never funded
-    (UNPAID/EXPIRED/CANCELLED) succeeds trivially and is still recorded as
-    refunded. If the cancel fails while funds are still held, or the escrow
-    is already settled, the deal is NOT marked refunded — the money is
-    committed and needs operator handling.
-  - `SettleHold`/`CancelHold` now decode LNbits's `ok:false` responses into
-    errors (LNbits answers 200 with `ok:false` for refusals like "already
-    settled" / "not held") so a refused settle can never be mistaken for a
-    successful one that releases money.
-  - Tests: settle+payout happy path, approve straight from submission,
-    idempotent already-settled retry, refused-payout-unless-settled,
-    dispute-cancel→refunded, dispute refuses while held / already settled,
-    and refund of an unfunded hold.
-- [x] Docs + env sync (`README.md`, `API_REFERENCE.md`, `.env`):
-  - `README.md` describes the hold-invoice (network-as-escrow) model and the
-    new `LNBITS_ADMIN_KEY` (required for settle/cancel/payout) +
-    `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` env vars.
-  - `API_REFERENCE.md`: `POST /deals` documents required `client_email` /
-    `payee_invoice` and that the raw preimage stays server-side; new
-    `submit`/`approve`/`dispute` endpoint docs (approve = settle + payout,
-    dispute = cancel → refunded); `PATCH status` only drives workflow states;
-    state-machine diagram updated with `refunded` and the LND-safe
-    `awaiting_payment → work_submitted` edge.
-  - `.env` (gitignored, updated locally) has `LNBITS_ADMIN_KEY` and
-    `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS=2592000` — **you must paste your
-    LNbits router admin key** into `.env` before approve/dispute will work.
-
-#### Robustness fixes batch (`4b7e33e`..`ba1b3ff`)
-
-- [x] **Webhook HMAC verification** (`internal/webhook/signature.go`,
-  `handler.go`, `cmd/api/router.go`, `config.go`):
-  - LNbits signs webhooks with header `LNbits-Signature: t=<unix>,v1=<mac>`
-    where `mac` = HMAC-SHA256(key=`LNBITS_WEBHOOK_SECRET`) over
-    `"{t}.{raw_body}"`, gated by LNbits' `LNBITS_WEBHOOK_SIGNING_ENABLED`
-    (default on; wallets created before the feature have no secret).
-  - `VerifyLNbitsSignature` checks `t` is within ±5 minutes (replay + clock
-    skew protection) and recomputes the MAC. When `LNBITS_WEBHOOK_SECRET` is
-    empty (pre-existing wallets / signing disabled), verification is skipped
-    so unsigned webhooks keep working.
-  - `NewHandler(service, secret)` 401s on a missing/invalid signature.
-  - Tests: `TestVerifyLNbitsSignature`, valid-signature accept, bad-signature
-    reject in `handler_test.go` (`signBody` helper).
-- [x] **Hold-expiry sweep** (`internal/deals/sweep.go`, `service.go`
-  `SweepExpiredHolds`, `repository.go` `ListOpenBefore`, `cmd/api/workers.go`,
-  `config.go`):
-  - New background worker starts on boot and every
-    `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` (default 21600 = 6h). It lists deals
-    still `awaiting_payment`/`locked` but older than the hold lifetime
-    (`LNBITS_HOLD_INVOICE_EXPIRY_SECONDS`) and re-checks their LNbits hold.
-  - Only when LNbits reports `UNPAID`/`EXPIRED`/`CANCELLED` — i.e. the network
-    already returned any funds — is the deal marked **`refunded`**. Holds still
-    reported `HOLD`/`ACCEPTED`/`SETTLED` are left untouched; the sweep never
-    pays anything out and stops on LNbits errors (retries next tick).
-  - This is the expiry backstop for the network-as-escrow model: without it an
-    expired hold would sit in the DB as `awaiting_payment` forever even though
-    the sats went back to the client.
-  - Tests: refunds an expired hold, ignores still-held and freshly-created
-    deals, ignores unreachable LNbits.
-- [x] **Payee-invoice rotation** (`internal/deals/service.go`
-  `UpdatePayeeInvoice`, `handler.go`, `repository.go`):
-  - `PATCH /deals/:dealID/payee-invoice` (freelancer only). If the original
-    `payee_invoice` expired mid-deal, the approve payout leg can fail even
-    though the hold settles; setting a fresh invoice + re-approving unsticks
-    release (already-settled settle is idempotent, new invoice gets paid).
-  - Frozen once the deal is `released`/`refunded` (money already moved).
-  - Tests: owner updates, non-owner → `ErrForbidden`, frozen after release.
-- [x] **Dead-code removal** (`internal/lnbits`): deleted the abandoned
-  custodial `CreateInvoice` method, its `CreateInvoiceRequest`, and
-  `ErrCreateInvoice` — every deal now goes through `CreateHoldInvoice`.
-
-## 5. Client Role & Submit / Approve / Dispute Flow
-
-### Identity model (email link, no forced sign-up)
-
-- `deals.client_email` (folded into the CREATE TABLE in migration `000003`)
-  identifies the client — the client does
-  **not** need an account yet (product concept: no platform lock-in, deals
-  happen over WhatsApp/Telegram/X/etc.).
-- When the client is ready to review, they sign up with that same email. The
-  JWT access token carries their email (`middleware/auth.go` sets
-  `c.Set("email", claims.Email)`), which authorizes them for approve/dispute.
-- Emails are stored lowercased (matching `auth` signup normalization) and
-  compared with `strings.EqualFold`.
-
-### New endpoints (all in `internal/deals/handler.go`)
-
-| Method | Path | Who | Effect |
+| From | Allowed To | Set by | Money move? |
 |---|---|---|---|
-| `POST` | `/deals/:dealID/submit` | freelancer (owner) | `locked` → `work_submitted`; **requires ≥ 1 artifact** |
-| `POST` | `/deals/:dealID/approve` | client (email match) | `work_submitted`/`reviewing` → `released` (stamps `verified_at`) |
-| `POST` | `/deals/:dealID/dispute` | client (email match) | `work_submitted`/`reviewing` → `disputed` |
+| `awaiting_payment` | `locked`, `work_submitted`, `refunded` | backend / freelancer / client | locked = funds held |
+| `locked` | `work_submitted`, `refunded` | — | — |
+| `work_submitted` | `reviewing`, `released`, `disputed`(reserved), `refunded` | — | — |
+| `reviewing` | `released`, `refunded` | — | — |
+| `released` | *(terminal)* | client approve | settle + payout |
+| `refunded` | *(terminal)* | client dispute / sweep | cancel hold |
 
-### Authorization rules (`internal/deals/service.go`)
+Rules that keep the money honest:
 
-- `SubmitWork(userID, dealID)` — `deal.FreelancerID != userID` → `ErrForbidden`.
-  Returns `ErrInvalidInput` if no artifacts exist yet.
-- `ApproveDeal(email, dealID)` / `DisputeDeal(email, dealID)` —
-  `strings.EqualFold(deal.ClientEmail, email)` fails → `ErrForbidden`.
-- The generic `PATCH /deals/:dealID/status` is **freelancer-only** and is
-  blocked from reaching `released`/`disputed` (returning `ErrInvalidTransition`)
-  so it can never be used to bypass the client. Those two states are reachable
-  only through the client's approve/dispute endpoints.
-- Releasing a deal via approve (`repository.go::UpdateStatus`) is what stamps
-  `verified_at = NOW()`; dispute resolution later reuses the same single path.
-- `GET /deals/:dealID` and `GET /deals` now also serve the **client**: a user
-  who matches `client_email` can view the deal, and `ListForUser` returns deals
-  where the user is freelancer **or** client.
+- The freelancer's generic `PATCH /deals/:dealID/status` **cannot** set
+  `locked`, `released`, `disputed`, or `refunded`. Those money states are set
+  only by the backend: payment detection, approve, or dispute.
+- `released` is only reachable through a **successful network settle**
+  (revealing the preimage proves the client really funded the hold).
+- `refunded` is only recorded when the hold was cancelled (or trivially was
+  never funded). If funds are still held and cancellation fails — or the escrow
+  already settled — the deal is **not** marked refunded; it needs an operator.
 
-Tests: `internal/deals/service_test.go` (fake in-memory `DealRepository`) covers
-submit success/forbidden/no-artifact/bad-transition, approve as client (from
-`reviewing` and from `work_submitted`), approve/forbidden/pre-payment, dispute
-as client/forbidden, and the PATCH release/dispute bypass block.
+If you add a status constant, update the DB `CHECK` constraint too or Postgres
+rejects the writes.
 
 ---
 
-## 5. Tests — What Passes and Why
+## 4. Money: Network-as-Escrow (Hold Invoices)
 
-All tests live in `backend/internal/webhook/`. Run with:
+This is the current model. LNbits hold invoices make the Lightning Network the
+escrow: an incoming payment sits **held** under `payment_hash` until someone
+reveals the preimage (settle → to the freelancer) or tears it down (cancel →
+back to the client).
+
+### LNbits endpoints Ganji uses
+
+| Action | Call | Auth |
+|---|---|---|
+| Create hold invoice (`out:false, amount, memo, payment_hash, webhook`) | `POST /api/v1/payments` | invoice key |
+| Check status | `GET /api/v1/payments/{checking_id}` | invoice key |
+| Settle (release escrow) — reveal stored preimage | `POST /api/v1/payments/settle` | **admin key** |
+| Cancel (refund) — `{payment_hash}` | `POST /api/v1/payments/cancel` | **admin key** |
+| Pay out — `out:true, bolt11` | `POST /api/v1/payments` | **admin key** |
+
+`Deal` stores both sides of the secret: `preimage` (raw hex — needed later to
+settle) and `preimage_hash = sha256(preimage)` (what LNbits locked the invoice
+to). The preimage and the freelancer's `payee_invoice` are persisted but never
+serialized into API responses (`omitempty` + the public view drops them).
+
+### CreateDeal (`service.go`)
+
+1. Validate + trim input; require a valid `client_email` and a `payee_invoice`
+   (the freelancer's payout destination).
+2. Generate a 32-byte random **preimage**; store `preimage` + `preimage_hash`.
+3. Generate the shareable-link **`share_token`** (see §5).
+4. `lnbits.CreateHoldInvoice` → hold invoice + `checking_id`; `memo = title`
+   (hold expiry: `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS`, default 30 days).
+5. Insert the deal (transaction, `status = awaiting_payment`).
+
+No money moves on creation.
+
+### Paid ⇒ locked detection — autodetect, backend chooses
+
+Whether LNbits reports a *held-but-unsettled* invoice as `paid` depends on its
+funding backend:
+
+- **CLN-backed LNbits** reports `paid=true` while held → deal locks the moment
+  the client pays (via webhook or poll).
+- **LND-backed LNbits** keeps `paid=false` until settled → the deal stays
+  `awaiting_payment`, and the **settle on approve** is what atomically proves
+  the funds were held.
+
+Hence the `awaiting_payment → work_submitted` edge (freelancer can submit
+before confirmed payment without deadlocking), and all locking logic is gated
+on LNbits actually reporting `paid`. No backend flags or hacks.
+
+### Paths that move money
+
+- **Webhook** (`POST /webhooks/lnbits`): LNbits pings when an invoice is paid.
+  The handler verifies the HMAC signature (`LNbits-Signature`, ±5 min replay
+  window, skipped if `LNBITS_WEBHOOK_SECRET` is empty), then the service
+  **re-queries LNbits** (the webhook body is never trusted) and transitions
+  `awaiting_payment → locked`. Idempotent for already-locked deals.
+- **Poll** (`GET /deals/:dealID/payment`, freelancer): same reconciliation via
+  the shared `refreshPaymentStatus`, so locking works even without webhooks.
+- **Approve** (`POST /deals/:dealID/approve`, client-by-email):
+  1. `SettleHold(preimage)` — reveals the preimage, funds land in Ganji's
+     LNbits wallet;
+  2. `PayInvoice(payee_invoice)` — forwards to the freelancer;
+  3. only then `status = released` (+ `verified_at NOW()`).
+  Idempotent: a settle refused because it's *already settled* is treated as
+  success (verified via `CheckPayment`), so a retry after a crash between the
+  legs just pays out without double-settling. Payout is **never** attempted
+  unless LNbits confirms the escrow is settled.
+- **Dispute** (`POST /deals/:dealID/dispute`, client-by-email):
+  `CancelHold(preimage_hash)`; the deal is recorded `refunded` even if nothing
+  was ever held (trivial refund), but **not** if the hold is still held and
+  cancel fails, nor if already settled (needs operator handling).
+- **Payee-invoice rotation** (`PATCH /deals/:dealID/payee-invoice`,
+  freelancer): swaps the payout destination while the deal is open. Unsticks a
+  release where the original invoice expired mid-deal. Frozen after
+  `released`/`refunded`.
+- **Hold-expiry sweep** (background, `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS`,
+  default 6 h): reconciles stale open deals with LNbits. If LNbits reports
+  `UNPAID`/`EXPIRED`/`CANCELLED` — the network already returned any funds —
+  the deal becomes `refunded`. Holds still held/settled are left alone. This
+  is the backstop for an expired-but-never-refunded hold sitting in
+  `awaiting_payment` forever.
+
+---
+
+## 5. The Shareable Payment Link (share_token)
+
+This is how the payment-confirmation loop closes for the client. The goal:
+the freelancer sends a link, the client opens it **without logging in**, sees
+the invoice (and message at-a-glance), pays in their wallet, and the page
+reflects the money landing on the network.
+
+### Design — why a separate token, not the deal UUID
+
+`GET /public/deals/:shareToken` is the only unauthenticated deal endpoint.
+The share token is a **deliberately separate secret from the deal's DB UUID**:
+
+- **Revocable.** `POST /deals/:dealID/share-link` (freelancer) mints a fresh
+  token; the old link stops resolving immediately. A UUID-based link can't be
+  retired without hiding the whole deal.
+- **No internal-ID leak.** The public response never contains the deal UUID,
+  so a shared link can't be used to correlate/guess other rows.
+- **Unguessable but not secret-critical.** 32 random bytes
+  (`crypto/rand`) base64url-encoded (~256 bits). Anyone with the link can see
+  the title/amount/invoice and pay — that is the point — but they cannot read
+  any sensitive field.
+
+### Implementation
+
+- **Schema** (`000003_create_deals_table.up.sql`):
+  `share_token TEXT NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex')`
+  with `UNIQUE` (which also serves as the lookup index). The `NOT NULL DEFAULT`
+  backfilled every existing deal when the column was folded into the table, so
+  no backfill migration is needed. New tokens are generated in
+  `deals.Service.CreateDeal` too (service-side generation, DB default as a
+  safety net).
+- **Model**: `Deal.ShareToken` (`json:"share_token"` — visible to authed
+  users so the freelancer can build the link) and a separate `PublicDeal`
+  view that carries only `title`, `amount_sats`, `source_platform`, `invoice`,
+  `status`, `created_at`.
+- **Lookup + refresh**: `Service.GetPublicDeal` resolves the token via
+  `repo.GetDealByShareToken`, and before answering **proactively re-checks the
+  hold with LNbits** (`refreshPaymentStatus`): if the client has already paid,
+  the deal transitions to `locked` right there. The client opening the link has
+  no account and could never call the freelancer-only poll endpoint, so this
+  self-refresh is what makes the page reflect reality even if the webhook was
+  delayed/lost/never configured. An LNbits error is swallowed — the visitor
+  gets the last known status rather than a 500.
+- **Rotation**: `Service.RotateShareLink` (freelancer owner only) generates a
+  new token and persists it via `repo.UpdateShareToken`. Mirrors the payee-
+  invoice rule: frozen after `released`/`refunded` (nothing left to share).
+- **Route wiring**: `GET /public/deals/:shareToken` is mounted on the **root
+  router** (unauthenticated), while `POST /deals/:dealID/share-link` lives in
+  the protected `/deals` group.
+
+### Endpoints
+
+| Method | Path | Auth | Effect |
+|---|---|---|---|
+| `GET` | `/public/deals/:shareToken` | none | safe public deal view; refreshes hold status (locks if paid) |
+| `POST` | `/deals/:dealID/share-link` | freelancer | rotate token → revoke old link, return new one |
+
+### Threat model / trade-offs
+
+- Link is bearer: whoever has it can see the deal and pay the invoice. That is
+  the feature, and the token is unguessable. It is **not**
+  sensitive-credential-grade — treat it like a "magic link".
+- Payment-gating is unchanged: even with the link, a stranger can't approve or
+  dispute (both are locked to `client_email` matching) and can't see the
+  preimage, payee invoice, or the freelancer's payout details.
+- After `released`/`refunded` the public page still renders the (terminal)
+  status but the invoice is spent; rotation is disabled because there is
+  nothing to re-share.
+
+---
+
+## 6. Identity & Authorization
+
+- **Freelancer** = authenticated user. `deals.freelancer_id` points at `users`.
+  Deal creation, artifact/verification upload, submit, payee-invoice and share-
+  link rotation are all freelancer-owner-gated.
+- **Client** = just an email address. `deals.client_email` (lowercased) is
+  captured at deal creation; the client needs **no account** to receive the
+  link and pay. When they're ready to review, they sign up with that same
+  email; the JWT carries `email` (set by `middleware/auth.go`), and
+  `strings.EqualFold(deal.ClientEmail, email)` authorizes approve/dispute and
+  deal viewing.
+- `GET /deals` and `GET /deals/:dealID` serve both roles (freelancer by id,
+  client by email match via `ListForUser`).
+- Money-state endpoints are contrasted: approve/dispute are **client**-scoped,
+  submit/payee-invoice/share-link are **freelancer**-scoped, and the generic
+  status PATCH is freelancer-only but blocked from money states.
+
+---
+
+## 7. Tests & Verification
+
+Run everything from `backend/`:
 
 ```bash
-cd backend
-go test ./internal/webhook
-go test ./...     # whole module
+go build ./...   # compiles
+go vet ./...     # static checks
+gofmt -l .       # should print nothing
+go test ./...    # all packages
 ```
 
-- `service_test.go` — `Service.HandlePayment` unit tests with fake
-  `DealReader`/`PaymentChecker` (payment confirmed → locked, unpaid → ignored,
-  missing deal → error, LNbits failure → error, idempotency).
-- `handler_test.go` — full HTTP tests through Gin:
-  - paid payment → 200 `{"status":"ok"}` and deal updated
-  - invalid JSON → 400
-  - unpaid payment → 200 ignored
-  - missing deal → 404
-  - LNbits failure → 500
-
-### JSON key-order gotcha (why the fix this session was needed)
-
-`gin.H{...}` marshals map keys in **sorted order**, so
-`{"reason": "payment not successful", "status": "ignored"}` is the actual wire
-order even when the code writes `gin.H{"status": "ignored", "reason": ...}`.
-The tests originally compared the response body as a raw string, so the
-unpaid-payment test failed on key ordering even though the handler was correct.
-
-Fix: compare responses as decoded JSON maps instead of strings. The pattern
-used in `handler_test.go`:
-
-```go
-var expectedJSON map[string]string
-var actualJSON map[string]string
-json.Unmarshal([]byte(expectedBody), &expectedJSON)  // etc.
-// compare len + each key/value
-```
-
-`TestHandleLNbitsWebhookReturnsNotFoundForMissingDeal` also initially had the
-wrong expected body (`{"status":"ignored",...}`), which produced the misleading
-`expected body X, got {"error":"no deal for checking_id"}` output. It now
-asserts `{"error":"no deal for checking_id"}`.
+- `internal/deals/service_test.go` — service-level tests using an in-memory
+  fake `DealRepository` plus `httptest` LNbits servers: create→hold-invoice,
+  submit rules, approve settle+payout (+ idempotent already-settled, refusal
+  unless settled), dispute cancel/refund (+ refusal while held / settled),
+  sweep, payee-invoice rotation, share-link (public view safe fields, lock-on-
+  refresh, LNbits-down fallback, rotation owner/frozen). Transactions are
+  simulated via a no-op `database/sql` driver so `BeginTx/Commit` flows without
+  a DB.
+- `internal/webhook/service_test.go` / `handler_test.go` — payment → locked,
+  unpaid ignored, missing deal, bad signature, HMAC verification.
+- `internal/lnbits/client_test.go` — client request shapes and key selection.
 
 ---
 
-## 6. Recent Commit Log (the worked milestones)
+## 8. Not Built / Next
 
-```
-d63a907 fix webhook handler tests for JSON key order    <- most recent
-938dbdc add webhook handler tests
-dcc5b44 add webhook payment verification tests
-9b38ebe verify LNbits payments before locking deals
-1ccc45a wire and clean up LNbits webhook
-c7d7365 fix: formatting
-e495b44 webhook: return proper HTTP status codes and reject future timestamps
-aeeca34 docs: add backend status report and API reference
-49698d8 feat(webhook): add LNbits webhook handler
-08551af feat(deals): add GET /deals/:dealID/payment endpoint
-13ec9f6 feat: Add LNbits payment status client
-c5567fe refactor: migrate to LNBits client and introduce transaction support for deals
-```
+Backend:
 
----
-
-## 7. Project State Overview
-
-**Working:** auth (JWT + refresh rotation), deals CRUD + state machine, **client
-role with submit/approve/dispute flow**, artifacts + verifications, LNbits
-invoice creation, payment polling, webhook payment verification → lock, health,
-migrations, graceful shutdown. `go build ./...`, `go vet ./...`, and the deals +
-webhook tests all pass.
-
-**Empty stubs (next features):** `internal/cv`, `internal/websocket`,
-`internal/middleware/cors.go`, `internal/middleware/ratelimit.go`,
-`pkg/hash`, `pkg/sanitize`.
-
-**Not built / gaps:**
-
-- Frontend (`frontend/`) does **not compile** — 22 TS errors from missing
-  `@/components/ui/*`, `@/components/auth/auth-shell`,
-  `@/lib/auth/auth-context`, `@/lib/api-client`.
-- No dispute resolution endpoint (arbiter `disputed → released` is only
-  reachable via the freelancer's `PATCH /status`, though the DB accepts it).
+- **Live CV** (`internal/cv/`): `cv_entries` table exists; public
+  `GET /cv/:slug`, hash verification, and `verified_at` anchoring on release
+  are not wired.
+- **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
+- **File upload**: artifacts only record a `storage_key` string; no storage
+  backend yet.
+- **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
 - `trust_score` is persisted but never calculated.
-- No file upload backend (artifacts just record a `storage_key` string).
-- No rate limiting, no structured logging (`log.Printf` everywhere).
-- No CI, Dockerfile, Makefile, or `.env.example`.
-- `backend/.env` (with real credentials) is **committed to git** — rotate and
-  untrack it.
-- The root `.gitignore` is **malformed** (contains the heredoc command text
-  instead of rules).
 
-### Architecture at a glance
-
-```
-Requests → Gin router → Handler → Service → Repository → PostgreSQL
-                           │          │
-                           │          └─→ lnbits.Client (X-Api-Key)
-                           └─(webhook: narrow interfaces → easy tests)
-```
-
-Handler → service → repository layering, constructor-injected dependencies
-(`NewService(repo, lnbitsClient)`), narrow consumer interfaces, sentinel errors
-+ `errors.Is` for HTTP mapping, `DBTX` for transactional operations.
+Frontend (out of scope this session): `frontend/` exists but the shared deal/
+public-link UI is not implemented.
 
 ---
 
-## 8. Next Logical Steps (in priority order)
+## 9. Environment
 
-1. **Deal client role + submit/approve/dispute flow** — the escrow product flow
-   is documented (`submit`, `approve`, `dispute`) but not buildable yet because
-   the model is freelancer-only. Add `client_id` to deals, then implement the
-   transition endpoints. (Chosen as the next milestone.)
-2. **Frontend build fix** — create the 6 missing `lib`/`components` modules so
-   `next build` / `tsc` passes.
-3. **`internal/cv` (Live CV)** — product differentiator; the `cv_entries`
-   migration already exists. Needs public `GET /cv/:slug` + hash verification;
-   extract the inline preimage logic into `pkg/hash`.
-4. **WebSocket layer** — real-time deal updates over `/ws/deals/:dealID`
-   (needs a websocket library — none is a dependency yet).
-5. **Hygiene** — fix `.gitignore`, untrack+rotate `.env`, add CI
-   (`go vet` + `go test` + `next build`), Makefile/docker-compose, `.env.example`.
+See `backend/.env.example`-style vars in `API_REFERENCE.md` / `README.md`; the
+critical ones:
 
----
-
-## 9. Useful Commands
-
-```bash
-# Build / verify
-cd backend
-go build ./...
-go vet ./...
-gofmt -w internal/webhook/handler.go   # format a file
-gofmt -l .                             # list unformatted files
-
-# Tests
-go test ./internal/webhook
-go test ./...
-
-# Migrations run automatically at boot (golang-migrate, file://migrations)
-# Config required: DATABASE_URL, JWT_SECRET, JWT_REFRESH_SECRET
-# Optional: PORT (8080), LNBITS_URL, LNBITS_API_KEY, WEBHOOK_URL, FRONTEND_URL
-
-# Git (single main branch, conventional commits)
-git status
-git log --oneline -15
-```
+- `LNBITS_ADMIN_KEY` — router **admin** key; required for settle/cancel/payout
+  (money moves). The invoice key alone can only create the hold invoice.
+- `LNBITS_WEBHOOK_SECRET` + `WEBHOOK_URL` — webhook HMAC verification and the
+  public webhook URL.
+- `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (30 d) / `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` (6 h).
+- `FRONTEND_URL` — CORS origin.
