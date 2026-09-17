@@ -32,6 +32,13 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   oversized blobs rejected before commit, and
   `GET /deals/:dealID/artifacts/:artifactID/download` streams them back to the
   freelancer or client.
+- **Arbitration shipped.** Disputes freeze the funds (no network move); an
+  operator resolves them via `GET /disputes` (queue) and
+  `POST /disputes/:dealID/resolve` (`release` = settle + payout, `refund` =
+  cancel hold). Operators are promoted from `OPERATOR_EMAILS` at boot and the
+  role rides in the access token as `is_operator`; the routes sit behind
+  `middleware.OperatorRequired`. Resolutions record `resolved_by` /
+  `resolved_at` only after the network leg succeeds.
 - **Tests now exist.** `internal/deals/service_test.go`,
   `internal/cv/service_test.go`,
   `internal/webhook/service_test.go`+`handler_test.go`,
@@ -186,6 +193,7 @@ Payment-not-successful returns `200` because the webhook was received and unders
 | `FRONTEND_URL` | No | CORS origin (default: `http://localhost:3000`) |
 | `STORAGE_PATH` | No | Artifact blob directory (default: `./uploads`) |
 | `MAX_UPLOAD_BYTES` | No | Per-artifact upload cap (default: 10 MB) |
+| `OPERATOR_EMAILS` | No | Comma-separated emails promoted to arbitration operators at boot |
 | `PORT` | No | Server port (default: `8080`) |
 
 ---

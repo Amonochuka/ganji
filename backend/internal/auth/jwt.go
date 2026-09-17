@@ -15,8 +15,9 @@ const (
 // password hash or anything sensitive in here, JWTs are signed, not
 // encrypted. Anyone can decode and read the payload.
 type Claims struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
+	UserID     string `json:"user_id"`
+	Email      string `json:"email"`
+	IsOperator bool   `json:"is_operator"`
 	jwt.RegisteredClaims
 }
 
@@ -36,11 +37,14 @@ func NewTokenManager(accessSecret, refreshSecret string) *TokenManager {
 }
 
 // GenerateAccessToken creates a short-lived token used to authenticate
-// API requests. Short TTL limits damage if a token leaks.
-func (tm *TokenManager) GenerateAccessToken(userID, email string) (string, error) {
+// API requests. Short TTL limits damage if a token leaks. The operator flag
+// is baked into the claims at issuance — promoting a user takes effect for
+// them on their next login.
+func (tm *TokenManager) GenerateAccessToken(userID, email string, isOperator bool) (string, error) {
 	claims := Claims{
-		UserID: userID,
-		Email:  email,
+		UserID:     userID,
+		Email:      email,
+		IsOperator: isOperator,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessTokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

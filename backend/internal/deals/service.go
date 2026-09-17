@@ -287,22 +287,8 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
 	}
 
-	if deal.Preimage == "" {
-		return nil, fmt.Errorf("%w: cannot approve a deal without an escrow preimage", ErrInvalidInput)
-	}
-
-	if _, err := s.lnbits.SettleHold(ctx, deal.Preimage); err != nil {
-		// A previous approve may already have settled this hold (for
-		// example if we crashed between settle and the DB update). Confirm
-		// with LNbits that the funds really are settled before paying out.
-		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
-		if checkErr != nil || payment.Details.Status != "SETTLED" {
-			return nil, fmt.Errorf("settling escrow for deal %s: %w", dealID, err)
-		}
-	}
-
-	if err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice); err != nil {
-		return nil, fmt.Errorf("paying freelancer for deal %s: %w", dealID, err)
+	if err := s.settleAndPayEscrow(ctx, deal); err != nil {
+		return nil, err
 	}
 
 	if err := s.repo.UpdateStatus(ctx, dealID, StatusReleased); err != nil {
@@ -311,16 +297,53 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 
 	deal.Status = StatusReleased
 
-	// Live CV anchoring. Best-effort and deliberately off the money path:
-	// a failed anchor must never roll back a completed release, and the
-	// public CV self-heals any missing anchors on its next read anyway.
-	if s.cv != nil {
-		if err := s.cv.AnchorReleasedDeal(ctx, deal.FreelancerID, dealID); err != nil {
-			log.Printf("cv: anchoring released deal %s: %v", dealID, err)
+	s.anchorReleasedDeal(ctx, deal)
+
+	return deal, nil
+}
+
+// settleAndPayEscrow runs the two non-atomic network legs that move a held
+// escrow to the freelancer:
+//  1. SettleHold reveals the preimage, completing the held payment so the
+//     sats land in Ganji's LNbits wallet.
+//  2. PayInvoice forwards those sats onward to the freelancer's invoice.
+//
+// Idempotency: a settle that fails because the hold is already settled is
+// treated as success (verified via CheckPayment) and we move straight to the
+// payout, so a retry after a crash between the legs cannot double-settle.
+// Payout is only ever attempted once LNbits confirms the escrow is settled.
+// It is shared by the client's approve and an operator's release resolution —
+// the money legs are identical, only the authorization differs.
+func (s *Service) settleAndPayEscrow(ctx context.Context, deal *Deal) error {
+	if deal.Preimage == "" {
+		return fmt.Errorf("%w: cannot release a deal without an escrow preimage", ErrInvalidInput)
+	}
+
+	if _, err := s.lnbits.SettleHold(ctx, deal.Preimage); err != nil {
+		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+		if checkErr != nil || payment.Details.Status != "SETTLED" {
+			return fmt.Errorf("settling escrow for deal %s: %w", deal.ID, err)
 		}
 	}
 
-	return deal, nil
+	if err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice); err != nil {
+		return fmt.Errorf("paying freelancer for deal %s: %w", deal.ID, err)
+	}
+
+	return nil
+}
+
+// anchorReleasedDeal writes the Live CV anchors for accepted work. Best-effort
+// and deliberately off the money path: a failed anchor must never roll back a
+// completed release, and the public CV self-heals any missing anchors on its
+// next read anyway.
+func (s *Service) anchorReleasedDeal(ctx context.Context, deal *Deal) {
+	if s.cv == nil {
+		return
+	}
+	if err := s.cv.AnchorReleasedDeal(ctx, deal.FreelancerID, deal.ID); err != nil {
+		log.Printf("cv: anchoring released deal %s: %v", deal.ID, err)
+	}
 }
 
 // DisputeDeal raises a dispute: the client must state, in writing, why they
@@ -367,6 +390,113 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID, reason string)
 	deal.DisputeReason = reason
 	deal.DisputedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	return deal, nil
+}
+
+// ListDisputes returns the arbitration queue: every deal frozen in the
+// disputed state, oldest dispute first. Route access is operator-only; the
+// service returns the full deal rows an operator needs to adjudicate.
+func (s *Service) ListDisputes(ctx context.Context) ([]Deal, error) {
+	return s.repo.ListDisputed(ctx)
+}
+
+// ResolveDispute is the arbiter's verdict on a frozen dispute. It is the only
+// path out of 'disputed' that moves money, and it is operator-only (enforced
+// by middleware.OperatorRequired at the route):
+//
+//   - release: the work is accepted — settle the hold and forward the sats to
+//     the freelancer (the same two network legs as ApproveDeal).
+//   - refund: the work is rejected — cancel the hold so the sats return to the
+//     client on the Lightning network.
+//
+// The deal must actually be disputed; a deal already released/refunded (or
+// never disputed) is refused. The resolution and the deciding operator are
+// recorded via UpdateDisputeResolution only AFTER the network leg succeeds,
+// so the DB never claims a money move the network did not make.
+func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID string, resolution DisputeResolution) (*Deal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	operatorEmail = strings.ToLower(strings.TrimSpace(operatorEmail))
+	if operatorEmail == "" {
+		return nil, fmt.Errorf("%w: operator email is required", ErrInvalidInput)
+	}
+
+	var target Status
+	switch resolution {
+	case DisputeResolutionRelease:
+		target = StatusReleased
+	case DisputeResolutionRefund:
+		target = StatusRefunded
+	default:
+		return nil, fmt.Errorf("%w: resolution must be %q or %q", ErrInvalidInput, DisputeResolutionRelease, DisputeResolutionRefund)
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+
+	if deal.Status != StatusDisputed {
+		return nil, fmt.Errorf("%w: only a disputed deal can be resolved, got %s", ErrInvalidTransition, deal.Status)
+	}
+
+	switch resolution {
+	case DisputeResolutionRelease:
+		if err := s.settleAndPayEscrow(ctx, deal); err != nil {
+			return nil, err
+		}
+	case DisputeResolutionRefund:
+		if err := s.cancelEscrowHold(ctx, deal); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := s.repo.UpdateDisputeResolution(ctx, dealID, target, operatorEmail); err != nil {
+		return nil, fmt.Errorf("recording dispute resolution for deal %s: %w", dealID, err)
+	}
+
+	deal.Status = target
+	deal.ResolvedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	deal.ResolvedBy = operatorEmail
+
+	if target == StatusReleased {
+		s.anchorReleasedDeal(ctx, deal)
+	}
+
+	return deal, nil
+}
+
+// cancelEscrowHold returns held funds to the client by cancelling the hold
+// invoice on the network (the network-level refund). Idempotent: if LNbits
+// refuses because the hold is already gone, we confirm the payment is no
+// longer committed (UNPAID/EXPIRED/CANCELLED) and treat that as success — the
+// sats have already returned to the payer. Anything still held/settled that we
+// could not cancel is surfaced as an error so the deal stays disputed.
+func (s *Service) cancelEscrowHold(ctx context.Context, deal *Deal) error {
+	if deal.PreimageHash == "" {
+		return fmt.Errorf("%w: cannot refund a deal without a preimage hash", ErrInvalidInput)
+	}
+
+	if _, err := s.lnbits.CancelHold(ctx, deal.PreimageHash); err != nil {
+		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+		if checkErr != nil || !isHoldReleased(payment.Details.Status) {
+			return fmt.Errorf("cancelling escrow for deal %s: %w", deal.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// isHoldReleased reports whether an LNbits payment status means the funds are
+// no longer committed to the escrow (already returned to the payer).
+func isHoldReleased(status string) bool {
+	switch status {
+	case "UNPAID", "EXPIRED", "CANCELLED":
+		return true
+	default:
+		return false
+	}
 }
 
 // CheckPayment queries LNbits for the payment status of a deal's hold

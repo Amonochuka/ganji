@@ -33,6 +33,12 @@ Public. Returns server and database status.
 
 ## 2. Authentication
 
+**Operator role.** Arbitration endpoints (`/disputes*`) require an operator.
+Operators are promoted at boot from the comma-separated `OPERATOR_EMAILS`
+environment variable (never self-serve). On login the role is embedded in the
+access-token claims as `is_operator`; a promoted user picks it up on their next
+login. Non-operators hitting an operator-only route get `403 Forbidden`.
+
 ### `POST /auth/signup`
 
 Public. Register a new user.
@@ -316,6 +322,62 @@ approve (`disputed → released`) to settle and pay.
     "status": "disputed",
     "dispute_reason": "deliverable does not match the agreement",
     "disputed_at": "2026-09-17T12:00:00Z",
+    ...
+  }
+}
+```
+
+### `GET /disputes`
+
+**Operator only.** The arbitration queue — every deal frozen in the `disputed`
+state, oldest dispute first.
+
+**Response `200`**
+```json
+{
+  "disputes": [
+    {
+      "id": "uuid",
+      "status": "disputed",
+      "dispute_reason": "deliverable does not match the agreement",
+      "disputed_at": "2026-09-17T12:00:00Z",
+      ...
+    }
+  ]
+}
+```
+
+### `POST /disputes/:dealID/resolve`
+
+**Operator only.** The arbiter's verdict on a frozen dispute. This is the only
+path out of `disputed` that moves money:
+
+- `release` — accept the work: settle the hold and pay the freelancer (the same
+  two network legs as approve).
+- `refund` — reject the work: cancel the hold so the sats return to the client.
+
+The deal must actually be `disputed`; anything else is `400`. The resolution
+and the deciding operator are recorded only **after** the network leg succeeds,
+so the DB never claims a money move the network did not make.
+
+**Request**
+```json
+{
+  "resolution": "release"
+}
+```
+
+`resolution` is `release` or `refund`.
+
+**Response `200`**
+```json
+{
+  "message": "dispute resolved — escrow released to the freelancer",
+  "deal": {
+    "id": "uuid",
+    "status": "released",
+    "resolved_by": "arbiter@example.com",
+    "resolved_at": "2026-09-17T13:00:00Z",
     ...
   }
 }
@@ -629,8 +691,6 @@ These are planned per the build spec but not yet implemented:
 | Method | Path | Description |
 |---|---|---|
 | `WS` | `/ws/deals/:dealID` | Real-time deal state updates |
-| `GET` | `/disputes` | Arbitration queue — list disputed deals (operator only) |
-| `POST` | `/disputes/:dealID/resolve` | Arbiter resolves a dispute → `released` (settle+payout) or `refunded` (cancel hold); requires an operator/admin role (not built yet) |
 
 ---
 
@@ -648,7 +708,7 @@ All error responses follow this shape:
 |---|---|
 | `400` | Bad request — invalid body, missing fields, invalid transition |
 | `401` | Unauthorized — missing or invalid token |
-| `403` | Forbidden — user doesn't own this resource |
+| `403` | Forbidden — user doesn't own this resource, or lacks operator privileges |
 | `404` | Not found — deal, artifact, or verification doesn't exist |
 | `500` | Internal server error |
 
@@ -684,9 +744,11 @@ Network-as-escrow flow (hold invoices). `awaiting_payment → work_submitted` is
              └────────┘
 
   * reviewing is an optional formal phase between submitted and approve.
-  * disputed = money frozen pending arbitration; a client who changes their
-    mind can still approve from disputed.
-  * refunded is reached by arbitration (disputed → refunded) or by the
+  * disputed = money frozen pending arbitration. `POST /disputes/:id/resolve`
+    (operator only) moves it to released (settle + pay) or refunded (cancel
+    hold). A client who changes their mind can still approve from disputed.
+  * released is reached by client approve or an operator release resolution.
+  * refunded is reached by an operator refund resolution or by the
     hold-expiry sweep for deals that were never funded.
 ```
 

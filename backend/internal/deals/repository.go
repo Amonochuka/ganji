@@ -90,6 +90,8 @@ const dealColumns = `
 		status,
 		dispute_reason,
 		disputed_at,
+		resolved_at,
+		resolved_by,
 		created_at,
 		verified_at
 	`
@@ -112,6 +114,8 @@ func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 		&deal.Status,
 		&deal.DisputeReason,
 		&deal.DisputedAt,
+		&deal.ResolvedAt,
+		&deal.ResolvedBy,
 		&deal.CreatedAt,
 		&deal.VerifiedAt,
 	); err != nil {
@@ -339,6 +343,64 @@ func (r *Repository) UpdateDispute(ctx context.Context, dealID, reason string) e
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("repository: raise dispute: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+
+	return nil
+}
+
+// ListDisputed returns every deal frozen in the disputed state, oldest
+// dispute first — the arbitration queue an operator works through.
+func (r *Repository) ListDisputed(ctx context.Context) ([]Deal, error) {
+	query := "SELECT" + dealColumns + `
+		FROM deals
+		WHERE status = $1
+		ORDER BY disputed_at ASC;
+	`
+
+	rows, err := r.q.QueryContext(ctx, query, StatusDisputed)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list disputed deals: %w", err)
+	}
+	defer rows.Close()
+
+	var deals []Deal
+	for rows.Next() {
+		deal, err := scanDeal(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repository: scan deal: %w", err)
+		}
+		deals = append(deals, *deal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate deals: %w", err)
+	}
+	return deals, nil
+}
+
+// UpdateDisputeResolution closes out a disputed deal after the operator has
+// run the network leg: it moves the status to released or refunded and
+// records who decided and when. A release also stamps verified_at, matching
+// UpdateStatus, so the Live CV anchors the accepted work.
+func (r *Repository) UpdateDisputeResolution(ctx context.Context, dealID string, status Status, resolvedBy string) error {
+	query := `
+		UPDATE deals
+		SET status = $1,
+			resolved_by = $2,
+			resolved_at = NOW(),
+			verified_at = CASE WHEN $1 = 'released' THEN NOW() ELSE verified_at END
+		WHERE id = $3;
+	`
+	result, err := r.q.ExecContext(ctx, query, status, resolvedBy, dealID)
+	if err != nil {
+		return fmt.Errorf("repository: update dispute resolution: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: update dispute resolution: %w", err)
 	}
 	if rowsAffected == 0 {
 		return ErrDealNotFound

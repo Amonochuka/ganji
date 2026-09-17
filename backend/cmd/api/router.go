@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"log"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -42,6 +44,12 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	authHandler := auth.NewHandler(authService)
 	auth.RegisterRoutes(router, authHandler)
 
+	// Promote the configured operator emails (OPERATOR_EMAILS) so their next
+	// login mints access tokens with is_operator=true. Safe on every boot.
+	if err := authService.ApplyOperatorRole(context.Background(), cfg.OperatorEmails); err != nil {
+		log.Fatalf("promoting operators: %v", err)
+	}
+
 	dealRepo := deals.NewRepository(dbConn)
 	cvService := cv.NewService(cv.NewRepository(dbConn))
 
@@ -68,6 +76,11 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	deals.RegisterPublicRoutes(router, dealHandler)
 	deals.RegisterArtifactRoutes(protected, dealHandler)
 	deals.RegisterVerificationRoutes(protected, dealHandler)
+
+	// Arbitration: dispute queue + resolution, operator-only.
+	operator := protected.Group("/")
+	operator.Use(middleware.OperatorRequired())
+	deals.RegisterArbitrationRoutes(operator, dealHandler)
 
 	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient)
 	//webhookService := webhook.NewService(dealRepo, lnbitsClient)

@@ -144,7 +144,7 @@ func hashRefreshToken(token string) string {
 }
 
 func (s *Service) issueTokens(ctx context.Context, user *User) (*AuthResponse, error) {
-	accessToken, err := s.tokens.GenerateAccessToken(user.ID, user.Email)
+	accessToken, err := s.tokens.GenerateAccessToken(user.ID, user.Email, user.IsOperator)
 	if err != nil {
 		return nil, fmt.Errorf("generating access token: %w", err)
 	}
@@ -170,6 +170,16 @@ func (s *Service) issueTokens(ctx context.Context, user *User) (*AuthResponse, e
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 	}, nil
+}
+
+// ApplyOperatorRole promotes the configured operator emails (OPERATOR_EMAILS)
+// at startup. Idempotent and safe to call on every boot; unknown emails are
+// skipped. Promotions land on the next login's access-token claims.
+func (s *Service) ApplyOperatorRole(ctx context.Context, emails []string) error {
+	if err := s.repo.PromoteOperators(ctx, emails); err != nil {
+		return fmt.Errorf("applying operator role: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error) {

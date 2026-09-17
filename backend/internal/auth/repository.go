@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 type DBTX interface {
@@ -29,14 +30,14 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash, displayNam
 	query := `
 		INSERT INTO users (email, password_hash, display_name, slug)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, email, display_name, slug, bitcoin_address, trust_score, created_at
+		RETURNING id, email, display_name, slug, bitcoin_address, trust_score, is_operator, created_at
 	`
 
 	var u User
 	var bitcoinAddress sql.NullString
 
 	err := r.q.QueryRowContext(ctx, query, email, passwordHash, displayName, slug).Scan(
-		&u.ID, &u.Email, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.CreatedAt,
+		&u.ID, &u.Email, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.IsOperator, &u.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("repository: create user: %w", err)
@@ -48,7 +49,7 @@ func (r *Repository) Create(ctx context.Context, email, passwordHash, displayNam
 
 func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, error) {
 	query := `
-		SELECT id, email, password_hash, display_name, slug, bitcoin_address, trust_score, created_at
+		SELECT id, email, password_hash, display_name, slug, bitcoin_address, trust_score, is_operator, created_at
 		FROM users
 		WHERE email = $1
 	`
@@ -57,7 +58,7 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 	var bitcoinAddress sql.NullString
 
 	err := r.q.QueryRowContext(ctx, query, email).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.CreatedAt,
+		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.IsOperator, &u.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -74,7 +75,7 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 // Live CV page — never includes password_hash by design.
 func (r *Repository) FindBySlug(ctx context.Context, slug string) (*User, error) {
 	query := `
-		SELECT id, email, display_name, slug, bitcoin_address, trust_score, created_at
+		SELECT id, email, display_name, slug, bitcoin_address, trust_score, is_operator, created_at
 		FROM users
 		WHERE slug = $1
 	`
@@ -83,7 +84,7 @@ func (r *Repository) FindBySlug(ctx context.Context, slug string) (*User, error)
 	var bitcoinAddress sql.NullString
 
 	err := r.q.QueryRowContext(ctx, query, slug).Scan(
-		&u.ID, &u.Email, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.CreatedAt,
+		&u.ID, &u.Email, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.IsOperator, &u.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -113,6 +114,28 @@ func (r *Repository) SlugExists(ctx context.Context, slug string) (bool, error) 
 		return false, fmt.Errorf("repository: slug exists: %w", err)
 	}
 	return exists, nil
+}
+
+// PromoteOperators marks every listed email as an operator (idempotent;
+// unknown emails are simply skipped). Called at startup from OPERATOR_EMAILS
+// so promotions are config-driven, not self-service. A promoted user picks up
+// the role on their next login, when fresh access-token claims are issued.
+func (r *Repository) PromoteOperators(ctx context.Context, emails []string) error {
+	cleaned := make([]string, 0, len(emails))
+	for _, e := range emails {
+		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {
+			cleaned = append(cleaned, e)
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+
+	query := `UPDATE users SET is_operator = TRUE WHERE email = ANY($1);`
+	if _, err := r.q.ExecContext(ctx, query, cleaned); err != nil {
+		return fmt.Errorf("repository: promote operators: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) StoreRefreshToken(ctx context.Context, token *StoredRefreshToken) error {

@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -23,6 +24,7 @@ type Config struct {
 	HoldSweepIntervalSeconds int64
 	StoragePath              string
 	MaxUploadBytes           int64
+	OperatorEmails           []string
 }
 
 func Load() *Config {
@@ -45,9 +47,22 @@ func Load() *Config {
 		HoldSweepIntervalSeconds: getEnvInt("LNBITS_HOLD_SWEEP_INTERVAL_SECONDS", 21_600),
 		StoragePath:              getEnv("STORAGE_PATH", "./uploads"),
 		MaxUploadBytes:           getEnvInt("MAX_UPLOAD_BYTES", 10*1024*1024),
+		OperatorEmails:           getEnvList("OPERATOR_EMAILS"),
 	}
 
 	return cfg
+}
+
+// getEnvList parses a comma-separated env var into a list of trimmed,
+// non-empty entries (e.g. "a@x.com, b@y.com").
+func getEnvList(key string) []string {
+	var out []string
+	for _, part := range strings.Split(os.Getenv(key), ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func getEnvInt(key string, fallback int64) int64 {

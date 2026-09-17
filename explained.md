@@ -143,8 +143,10 @@ by the DB `CHECK` constraint in
   * reviewing is an optional formal phase between submitted and approve.
   * disputed = money frozen pending arbitration. DisputeDeal requires a
     written reason and cancels nothing — the hold stays on the network.
-    A client who changes their mind can still approve from disputed.
-  * refunded is reached by arbitration (disputed → refunded) or by the
+    ResolveDispute (operator only) moves it to released or refunded; a client
+    who changes their mind can still approve from disputed.
+  * released is reached by client approve or an operator release resolution.
+  * refunded is reached by an operator refund resolution or by the
     hold-expiry sweep for deals that were never funded.
 ```
 
@@ -251,6 +253,19 @@ on LNbits actually reporting `paid`. No backend flags or hacks.
   hold). A client who changes their mind can still approve from `disputed`.
   This is the safeguard against pay → take the work → cancel: the funds can't
   be clawed back by the client alone.
+- **Arbitration** (`GET /disputes`, `POST /disputes/:dealID/resolve`,
+  operator-only via the `is_operator` claim):
+  - `release` → same two network legs as approve (`settleAndPayEscrow`): settle
+    the hold, pay the freelancer, `released`. Anchors the CV like an approve.
+  - `refund` → `CancelHold(preimage_hash)`, sats return to the client,
+    `refunded`. Idempotent: if the hold is already gone (retry, or already
+    cancelled/expired on the network) LNbits refuses the cancel, and we
+    confirm via `CheckPayment` that the funds are no longer committed
+    (`UNPAID`/`EXPIRED`/`CANCELLED`) before recording the refund. A hold still
+    committed that we cannot cancel stays `disputed` with an error.
+  - The deal must actually be `disputed` (else `ErrInvalidTransition`), and
+    `resolved_by` + `resolved_at` are written **only after** the network leg
+    succeeds — the DB never claims a money move the network did not make.
 - **Payee-invoice rotation** (`PATCH /deals/:dealID/payee-invoice`,
   freelancer): swaps the payout destination while the deal is open. Unsticks a
   release where the original invoice expired mid-deal. Frozen after
@@ -370,10 +385,20 @@ go test ./...    # all packages
   submit rules, approve settle+payout (+ idempotent already-settled, refusal
   unless settled), arbitration disputes (freeze funds, write reason + reject
   empty/overlong, no network move, non-client forbidden, invalid-transition
-  refusals, approve-after-dispute releases), sweep, payee-invoice rotation, share-link (public view safe fields, lock-on-
+  refusals, approve-after-dispute releases), operator arbitration (release =
+  settle+payout+anchor, refund = cancel hold, idempotent already-cancelled,
+  refusal while the hold is still committed, only-disputed, unknown verdict),
+  sweep, payee-invoice rotation, share-link (public view safe fields, lock-on-
   refresh, LNbits-down fallback, rotation owner/frozen). Transactions are
   simulated via a no-op `database/sql` driver so `BeginTx/Commit` flows without
   a DB.
+- `internal/deals/arbitration_handler_test.go` — the operator-only routes
+  behind the **real** auth + operator middleware: queue contents, release
+  round-trip, 400 on unknown verdict, 403 for a non-operator, 401 without a
+  token.
+- `internal/auth/jwt_test.go` + `internal/middleware/auth_test.go` — the
+  `is_operator` claim is issued and verified, `AuthRequired` surfaces it, and
+  `OperatorRequired` allows operators / 403s everyone else.
 - `internal/deals/artifact_upload_test.go` / `artifact_handler_test.go` +
   `internal/storage/local_test.go` — streaming upload/download, size-cap
   rejection leaves no blob, owner/party gating, multipart handler round-trips,
@@ -404,14 +429,18 @@ Backend:
   oversized rejected with no blob left behind, DB-failure rollback deletes the
   blob) and `GET /deals/:dealID/artifacts/:artifactID/download` streams it
   back to the freelancer or client. Keys are `deals/<dealID>/<random-hex><sanitized-ext>`.
-- **Arbitration (next): dispute → resolution.** Disputes now freeze the
-  funds with the client's written reason (`disputed` state; see §3/§4). The
-  missing piece is the **arbiter side**: an operator-gated
-  `POST /disputes/:dealID/resolve` (`released` → settle+payout, `refunded` →
-  cancel hold), a dispute queue (`GET /disputes`), and a request–response
-  round with the client. Requires an operator/admin role in auth (none today).
-  Also consider: an automated resolution for `awaiting_payment` disputes where
-  nothing was ever funded (sweep already covers stale open deals).
+- **Arbitration: done.** Disputes freeze the funds with the client's written
+  reason (`disputed`; §3/§4) and an operator resolves them via
+  `POST /disputes/:dealID/resolve` (release = settle+payout, refund = cancel
+  hold) with the queue at `GET /disputes`. Operators come from the
+  `OPERATOR_EMAILS` env var, promoted at boot; the role rides in the access
+  token as `is_operator` and the routes sit behind `OperatorRequired`.
+- **Arbitration (next): operator workflow polish.** The endpoints exist but
+  there is no request–response round between arbiter and parties (evidence,
+  counter-claims), no notifications on dispute/resolution, and no audit
+  history beyond the single `resolved_by`/`resolved_at`. Also consider an
+  automated resolution for `awaiting_payment` disputes where nothing was ever
+  funded (the sweep already covers stale open deals).
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
 - **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
 - **Hardening (future): `client_email` masking.** Already excluded from the
@@ -439,3 +468,6 @@ critical ones:
 - `FRONTEND_URL` — CORS origin.
 - `STORAGE_PATH` — where artifact blobs live on disk (default `./uploads`).
 - `MAX_UPLOAD_BYTES` — per-artifact size cap (default 10 MB).
+- `OPERATOR_EMAILS` — comma-separated emails promoted to arbitration
+  operators at boot (`is_operator` claim). Empty by default; no operator means
+  disputes can be raised but not resolved.

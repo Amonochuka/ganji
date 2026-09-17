@@ -13,6 +13,7 @@ type User struct {
 	Slug           string    `json:"slug"`
 	BitcoinAddress string    `json:"bitcoin_address"`
 	TrustScore     float64   `json:"trust_score"`
+	IsOperator     bool      `json:"is_operator"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 

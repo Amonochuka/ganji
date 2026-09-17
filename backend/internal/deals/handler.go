@@ -293,6 +293,70 @@ func (h *Handler) DisputeDeal(c *gin.Context) {
 	})
 }
 
+type resolveDisputeRequest struct {
+	Resolution DisputeResolution `json:"resolution" binding:"required"`
+}
+
+// ListDisputes returns the arbitration queue. Mounted behind
+// middleware.OperatorRequired, so by the time we get here the caller is an
+// operator.
+func (h *Handler) ListDisputes(c *gin.Context) {
+	disputed, err := h.service.ListDisputes(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"disputes": disputed})
+}
+
+// ResolveDispute closes a frozen dispute as an operator: release (settle +
+// payout the freelancer) or refund (cancel the hold back to the client).
+func (h *Handler) ResolveDispute(c *gin.Context) {
+	email := c.GetString("email")
+	dealID := c.Param("dealID")
+
+	var req resolveDisputeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "resolution is required"})
+		return
+	}
+
+	deal, err := h.service.ResolveDispute(c.Request.Context(), email, dealID, req.Resolution)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+
+	message := "dispute resolved — escrow released to the freelancer"
+	if deal.Status == StatusRefunded {
+		message = "dispute resolved — escrow refunded to the client"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": message,
+		"deal":    deal,
+	})
+}
+
+// RegisterArbitrationRoutes mounts the operator-only arbitration endpoints.
+// Callers must already attach middleware.OperatorRequired to the router.
+func RegisterArbitrationRoutes(router gin.IRouter, h *Handler) {
+	group := router.Group("/disputes")
+	group.GET("", h.ListDisputes)
+	group.POST("/:dealID/resolve", h.ResolveDispute)
+}
+
 type payeeInvoiceRequest struct {
 	PayeeInvoice string `json:"payee_invoice" binding:"required"`
 }

@@ -46,9 +46,23 @@ type Deal struct {
 	Status         Status       `json:"status"`
 	DisputeReason  string       `json:"dispute_reason"`
 	DisputedAt     sql.NullTime `json:"disputed_at"`
+	ResolvedAt     sql.NullTime `json:"resolved_at"`
+	ResolvedBy     string       `json:"resolved_by,omitempty"`
 	CreatedAt      time.Time    `json:"created_at"`
 	VerifiedAt     sql.NullTime `json:"verified_at"`
 }
+
+// DisputeResolution is the operator's verdict on a disputed deal. It is the
+// only thing that moves money out of the frozen 'disputed' state: "release"
+// accepts the work (settle + payout to the freelancer), "refund" sends the
+// held funds back to the client (cancel the hold). Neither happens without an
+// operator.
+type DisputeResolution string
+
+const (
+	DisputeResolutionRelease DisputeResolution = "release"
+	DisputeResolutionRefund  DisputeResolution = "refund"
+)
 
 // PublicDeal is the safe view of a deal exposed on the public shareable
 // link (GET /public/deals/:shareToken). It carries only what anyone with the

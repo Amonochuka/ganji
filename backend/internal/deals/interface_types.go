@@ -16,9 +16,11 @@ type DealRepository interface {
 	ListForUser(ctx context.Context, userID, email string) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
 	UpdateDispute(ctx context.Context, dealID, reason string) error
+	UpdateDisputeResolution(ctx context.Context, dealID string, status Status, resolvedBy string) error
 	UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error
 	UpdateShareToken(ctx context.Context, dealID, shareToken string) error
 	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)
+	ListDisputed(ctx context.Context) ([]Deal, error)
 
 	// Artifacts
 	CreateArtifact(ctx context.Context, artifact *Artifact) error
