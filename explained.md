@@ -368,6 +368,12 @@ Backend:
   backend yet.
 - **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
 - `trust_score` is persisted but never calculated.
+- **Hardening (future): `client_email` masking.** Already excluded from the
+  public share-link view, but the authed deal payloads (`POST /deals`,
+  `GET /deals`, `GET /deals/:id`) return the full email to both parties. If we
+  want stricter contact privacy later: return a masked value
+  (`c***@example.com`) outside approve/dispute contexts, or drop it from list
+  views entirely.
 
 Frontend (out of scope this session): `frontend/` exists but the shared deal/
 public-link UI is not implemented.
