@@ -19,7 +19,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 
 | Component | Status | Files |
 |---|---|---|
-| DB schema (7 migrations) | ✅ Done | `backend/migrations/000000–000006` |
+| DB schema (7 migrations) | ✅ Done | `backend/migrations/000001–000007` |
 | Auth (signup, login, logout, refresh) | ✅ Done | `internal/auth/` |
 | JWT access + refresh tokens | ✅ Done | `internal/auth/token.go` |
 | Password hashing (bcrypt) | ✅ Done | `internal/auth/service.go` |
@@ -53,7 +53,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 
 | Component | Status | Files |
 |---|---|---|
-| CV entries table (migration) | ✅ Done | `migrations/000004` |
+| CV entries table (migration) | ✅ Done | `migrations/000005` |
 | `internal/cv/` package | ❌ Empty stubs | `internal/cv/*.go` |
 | Public CV endpoint | ❌ Not built | — |
 | Hash verification logic | ❌ Not built | — |

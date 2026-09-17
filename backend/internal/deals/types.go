@@ -7,7 +7,7 @@ import (
 
 // Status represents the deal's position in the escrow lifecycle. These
 // values must exactly match the CHECK constraint on the deals table
-// (see migrations/000002_create_deals_table.up.sql) — if you add a new
+// (see migrations/000003_create_deals_table.up.sql) — if you add a new
 // status here, you must also update that constraint, or inserts using
 // the new status will be rejected by Postgres.
 type Status string

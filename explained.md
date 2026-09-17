@@ -88,7 +88,7 @@ frontend/                  Next.js app — currently does NOT compile
 | Deal Gin handlers + routes | `backend/internal/deals/handler.go` |
 | Hold-expiry sweep loop + sweep logic | `backend/internal/deals/sweep.go` |
 | Deal service tests (submit/approve/dispute) | `backend/internal/deals/service_test.go` |
-| Client role schema (client_email) | `backend/migrations/000007_add_client_email_to_deals.up.sql` |
+| Client role schema (client_email) | `backend/migrations/000003_create_deals_table.up.sql` |
 | LNbits client (hold invoices, settle/cancel/payout) | `backend/internal/lnbits/client.go` |
 | LNbits request/response models | `backend/internal/lnbits/models.go` |
 | Webhook handler (`POST /webhooks/lnbits`) | `backend/internal/webhook/handler.go` |
@@ -103,7 +103,7 @@ frontend/                  Next.js app — currently does NOT compile
 ## 3. The Deal Lifecycle (State Machine)
 
 Defined in `backend/internal/deals/types.go` (`ValidTransitions`) and mirrored
-in the DB CHECK constraint (`backend/migrations/000002_create_deals_table.up.sql`).
+in the DB CHECK constraint (`backend/migrations/000003_create_deals_table.up.sql`).
 
 ```
 awaiting_payment ──payment confirmed──► locked ──► work_submitted ──► reviewing
@@ -240,11 +240,12 @@ successful settle, which cannot happen if the client never funded the hold).
   - `PayInvoice(bolt11)` — POST `/api/v1/payments` `out:true` (payout leg).
   - `postJSON` helper for the new POST methods.
   - Tests cover happy path, key selection (invoice vs admin), and error bodies.
-- [x] **Deal model + migration** (`migrations/000008*`, `deals/types.go`,
-  `deals/repository.go`):
+- [x] **Deal model + migration** (`migrations/000003_create_deals_table*`,
+  `deals/types.go`, `deals/repository.go`):
   - `deals.preimage TEXT` — raw hex preimage Ganji generated, needed on LNbits
     to settle later. `deals.payee_invoice TEXT` — freelancer's Lightning
-    destination for the payout leg.
+    destination for the payout leg (folded into the fresh CREATE TABLE since
+    the escrow work landed before this environment existed).
   - Status enum + DB CHECK gain **`refunded`** (terminal): dispute cancels the
     hold on the network and refunds the client.
   - `ValidTransitions` updated for the LND case: `awaiting_payment →
@@ -376,8 +377,8 @@ successful settle, which cannot happen if the client never funded the hold).
 
 ### Identity model (email link, no forced sign-up)
 
-- Migration `000007` adds `client_email TEXT` to `deals`.
-- At creation the freelancer names the client by **email** — the client does
+- `deals.client_email` (folded into the CREATE TABLE in migration `000003`)
+  identifies the client — the client does
   **not** need an account yet (product concept: no platform lock-in, deals
   happen over WhatsApp/Telegram/X/etc.).
 - When the client is ready to review, they sign up with that same email. The

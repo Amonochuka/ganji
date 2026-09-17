@@ -1,0 +1,37 @@
+-- deals (complete schema with all escrow columns).
+-- Folded in from the later client_email / escrow ALTER migrations because this
+-- is a fresh schema for a new environment: client_email identifies the client,
+-- preimage settles the hold invoice later, and payee_invoice is the payout leg.
+CREATE TABLE deals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    freelancer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    client_email TEXT NOT NULL,
+    title TEXT NOT NULL,
+    amount_sats BIGINT NOT NULL,
+    source_platform TEXT NOT NULL,
+    preimage_hash TEXT NOT NULL UNIQUE,
+    preimage TEXT,
+    payee_invoice TEXT,
+    invoice TEXT NOT NULL,
+    checking_id TEXT,
+    status TEXT NOT NULL DEFAULT 'awaiting_payment',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    verified_at TIMESTAMPTZ,
+
+    CONSTRAINT valid_status CHECK (
+        status IN (
+            'awaiting_payment',
+            'locked',
+            'work_submitted',
+            'reviewing',
+            'released',
+            'disputed',
+            'refunded'
+        )
+    )
+);
+
+CREATE INDEX idx_deals_freelancer_id ON deals(freelancer_id);
+CREATE INDEX idx_deals_preimage_hash ON deals(preimage_hash);
+CREATE INDEX idx_deals_status ON deals(status);
+CREATE INDEX idx_deals_client_email ON deals(client_email);
