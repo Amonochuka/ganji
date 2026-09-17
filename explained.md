@@ -31,8 +31,9 @@ freelancer creates deal   ──►  Ganji draws a hold invoice for amount_sats
   client disputes         ──►  cancel hold → sats return to client ──► refunded
 ```
 
-Every released deal stamps `verified_at` and becomes a hash-verified line on
-the freelancer's Live CV (CV itself is a future milestone — see §7).
+Every released deal stamps `verified_at` and its artifacts become hash-verified
+lines on the freelancer's public **Live CV** (`GET /cv/:slug` + hash verification
+endpoint — see §6 of API_REFERENCE).
 
 ---
 
@@ -60,7 +61,8 @@ backend/
   internal/
     auth/             JWT + refresh rotation + bcrypt (complete)
     config/           env/config loading (godotenv)
-    cv/               Live CV — STUB (next major feature)
+    cv/               Live CV — public profile, hash anchoring + verification,
+                      trust-score derivation
     db/               pool + auto-migration on boot
     deals/            deal model, state machine, share link, escrow service,
                       artifacts, verifications, expiry sweep
@@ -71,7 +73,7 @@ backend/
     webhook/          LNbits payment webhook + HMAC signature verification
     websocket/        STUB (real-time updates planned)
   migrations/         numbered SQL schema (golang-migrate, run at boot)
-  pkg/                hash/, sanitize/ — empty stubs
+  pkg/                hash/ (sha256 anchor helper), sanitize/ — mostly empty
 frontend/             Next.js app (out of scope here)
 ```
 
@@ -352,6 +354,11 @@ go test ./...    # all packages
   a DB.
 - `internal/webhook/service_test.go` / `handler_test.go` — payment → locked,
   unpaid ignored, missing deal, bad signature, HMAC verification.
+- `internal/cv/service_test.go` — profile read self-heals missing anchors and
+  derives trust score, verify matches / detects tampered hashes, foreign-slug
+  lookup is hidden (404), handler status codes. The deals tests also cover
+  the approve→anchor hook (including anchoring failing without blocking the
+  release).
 - `internal/lnbits/client_test.go` — client request shapes and key selection.
 
 ---
@@ -360,14 +367,15 @@ go test ./...    # all packages
 
 Backend:
 
-- **Live CV** (`internal/cv/`): `cv_entries` table exists; public
-  `GET /cv/:slug`, hash verification, and `verified_at` anchoring on release
-  are not wired.
+- **Live CV** (`internal/cv/`): public `GET /cv/:slug` and
+  `GET /cv/:slug/verify/:entryID` are implemented. Approving a deal anchors
+  its artifacts as SHA-256 entries (`verified_at` → release), and the CV
+  self-heals any anchors that were missed on its next read. `trust_score`
+  is now derived on CV read (`100 + 25·released`, capped at 1000).
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
 - **File upload**: artifacts only record a `storage_key` string; no storage
   backend yet.
 - **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
-- `trust_score` is persisted but never calculated.
 - **Hardening (future): `client_email` masking.** Already excluded from the
   public share-link view, but the authed deal payloads (`POST /deals`,
   `GET /deals`, `GET /deals/:id`) return the full email to both parties. If we

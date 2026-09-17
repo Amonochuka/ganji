@@ -464,7 +464,88 @@ Get a specific verification.
 
 ---
 
-## 6. Webhooks
+## 6. Live CV
+
+Every released deal anchors its artifacts as hash-verified entries on the
+freelancer's public **Live CV** (approve → `released` writes a SHA-256 anchor
+per artifact; see the release flow in section 3). Both endpoints are public —
+the slug is a shareable handle, not a secret.
+
+### `GET /cv/:slug`
+
+Public. Returns the freelancer's identity plus all anchored entries, newest
+verified first. Anchoring is self-healing: a released deal whose artifacts were
+never anchored (hook failure, deals that predate Live CV) gets its entries
+written on read, and the trust score is recalcuated from the number of released
+deals (`100 + 25·released`, capped at 1000).
+
+**Response `200`**
+```json
+{
+  "profile": {
+    "display_name": "Alice",
+    "slug": "alice",
+    "trust_score": 125,
+    "entries": [
+      {
+        "id": "uuid",
+        "deal_title": "Build a site",
+        "amount_sats": 5000,
+        "source_platform": "telegram",
+        "artifact_kind": "source_code",
+        "hash": "sha256 hex over the artifact's storage reference",
+        "algorithm": "sha256",
+        "verified_at": "2026-08-26T12:00:00Z",
+        "created_at": "2026-08-26T12:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+**Responses:**
+
+| Status | Condition | Body |
+|---|---|---|
+| `200` | CV exists (may have empty `entries`) | `{"profile": {...}}` |
+| `400` | Blank slug | `{"error": "invalid input: ..."}` |
+| `404` | Slug does not resolve to a CV | `{"error": "cv not found"}` |
+
+### `GET /cv/:slug/verify/:entryID`
+
+Public. Recomputes the release-time SHA-256 anchor from the artifact's current
+storage reference and compares it to the stored hash — proving the CV line is
+intact, or detecting that the anchor no longer matches the artifact.
+A slug/entry mismatch returns `404` exactly like a missing entry, so the
+endpoint never confirms an entry's existence under a foreign slug.
+
+**Response `200`**
+```json
+{
+  "verification": {
+    "valid": true,
+    "entry_id": "uuid",
+    "slug": "alice",
+    "hash": "...",
+    "algorithm": "sha256",
+    "matches_current": true,
+    "deal_title": "Build a site",
+    "verified_at": "2026-08-26T12:00:00Z"
+  }
+}
+```
+
+**Responses:**
+
+| Status | Condition | Body |
+|---|---|---|
+| `200` | Entry resolves; `valid`/`matches_current` reflect hash comparison | `{"verification": {...}}` |
+| `400` | Blank slug or entry id | `{"error": "invalid input: ..."}` |
+| `404` | Unknown slug or entry not on that slug's CV | `{"error": "cv not found"}` |
+
+---
+
+## 7. Webhooks
 
 ### `POST /webhooks/lnbits`
 
@@ -509,14 +590,12 @@ Payment-not-successful returns `200` because the webhook was received and unders
 
 ---
 
-## 7. Future Endpoints (Not Yet Built)
+## 8. Future Endpoints (Not Yet Built)
 
 These are planned per the build spec but not yet implemented:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/cv/:slug` | Public freelancer Live CV page |
-| `GET` | `/cv/:slug/verify/:entryID` | Verify a CV entry's hash |
 | `WS` | `/ws/deals/:dealID` | Real-time deal state updates |
 
 ---

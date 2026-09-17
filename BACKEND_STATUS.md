@@ -20,11 +20,16 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   `GET /public/deals/:shareToken` shows a safe public view and refreshes the
   hold status (locks when paid) so the client sees the payment land without an
   account. `POST /deals/:dealID/share-link` rotates the token.
+- **Live CV shipped.** Releasing a deal anchors its artifacts as SHA-256
+  entries; the public `GET /cv/:slug` profile and `GET /cv/:slug/verify/:entryID`
+  hash check are live, and `trust_score` is derived from released deals
+  (`100 + 25·released`, capped at 1000).
 - **Tests now exist.** `internal/deals/service_test.go`,
+  `internal/cv/service_test.go`,
   `internal/webhook/service_test.go`+`handler_test.go`,
   `internal/lnbits/client_test.go`; `go test ./...` passes.
-- Still stubbed (unchanged): `internal/cv`, `internal/websocket`,
-  `internal/middleware/{cors,ratelimit}.go`, `pkg/hash`, `pkg/sanitize`.
+- Still stubbed (unchanged): `internal/websocket`,
+  `internal/middleware/ratelimit.go`, `pkg/sanitize`.
   Frontend still does not compile.
 
 ---
@@ -73,15 +78,15 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 | HMAC signature verification | ✅ Done | `internal/webhook/service.go` |
 | Auto-transition on payment | ✅ Done | `internal/webhook/service.go` |
 
-### Phase 4 — Live CV & Verification (Week 8–9) ❌ Not started
+### Phase 4 — Live CV & Verification (Week 8–9) ✅ Backend done
 
 | Component | Status | Files |
 |---|---|---|
-| CV entries table (migration) | ✅ Done | `migrations/000005` |
-| `internal/cv/` package | ❌ Empty stubs | `internal/cv/*.go` |
-| Public CV endpoint | ❌ Not built | — |
-| Hash verification logic | ❌ Not built | — |
-| Trust score calculation | ❌ Not built | — |
+| CV entries table (migration) | ✅ Done | `migrations/000005` (UNIQUE per artifact) |
+| Release-time SHA-256 anchoring | ✅ Done | `internal/cv/service.go`, `internal/deals/service.go` |
+| Public CV endpoint (`GET /cv/:slug`) | ✅ Done | `internal/cv/handler.go` |
+| Hash verification (`/cv/:slug/verify/:entryID`) | ✅ Done | `internal/cv/service.go` |
+| Trust score calculation | ✅ Done | `internal/cv/service.go` |
 
 ### Phase 5 — Polish & Deploy (Week 10–12) ❌ Not started
 
@@ -100,8 +105,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 
 ### Critical (blocks Phase 4+)
 1. **WebSocket server** (`internal/websocket/`) — empty stubs. Needed for real-time deal state updates to the frontend.
-2. **Live CV package** (`internal/cv/`) — empty stubs. The `cv_entries` table exists but no code reads/writes it.
-3. **File upload handling** — artifacts store a `storage_key` but there's no actual upload endpoint or storage backend (S3, local disk, etc.).
+2. **File upload handling** — artifacts store a `storage_key` but there's no actual upload endpoint or storage backend (S3, local disk, etc.).
 
 ### Important (Phase 5)
 4. **Sanitize package** — needed for output encoding, XSS prevention.
@@ -178,6 +182,6 @@ Payment-not-successful returns `200` because the webhook was received and unders
 
 1. **Create the missing frontend modules** — the frontend cannot compile without `Button`, `Input`, `FormBanner`, `AuthShell`, `AuthProvider`, and `ApiClient`. This is the single biggest blocker.
 2. **Build the WebSocket server** — needed before any real-time deal UI works.
-3. **Build the Live CV package** — the core differentiator of the product.
+3. ~~**Build the Live CV package**~~ — *(done: released deals anchor hashed CV entries; public profile + verify endpoints are live).*
 4. **Add tests** — start with auth and deal state machine. The repository interfaces make mocking straightforward.
 5. **Set up a CI pipeline** — `go vet`, `go build`, `go test` on every push.
