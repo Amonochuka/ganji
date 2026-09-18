@@ -14,6 +14,10 @@ CREATE TABLE deals (
     payee_invoice TEXT,
     invoice TEXT NOT NULL,
     checking_id TEXT,
+    -- Payout checking_id tracks the outgoing payment to the freelancer.
+    -- Filled after PayInvoice succeeds so a retry can verify the payout
+    -- instead of sending again (double-pay prevention).
+    payout_checking_id TEXT,
     -- Shareable payment-link token: a separate high-entropy random value from
     -- the deal's UUID so the public link can be revoked/rotated without
     -- exposing the internal id. NOT NULL DEFAULT backfills existing deals;
@@ -45,3 +49,4 @@ CREATE INDEX idx_deals_freelancer_id ON deals(freelancer_id);
 CREATE INDEX idx_deals_preimage_hash ON deals(preimage_hash);
 CREATE INDEX idx_deals_status ON deals(status);
 CREATE INDEX idx_deals_client_email ON deals(client_email);
+CREATE INDEX idx_deals_disputed_at ON deals(disputed_at);
