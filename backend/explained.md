@@ -95,32 +95,45 @@ settleAndPayEscrow():
 
 **Schema addition:**
 ```sql
-ALTER TABLE deals ADD COLUMN payout_attempted_at TIMESTAMPTZ;
-ALTER TABLE deals ADD COLUMN payout_checking_id TEXT;
-CREATE INDEX idx_deals_disputed_at ON deals(disputed_at);
+payout_attempted_at TIMESTAMPTZ,   -- durable "attempt started" marker
+payout_checking_id   TEXT          -- LNbits outgoing payment ID
 ```
 
-**Flow:**
+**Flow (two-phase release, in `releaseEscrow`):**
 ```go
-// 1. Persist and commit the attempt before any external money move.
-markPayoutAttempted(deal.ID)
+// Phase 1 — commit durable intent BEFORE any money moves (own transaction):
+deal := repo.GetDealForUpdate(dealID)   // SELECT FOR UPDATE
+repo.MarkPayoutAttempted(dealID)        // payout_attempted_at = NOW()
+tx.Commit()
 
-// 2. Settle the hold, then submit the outgoing BOLT11 payment.
-SettleHold(preimage)
-checkingID := PayInvoice(payeeInvoice)
+// Phase 2 — the network legs, deliberately OUTSIDE any DB lock:
+SettleHold(preimage)                    // idempotent: already-settled == success
+checkingID := PayInvoice(payeeInvoice)  // 4xx refusal is classified (ErrPayoutRefused)
 
-// 3. Persist its provider ID, verify it, then mark the deal released.
-recordPayoutCheckingID(deal.ID, checkingID)
+// Phase 3 — re-lock and finalize (second transaction):
+repo.GetDealForUpdate(dealID)           // re-validate the transition
+repo.UpdatePayoutCheckingID(dealID, checkingID)
+repo.UpdateStatus(dealID, released)
+tx.Commit()
 ```
 
-**Guarantees:**
-- A retry first queries LNbits payment history for the exact outgoing BOLT11;
-  a successful provider payment is recorded and released without re-sending.
-- A confirmed provider failure is eligible for a controlled retry.
-- If the attempt is durable but LNbits cannot identify its outcome, Ganji does
-  **not** call `PayInvoice` again. The deal remains reconciliation-required;
-  this deliberately favors a visible pending release over a possible duplicate
-  payout.
+**Guarantees (conservative — never a second payout without proof):**
+- A retry that finds `payout_checking_id` set asks LNbits to verify it: confirmed
+  paid → the deal is released without re-sending; confirmed failed/refused →
+  the tracking is cleared and a fresh attempt is legal.
+- If the attempt is durable (`payout_attempted_at` set, `payout_checking_id`
+  missing) or LNbits cannot identify the outcome, Ganji returns
+  `ErrPayoutInFlight` (reconciliation required) and **does not** call
+  `PayInvoice` again. A crash between Phase 2 and Phase 3 therefore leaves a
+  visible, stuck deal — not a duplicate payout.
+- The human backstop is the operator-only `POST /deals/:dealID/reconcile`
+  endpoint:
+  - `{"action":"confirm_payout","payout_checking_id":"..."}` — the operator
+    verified in the LNbits UI that the freelancer was paid; after re-verifying,
+    the deal is released. No money moves.
+  - `{"action":"reset_payout"}` — the operator verified the earlier attempt
+    never moved money; the tracking is cleared so a normal approve/release can
+    run the payout again.
 
 ---
 
@@ -168,6 +181,7 @@ func (s *Service) SweepExpiredHolds(ctx, cutoff) {
 | `id` (UUID PK) | Internal Ganji deal ID |
 | `checking_id` | LNbits hold invoice ID (for webhook/poll lookup) |
 | `payout_checking_id` | LNbits **outgoing** payment ID (idempotency) |
+| `payout_attempted_at` | Durable "payout started" marker, committed **before** money moves |
 | `preimage` / `preimage_hash` | Escrow secret / hash (sha256) |
 | `payee_invoice` | Freelancer's BOLT11 (payout destination) |
 | `share_token` | Public payment link token (rotatable) |

@@ -4,10 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
+
+// requestTimeout bounds every LNbits call. The escrow release path holds a
+// DB row lock (SELECT FOR UPDATE) while talking to LNbits, so an unbounded
+// HTTP call would pin the row and a pool connection forever.
+const requestTimeout = 15 * time.Second
+
+// ErrPayoutRefused wraps a definitely-rejected outgoing payout (a 4xx from
+// LNbits): the payment was never sent, so clearing the attempt marker and
+// retrying later is safe. Anything else that fails during PayInvoice must be
+// treated as ambiguous — the payout may or may not have been initiated.
+var ErrPayoutRefused = errors.New("lnbits refused payout")
 
 type Config struct {
 	URL           string
@@ -33,7 +46,7 @@ func NewClient(cfg Config) *Client {
 		webhookURL: cfg.WebhookURL,
 		adminKey:   cfg.AdminKey,
 		holdExpiry: cfg.HoldExpirySec,
-		http:       &http.Client{},
+		http:       &http.Client{Timeout: requestTimeout},
 	}
 }
 
@@ -211,6 +224,12 @@ func (c *Client) PayInvoice(ctx context.Context, bolt11 string) (string, error) 
 				response.StatusCode,
 				err,
 			)
+		}
+		// A 4xx is a guaranteed non-send (invalid bolt11, insufficient
+		// balance, bad auth...). A 5xx is ambiguous: the server may have
+		// started the payment before failing.
+		if response.StatusCode < http.StatusInternalServerError {
+			return "", fmt.Errorf("%w: lnbits returned %d: %s", ErrPayoutRefused, response.StatusCode, string(body))
 		}
 		return "", fmt.Errorf("lnbits returned %d: %s", response.StatusCode, string(body))
 	}

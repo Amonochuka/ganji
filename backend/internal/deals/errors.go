@@ -11,4 +11,9 @@ var (
 	ErrInvalidTransition    = errors.New("invalid status transition")
 	ErrPaymentNotPaid       = errors.New("payment not yet received")
 	ErrNoCheckingID         = errors.New("deal has no checking id")
+	// ErrPayoutInFlight marks a payout whose outcome is unknown (an earlier
+	// attempt was recorded but never confirmed, or LNbits has not settled it
+	// either way). The deal needs manual reconciliation against LNbits
+	// history before it can be released again; the code must never auto-resend.
+	ErrPayoutInFlight = errors.New("payout outcome unknown; manual reconciliation required")
 )

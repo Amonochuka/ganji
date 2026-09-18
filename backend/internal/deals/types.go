@@ -30,7 +30,10 @@ const (
 // preimage (needed to settle the hold); PreimageHash is sha256(preimage)
 // for verification and CV anchoring. PayeeInvoice is the freelancer's
 // Lightning destination for the payout leg. PayoutCheckingID tracks the
-// outgoing payout payment for idempotency (double-pay prevention).
+// outgoing payout payment for idempotency (double-pay prevention);
+// PayoutAttemptedAt is the durable "payout attempt started" marker committed
+// BEFORE any money moves, so a release that crashes mid-network can never be
+// auto-resumed into a second payout.
 type Deal struct {
 	ID                string       `json:"id"`
 	FreelancerID      string       `json:"freelancer_id"`
@@ -44,6 +47,7 @@ type Deal struct {
 	Invoice           string       `json:"invoice"`
 	CheckingID        string       `json:"checking_id"`
 	PayoutCheckingID  string       `json:"payout_checking_id,omitempty"`
+	PayoutAttemptedAt sql.NullTime `json:"payout_attempted_at"`
 	ShareToken        string       `json:"share_token"`
 	Status            Status       `json:"status"`
 	DisputeReason     string       `json:"dispute_reason"`
@@ -64,6 +68,22 @@ type DisputeResolution string
 const (
 	DisputeResolutionRelease DisputeResolution = "release"
 	DisputeResolutionRefund  DisputeResolution = "refund"
+)
+
+// ReconcileAction is an operator's manual verdict on a deal whose payout is
+// hung (releaseEscrow returned ErrPayoutInFlight). The operator verifies the
+// truth in the LNbits payments UI, then tells the system how to proceed:
+//
+//   - confirm_payout: the freelancer WAS paid — record the real outgoing
+//     payout_checking_id and release the deal, without sending any money.
+//   - reset_payout: the freelancer was NOT paid — the earlier attempt never
+//     moved money, so clear the payout tracking and let a normal
+//     approve/release re-run the payout.
+type ReconcileAction string
+
+const (
+	ReconcileConfirmPayout ReconcileAction = "confirm_payout"
+	ReconcileResetPayout   ReconcileAction = "reset_payout"
 )
 
 // PublicDeal is the safe view of a deal exposed on the public shareable

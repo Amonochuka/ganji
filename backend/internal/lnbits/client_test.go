@@ -3,6 +3,7 @@ package lnbits
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -276,6 +277,24 @@ func TestPayInvoiceError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no route") {
 		t.Fatalf("expected LNbits body in error, got %v", err)
+	}
+	if errors.Is(err, ErrPayoutRefused) {
+		t.Fatal("a 5xx is ambiguous and must NOT be classified as a definite refusal")
+	}
+}
+
+func TestPayInvoice4xxIsClassifiedRefused(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"detail":"invalid bolt11"}`))
+	})
+
+	_, err := client.PayInvoice(context.Background(), "lnbc-bad")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrPayoutRefused) {
+		t.Fatalf("expected ErrPayoutRefused, got %v", err)
 	}
 }
 

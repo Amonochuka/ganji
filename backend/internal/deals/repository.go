@@ -89,6 +89,7 @@ const dealColumns = `
 		invoice,
 		checking_id,
 		payout_checking_id,
+		payout_attempted_at,
 		share_token,
 		status,
 		dispute_reason,
@@ -114,6 +115,7 @@ func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 		&deal.Invoice,
 		&deal.CheckingID,
 		&deal.PayoutCheckingID,
+		&deal.PayoutAttemptedAt,
 		&deal.ShareToken,
 		&deal.Status,
 		&deal.DisputeReason,
@@ -296,6 +298,52 @@ func (r *Repository) UpdatePayoutCheckingID(ctx context.Context, dealID, payoutC
 	return nil
 }
 
+// MarkPayoutAttempted durably stamps that a payout attempt is starting. It is
+// committed (in its own transaction) BEFORE any money moves, so a release that
+// crashes in the middle of the network legs leaves a visible marker and any
+// retry refuses to auto-resend (double-pay prevention).
+func (r *Repository) MarkPayoutAttempted(ctx context.Context, dealID string) error {
+	query := `UPDATE deals SET payout_attempted_at = NOW() WHERE id = $1;`
+
+	result, err := r.q.ExecContext(ctx, query, dealID)
+	if err != nil {
+		return fmt.Errorf("repository: mark payout attempted: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: mark payout attempted: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+
+	return nil
+}
+
+// ClearPayoutTracking resets both payout tracking fields. Called only when a
+// payout is PROVABLY not in flight — a definitive LNbits refusal before the
+// money moved, or a confirmed-failed prior payout. Never call it on an
+// ambiguous outcome: that would re-open the double-pay window.
+func (r *Repository) ClearPayoutTracking(ctx context.Context, dealID string) error {
+	query := `UPDATE deals SET payout_checking_id = NULL, payout_attempted_at = NULL WHERE id = $1;`
+
+	result, err := r.q.ExecContext(ctx, query, dealID)
+	if err != nil {
+		return fmt.Errorf("repository: clear payout tracking: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: clear payout tracking: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+
+	return nil
+}
+
 // ListOpenBefore returns deals still awaiting payment or locked that were
 // created before the cutoff — the candidates for the hold-expiry sweep. Left
 // alone, a deal whose hold expired (or was never funded) would sit in the DB
@@ -368,31 +416,28 @@ func (r *Repository) UpdateStatusIfCurrent(ctx context.Context, dealID string, e
 	return rowsAffected == 1, nil
 }
 
-// UpdateDispute raises a dispute: it moves the deal into the 'disputed'
-// arbitration state and records the client's written reason. No money moves
-// here — the hold stays held until an arbiter resolves the dispute.
-func (r *Repository) UpdateDispute(ctx context.Context, dealID, reason string) error {
+// UpdateDisputeIfCurrent raises a dispute only if the deal row is still in
+// expected (the status the caller read before any network legs). Without the
+// guard, a dispute racing an approve that just released the deal could flip a
+// released deal back to disputed after the money moved.
+func (r *Repository) UpdateDisputeIfCurrent(ctx context.Context, dealID string, expected Status, reason string) (bool, error) {
 	query := `
 		UPDATE deals
 		SET status = 'disputed',
 			dispute_reason = $1,
 			disputed_at = NOW()
-		WHERE id = $2;
+		WHERE id = $2 AND status = $3;
 	`
-	result, err := r.q.ExecContext(ctx, query, reason, dealID)
+	result, err := r.q.ExecContext(ctx, query, reason, dealID, expected)
 	if err != nil {
-		return fmt.Errorf("repository: raise dispute: %w", err)
+		return false, fmt.Errorf("repository: conditionally raise dispute: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("repository: raise dispute: %w", err)
+		return false, fmt.Errorf("repository: conditionally raise dispute: %w", err)
 	}
-	if rowsAffected == 0 {
-		return ErrDealNotFound
-	}
-
-	return nil
+	return rowsAffected == 1, nil
 }
 
 // ListDisputed returns every deal frozen in the disputed state, oldest

@@ -18,6 +18,11 @@ CREATE TABLE deals (
     -- Filled after PayInvoice succeeds so a retry can verify the payout
     -- instead of sending again (double-pay prevention).
     payout_checking_id TEXT,
+    -- payout_attempted_at is the durable "payout attempt started" marker,
+    -- committed BEFORE any money moves. A release that crashes mid-payout
+    -- leaves this set, and a retry refuses to auto-resend until an operator
+    -- reconciles the outcome against LNbits history.
+    payout_attempted_at TIMESTAMPTZ,
     -- Shareable payment-link token: a separate high-entropy random value from
     -- the deal's UUID so the public link can be revoked/rotated without
     -- exposing the internal id. NOT NULL DEFAULT backfills existing deals;

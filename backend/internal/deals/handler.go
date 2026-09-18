@@ -149,7 +149,7 @@ func (h *Handler) UpdateDealStatus(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.UpdateStatus(c.Request.Context(), dealID, userID, req.Status); err != nil {
+	if err := h.service.UpdateStatus(c.Request.Context(), userID, dealID, req.Status); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidTransition),
 			errors.Is(err, ErrInvalidInput):
@@ -355,6 +355,54 @@ func RegisterArbitrationRoutes(router gin.IRouter, h *Handler) {
 	group := router.Group("/disputes")
 	group.GET("", h.ListDisputes)
 	group.POST("/:dealID/resolve", h.ResolveDispute)
+
+	// Operator reconcile for hung payouts: the human backstop to the
+	// no-auto-resend payout policy (see Service.ReconcilePayout). Mounted here
+	// so it inherits the same operator-only gate.
+	reconcile := router.Group("/deals")
+	reconcile.POST("/:dealID/reconcile", h.ReconcileDeal)
+}
+
+type reconcileDealRequest struct {
+	Action           ReconcileAction `json:"action" binding:"required"`
+	PayoutCheckingID string          `json:"payout_checking_id"`
+}
+
+// ReconcileDeal lets an operator unstick a deal whose payout is hung. They
+// confirmed the true state against LNbits history and either record a verified
+// payout (confirm_payout -> release) or clear a never-sent attempt
+// (reset_payout -> re-payable by a normal approve/release).
+func (h *Handler) ReconcileDeal(c *gin.Context) {
+	email := c.GetString("email")
+	dealID := c.Param("dealID")
+
+	var req reconcileDealRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	deal, err := h.service.ReconcilePayout(c.Request.Context(), email, dealID, req.Action, req.PayoutCheckingID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutInFlight):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"deal": deal,
+	})
 }
 
 type payeeInvoiceRequest struct {

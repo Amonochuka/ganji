@@ -19,10 +19,12 @@ type DealRepository interface {
 	// still in expected. The boolean reports whether this caller won the
 	// transition, which is essential for one-time side effects such as email.
 	UpdateStatusIfCurrent(ctx context.Context, dealID string, expected, status Status) (bool, error)
-	UpdateDispute(ctx context.Context, dealID, reason string) error
+	UpdateDisputeIfCurrent(ctx context.Context, dealID string, expected Status, reason string) (bool, error)
 	UpdateDisputeResolution(ctx context.Context, dealID string, status Status, resolvedBy string) error
 	GetDealForUpdate(ctx context.Context, dealID string) (*Deal, error)
 	UpdatePayoutCheckingID(ctx context.Context, dealID, payoutCheckingID string) error
+	MarkPayoutAttempted(ctx context.Context, dealID string) error
+	ClearPayoutTracking(ctx context.Context, dealID string) error
 	UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error
 	UpdateShareToken(ctx context.Context, dealID, shareToken string) error
 	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)

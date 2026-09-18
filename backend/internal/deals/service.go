@@ -278,18 +278,71 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 //     sats land in Ganji's LNbits wallet.
 //  2. PayInvoice forwards those sats onward to the freelancer's invoice.
 //
-// Idempotency: approving twice (or a crash between the two legs) re-settles
-// nothing and re-pays the freelancer's invoice. A settle that fails because
-// the hold is already settled is treated as success and we move straight to
-// the payout. Payout is only ever attempted after LNbits confirms the escrow
-// is actually settled.
+// The release is two-phase and conservative about payouts (see releaseEscrow
+// and explained.md §3). In a nutshell: a durable payout_attempted_at marker
+// is committed BEFORE any money moves, the network legs run outside any DB
+// lock, and a retry never auto-resends — a verified payout releases without
+// re-paying, a provably-failed one is cleared and retried, and anything
+// ambiguous surfaces as ErrPayoutInFlight for manual reconciliation.
 func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
 
-	// Keep the deal row locked through the payout bookkeeping. This prevents
-	// concurrent approve requests from both observing an empty payout ID.
+	return s.releaseEscrow(ctx, dealID, releaseEscrowOptions{
+		authorize: func(deal *Deal) error {
+			if !strings.EqualFold(deal.ClientEmail, email) {
+				return ErrForbidden
+			}
+			if !CanTransition(deal.Status, StatusReleased) {
+				return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
+			}
+			return nil
+		},
+		finalize: func(repo DealRepository, id string) error {
+			return repo.UpdateStatus(ctx, id, StatusReleased)
+		},
+	})
+}
+
+// releaseEscrowOptions captures how the shared release flow differs between a
+// client approving and an operator releasing a dispute: the authorization and
+// the UPDATE that finalizes the deal.
+type releaseEscrowOptions struct {
+	authorize func(*Deal) error
+	finalize  func(repo DealRepository, dealID string) error
+}
+
+// releaseEscrow is the shared, two-phase escrow release behind ApproveDeal and
+// an operator's Release resolution — the money legs are identical, only the
+// authorization and the final UPDATE differ.
+//
+//   - Phase 1 (durable intent): lock the row, authorize, and — when there is
+//     no payout yet — commit payout_attempted_at BEFORE any money moves. A
+//     crash after this leaves a visible marker; the next attempt reads it and
+//     refuses to auto-resend instead of double-paying.
+//   - Phase 2 (network): settle the hold and pay the freelancer WITHOUT the
+//     row lock or a transaction pinned across the external calls.
+//   - Phase 3 (finalize): re-lock the row, re-validate the transition, record
+//     the payout checking_id if a fresh payout was just sent, then apply the
+//     release UPDATE and commit.
+//
+// Payout policy (conservative; see explained.md §3):
+//   - payout_checking_id set + confirmed paid     -> release without re-paying.
+//   - payout_checking_id set + confirmed failed   -> clear tracking, re-pay.
+//   - payout_checking_id set + ambiguous status   -> ErrPayoutInFlight, no resend.
+//   - payout_attempted_at set, no checking_id      -> ErrPayoutInFlight, no
+//     resend (crash window: the earlier attempt may have moved money).
+//   - PayInvoice refused with a 4xx                -> provably not sent: clear
+//     the marker so a later attempt is legal, surface the error.
+//   - PayInvoice failed 5xx/timeout                -> ambiguous: keep the
+//     marker, surface ErrPayoutInFlight.
+func (s *Service) releaseEscrow(ctx context.Context, dealID string, opts releaseEscrowOptions) (*Deal, error) {
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+
+	// Phase 1: authorize under the row lock, then commit the durable intent.
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -301,53 +354,118 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 	if err != nil {
 		return nil, err
 	}
-
-	if !strings.EqualFold(deal.ClientEmail, email) {
-		return nil, ErrForbidden
-	}
-
-	if !CanTransition(deal.Status, StatusReleased) {
-		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
-	}
-
-	if err := s.settleAndPayEscrowWithRepo(ctx, deal, repo); err != nil {
+	if err := opts.authorize(deal); err != nil {
 		return nil, err
 	}
 
-	if err := repo.UpdateStatus(ctx, dealID, StatusReleased); err != nil {
-		return nil, fmt.Errorf("releasing escrow for deal %s: %w", dealID, err)
+	confirmed := false
+	payoutCheckingID := deal.PayoutCheckingID
+	switch {
+	case deal.PayoutCheckingID != "":
+		ok, failed, err := s.checkOutgoingPayout(ctx, deal.PayoutCheckingID)
+		if err != nil {
+			// Cannot tell whether the earlier payout landed. Never resend.
+			return nil, fmt.Errorf("%w: verifying payout %s for deal %s: %v",
+				ErrPayoutInFlight, deal.PayoutCheckingID, deal.ID, err)
+		}
+		switch {
+		case ok:
+			confirmed = true
+		case failed:
+			// Definitively not sent — reset the stale tracking and re-try below.
+			if err := repo.ClearPayoutTracking(ctx, deal.ID); err != nil {
+				return nil, fmt.Errorf("resetting payout tracking for deal %s: %w", deal.ID, err)
+			}
+			payoutCheckingID = ""
+		default:
+			// Still pending/in flight with no verdict. Do not resend.
+			return nil, fmt.Errorf("%w: payout %s for deal %s is not confirmed",
+				ErrPayoutInFlight, deal.PayoutCheckingID, deal.ID)
+		}
+	case deal.PayoutAttemptedAt.Valid:
+		// A previous release recorded an attempt but never confirmed it. This is
+		// exactly the crash window — money may or may not have moved.
+		return nil, fmt.Errorf("%w: deal %s has an unconfirmed payout attempt", ErrPayoutInFlight, deal.ID)
+	}
+
+	if !confirmed {
+		if err := repo.MarkPayoutAttempted(ctx, deal.ID); err != nil {
+			return nil, fmt.Errorf("recording payout attempt for deal %s: %w", deal.ID, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	deal.Status = StatusReleased
+	// Phase 2: the money legs, deliberately outside any lock/transaction so a
+	// stray LNbits stall cannot pin the row or a pool connection.
+	if !confirmed {
+		if err := s.settleHoldGuarded(ctx, deal); err != nil {
+			// Settlement provably did not complete, so no money moved and the
+			// attempt marker is safe to clear: a later request may retry.
+			if clearErr := s.clearPayoutAttempt(ctx, deal.ID); clearErr != nil {
+				log.Printf("clearing payout attempt for deal %s: %v", deal.ID, clearErr)
+			}
+			return nil, err
+		}
 
-	s.anchorReleasedDeal(ctx, deal)
-	s.notifyReleased(deal)
+		id, err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice)
+		if err != nil {
+			if errors.Is(err, lnbits.ErrPayoutRefused) {
+				// Provably not sent (rejected by LNbits before any payment):
+				// reset the marker so a later approve is legal.
+				if clearErr := s.clearPayoutAttempt(ctx, deal.ID); clearErr != nil {
+					log.Printf("clearing payout attempt for deal %s: %v", deal.ID, clearErr)
+				}
+				return nil, fmt.Errorf("paying freelancer for deal %s: %w", deal.ID, err)
+			}
+			// Ambiguous (5xx / timeout): may have been sent. Keep the marker.
+			return nil, fmt.Errorf("%w: paying freelancer for deal %s: %v", ErrPayoutInFlight, deal.ID, err)
+		}
+		payoutCheckingID = id
+	}
 
-	return deal, nil
+	// Phase 3: re-lock and finalize. Another actor may have moved the deal
+	// while the network legs ran, so the transition is re-validated.
+	tx2, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx2.Rollback()
+	repo2 := s.repo.WithTx(tx2)
+
+	deal2, err := repo2.GetDealForUpdate(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	if !CanTransition(deal2.Status, StatusReleased) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal2.Status, StatusReleased)
+	}
+	if payoutCheckingID != "" && deal2.PayoutCheckingID == "" {
+		if err := repo2.UpdatePayoutCheckingID(ctx, dealID, payoutCheckingID); err != nil {
+			return nil, fmt.Errorf("recording payout for deal %s: %w", deal.ID, err)
+		}
+	}
+	if err := opts.finalize(repo2, dealID); err != nil {
+		return nil, err
+	}
+	if err := tx2.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	deal2.Status = StatusReleased
+
+	s.anchorReleasedDeal(ctx, deal2)
+	s.notifyReleased(deal2)
+
+	return deal2, nil
 }
 
-// settleAndPayEscrow runs the two non-atomic network legs that move a held
-// escrow to the freelancer:
-//  1. SettleHold reveals the preimage, completing the held payment so the
-//     sats land in Ganji's LNbits wallet.
-//  2. PayInvoice forwards those sats onward to the freelancer's invoice.
-//
-// Idempotency: a settle that fails because the hold is already settled is
-// treated as success (verified via CheckPayment) and we move straight to the
-// payout, so a retry after a crash between the legs cannot double-settle.
-// Payout idempotency: if payout_checking_id is already set, we verify the
-// payout status with LNbits instead of sending again (double-pay prevention).
-// Payout is only ever attempted once LNbits confirms the escrow is settled.
-// It is shared by the client's approve and an operator's release resolution —
-// the money legs are identical, only the authorization differs.
-func (s *Service) settleAndPayEscrow(ctx context.Context, deal *Deal) error {
-	return s.settleAndPayEscrowWithRepo(ctx, deal, s.repo)
-}
-
-func (s *Service) settleAndPayEscrowWithRepo(ctx context.Context, deal *Deal, repo DealRepository) error {
+// settleHoldGuarded settles the escrow hold, treating "already settled" as
+// success: LNbits refuses the second settle, but a CheckPayment confirming the
+// hold is SETTLED proves the funds arrived. Anything still held surfaces an
+// error so the payout leg never runs on unsettled escrow.
+func (s *Service) settleHoldGuarded(ctx context.Context, deal *Deal) error {
 	if deal.Preimage == "" {
 		return fmt.Errorf("%w: cannot release a deal without an escrow preimage", ErrInvalidInput)
 	}
@@ -359,39 +477,59 @@ func (s *Service) settleAndPayEscrowWithRepo(ctx context.Context, deal *Deal, re
 		}
 	}
 
-	// Payout idempotency: if we already have a payout_checking_id, verify it
-	// instead of sending again. This handles crashes between PayInvoice and
-	// DB update.
-	if deal.PayoutCheckingID != "" {
-		payment, err := s.lnbits.CheckPayment(ctx, deal.PayoutCheckingID)
-		if err != nil {
-			return fmt.Errorf("verifying existing payout for deal %s: %w", deal.ID, err)
-		}
-		if !payment.Paid || payment.Details.Status != "SETTLED" {
-			// Payout not confirmed — clear the tracking ID and retry below
-			if err := repo.UpdatePayoutCheckingID(ctx, deal.ID, ""); err != nil {
-				log.Printf("failed to clear stale payout_checking_id for deal %s: %v", deal.ID, err)
-			}
-			deal.PayoutCheckingID = ""
-		} else {
-			// Payout already confirmed
-			return nil
-		}
-	}
+	return nil
+}
 
-	payoutCheckingID, err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice)
+// checkOutgoingPayout classifies a previously-initiated payout by its LNbits
+// status. It reports:
+//   - confirmed=true when the payout is verifiably done (paid + a terminal
+//     success status);
+//   - failed=true when the payout is verifiably NOT done (a terminal failure
+//     status);
+//   - otherwise ambiguous — the payout may still be in flight.
+func (s *Service) checkOutgoingPayout(ctx context.Context, payoutCheckingID string) (confirmed, failed bool, err error) {
+	payment, err := s.lnbits.CheckPayment(ctx, payoutCheckingID)
 	if err != nil {
-		return fmt.Errorf("paying freelancer for deal %s: %w", deal.ID, err)
+		return false, false, err
 	}
-
-	// Record payout checking_id immediately after successful PayInvoice so
-	// a crash before UpdateDisputeResolution doesn't cause double-pay on retry.
-	if err := repo.UpdatePayoutCheckingID(ctx, deal.ID, payoutCheckingID); err != nil {
-		// If DB update fails, we still have the payout_checking_id from LNbits.
-		// On retry, we'll verify it instead of paying again.
-		log.Printf("warning: payout sent but failed to record checking_id for deal %s: %v", deal.ID, err)
+	if payment.Paid && isPayoutConfirmed(payment.Details.Status) {
+		return true, false, nil
 	}
+	if isPayoutFailed(payment.Details.Status) {
+		return false, true, nil
+	}
+	return false, false, nil
+}
 
+// isPayoutConfirmed reports whether an outgoing payment status means the
+// freelancer got paid. LNbits backends report the underlying backend status
+// verbatim, so we accept the common set instead of hard-coding one backend.
+func isPayoutConfirmed(status string) bool {
+	switch status {
+	case "SETTLED", "COMPLETE", "SUCCEEDED", "PAID":
+		return true
+	default:
+		return false
+	}
+}
+
+// isPayoutFailed reports whether an outgoing payment status definitively means
+// nothing was sent.
+func isPayoutFailed(status string) bool {
+	switch status {
+	case "FAILED", "UNPAID", "CANCELLED", "EXPIRED":
+		return true
+	default:
+		return false
+	}
+}
+
+// clearPayoutAttempt resets the payout tracking (autocommit, off the money
+// path). Only called when the payout is provably not in flight.
+func (s *Service) clearPayoutAttempt(ctx context.Context, dealID string) error {
+	if err := s.repo.ClearPayoutTracking(ctx, dealID); err != nil {
+		return fmt.Errorf("resetting payout tracking for deal %s: %w", dealID, err)
+	}
 	return nil
 }
 
@@ -444,8 +582,15 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID, reason string)
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusDisputed)
 	}
 
-	if err := s.repo.UpdateDispute(ctx, dealID, reason); err != nil {
+	// Guard the write against the still-valid status we just read. Without the
+	// guard, a dispute racing an approve that already released the deal could
+	// flip a released (money-moved) deal back to disputed.
+	transitioned, err := s.repo.UpdateDisputeIfCurrent(ctx, dealID, deal.Status, reason)
+	if err != nil {
 		return nil, fmt.Errorf("raising dispute for deal %s: %w", dealID, err)
+	}
+	if !transitioned {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusDisputed)
 	}
 
 	deal.Status = StatusDisputed
@@ -467,14 +612,17 @@ func (s *Service) ListDisputes(ctx context.Context) ([]Deal, error) {
 // by middleware.OperatorRequired at the route):
 //
 //   - release: the work is accepted — settle the hold and forward the sats to
-//     the freelancer (the same two network legs as ApproveDeal).
+//     the freelancer (the same two-phase, conservative release as ApproveDeal,
+//     see releaseEscrow).
 //   - refund: the work is rejected — cancel the hold so the sats return to the
 //     client on the Lightning network.
 //
 // The deal must actually be disputed; a deal already released/refunded (or
 // never disputed) is refused. The resolution and the deciding operator are
 // recorded via UpdateDisputeResolution only AFTER the network leg succeeds,
-// so the DB never claims a money move the network did not make.
+// so the DB never claims a money move the network did not make. There is no
+// direct 'paying' state: the release path's payout_attempted_at marker
+// (committed before any money moves) is what survives a crash.
 func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID string, resolution DisputeResolution) (*Deal, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
@@ -485,68 +633,160 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 		return nil, fmt.Errorf("%w: operator email is required", ErrInvalidInput)
 	}
 
-	var target Status
 	switch resolution {
 	case DisputeResolutionRelease:
-		target = StatusReleased
+		deal, err := s.releaseEscrow(ctx, dealID, releaseEscrowOptions{
+			authorize: func(deal *Deal) error {
+				if deal.Status != StatusDisputed {
+					return fmt.Errorf("%w: only a disputed deal can be resolved, got %s", ErrInvalidTransition, deal.Status)
+				}
+				return nil
+			},
+			finalize: func(repo DealRepository, id string) error {
+				return repo.UpdateDisputeResolution(ctx, id, StatusReleased, operatorEmail)
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		deal.ResolvedAt = sql.NullTime{Time: time.Now(), Valid: true}
+		deal.ResolvedBy = operatorEmail
+		return deal, nil
 	case DisputeResolutionRefund:
-		target = StatusRefunded
+		return s.refundDispute(ctx, operatorEmail, dealID)
 	default:
 		return nil, fmt.Errorf("%w: resolution must be %q or %q", ErrInvalidInput, DisputeResolutionRelease, DisputeResolutionRefund)
 	}
+}
 
-	// Run the entire resolution in a transaction so the SELECT FOR UPDATE
-	// lock is held until the final UPDATE commits. This prevents concurrent
-	// operators from both reading 'disputed' and both proceeding to move money.
+// refundDispute is the arbiter's refund verdict: cancel the hold on the
+// network so the sats return to the client. It runs inside a single row-locked
+// transaction and only records the refund after the cancel succeeds (or
+// proves the hold is already gone).
+func (s *Service) refundDispute(ctx context.Context, operatorEmail, dealID string) (*Deal, error) {
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-
 	repo := s.repo.WithTx(tx)
 
-	// Lock the deal row for the duration of this resolution.
 	deal, err := repo.GetDealForUpdate(ctx, dealID)
 	if err != nil {
 		return nil, err
 	}
-
 	if deal.Status != StatusDisputed {
 		return nil, fmt.Errorf("%w: only a disputed deal can be resolved, got %s", ErrInvalidTransition, deal.Status)
 	}
 
-	switch resolution {
-	case DisputeResolutionRelease:
-		if err := s.settleAndPayEscrowWithRepo(ctx, deal, repo); err != nil {
-			return nil, err
-		}
-	case DisputeResolutionRefund:
-		if err := s.cancelEscrowHold(ctx, deal); err != nil {
-			return nil, err
-		}
+	if err := s.cancelEscrowHold(ctx, deal); err != nil {
+		return nil, err
 	}
-
-	if err := repo.UpdateDisputeResolution(ctx, dealID, target, operatorEmail); err != nil {
+	if err := repo.UpdateDisputeResolution(ctx, dealID, StatusRefunded, operatorEmail); err != nil {
 		return nil, fmt.Errorf("recording dispute resolution for deal %s: %w", dealID, err)
 	}
-
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	deal.Status = target
+	deal.Status = StatusRefunded
 	deal.ResolvedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	deal.ResolvedBy = operatorEmail
+	s.notifyRefunded(deal)
+	return deal, nil
+}
 
-	if target == StatusReleased {
-		s.anchorReleasedDeal(ctx, deal)
-		s.notifyReleased(deal)
-	} else {
-		s.notifyRefunded(deal)
+// ReconcilePayout rescues a deal whose payout is hung and operator-only.
+// releaseEscrow deliberately refuses to auto-resend an ambiguous payout
+// (ErrPayoutInFlight): it cannot tell whether an earlier attempt moved money,
+// and the conservative policy chooses a stuck-but-visible deal over a possible
+// duplicate payout. The operator is the human backstop: they inspect the
+// deal's outgoing payments in the LNbits UI and tell the system the truth.
+//
+//   - ReconcileConfirmPayout: the freelancer WAS paid. The operator passes the
+//     real payout_checking_id from LNbits history; the service verifies it is
+//     genuinely PAID before releasing the deal (no money moves here — the
+//     release only records what already happened).
+//   - ReconcileResetPayout: the freelancer was NOT paid (earlier attempt
+//     failed before sending). Everything is cleared so a normal approve /
+//     resolve-release can run the payout again.
+func (s *Service) ReconcilePayout(ctx context.Context, operatorEmail, dealID string, action ReconcileAction, payoutCheckingID string) (*Deal, error) {
+	operatorEmail = strings.ToLower(strings.TrimSpace(operatorEmail))
+	if operatorEmail == "" {
+		return nil, fmt.Errorf("%w: operator email is required", ErrInvalidInput)
+	}
+	if dealID == "" {
+		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
 
-	return deal, nil
+	switch action {
+	case ReconcileConfirmPayout:
+		payoutCheckingID = strings.TrimSpace(payoutCheckingID)
+		if payoutCheckingID == "" {
+			return nil, fmt.Errorf("%w: confirm_payout requires the payout_checking_id from LNbits history", ErrInvalidInput)
+		}
+
+		// Only release once the claimed payout is verifiably done.
+		ok, _, err := s.checkOutgoingPayout(ctx, payoutCheckingID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: verifying payout %s: %v", ErrPayoutInFlight, payoutCheckingID, err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("%w: payout %s is not confirmed as paid", ErrInvalidInput, payoutCheckingID)
+		}
+
+		tx, err := s.repo.BeginTx(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin transaction: %w", err)
+		}
+		defer tx.Rollback()
+		repo := s.repo.WithTx(tx)
+
+		deal, err := repo.GetDealForUpdate(ctx, dealID)
+		if err != nil {
+			return nil, err
+		}
+		if !CanTransition(deal.Status, StatusReleased) {
+			return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
+		}
+		if deal.PayoutCheckingID != payoutCheckingID {
+			if err := repo.UpdatePayoutCheckingID(ctx, deal.ID, payoutCheckingID); err != nil {
+				return nil, fmt.Errorf("recording reconciled payout for deal %s: %w", deal.ID, err)
+			}
+		}
+		if err := repo.UpdateStatus(ctx, deal.ID, StatusReleased); err != nil {
+			return nil, fmt.Errorf("releasing reconciled deal %s: %w", deal.ID, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit transaction: %w", err)
+		}
+
+		deal.Status = StatusReleased
+		s.anchorReleasedDeal(ctx, deal)
+		s.notifyReleased(deal)
+		return deal, nil
+
+	case ReconcileResetPayout:
+		deal, err := s.repo.GetDealByID(ctx, dealID)
+		if err != nil {
+			return nil, err
+		}
+		if deal.Status == StatusReleased || deal.Status == StatusRefunded {
+			return nil, fmt.Errorf("%w: deal %s is already %s", ErrInvalidTransition, deal.ID, deal.Status)
+		}
+		if deal.PayoutCheckingID == "" && !deal.PayoutAttemptedAt.Valid {
+			return nil, fmt.Errorf("%w: deal %s has no payout in flight to reset", ErrInvalidInput, deal.ID)
+		}
+		if err := s.repo.ClearPayoutTracking(ctx, dealID); err != nil {
+			return nil, fmt.Errorf("resetting payout tracking for deal %s: %w", dealID, err)
+		}
+		deal.PayoutCheckingID = ""
+		deal.PayoutAttemptedAt = sql.NullTime{}
+		return deal, nil
+
+	default:
+		return nil, fmt.Errorf("%w: reconcile action must be %q or %q", ErrInvalidInput, ReconcileConfirmPayout, ReconcileResetPayout)
+	}
 }
 
 // cancelEscrowHold returns held funds to the client by cancelling the hold
@@ -694,7 +934,11 @@ func (s *Service) SweepExpiredHolds(ctx context.Context, cutoff time.Time) (int,
 
 		switch payment.Details.Status {
 		case "UNPAID", "EXPIRED", "CANCELLED":
-			if err := s.repo.UpdateStatus(ctx, deal.ID, StatusRefunded); err != nil {
+			// Guard against racing an approve/refund: only sweep if the deal is
+			// still in the state this sweep read (awaiting_payment / locked).
+			transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, deal.Status, StatusRefunded)
+			if err != nil || !transitioned {
+				// Another caller already moved the deal (e.g. just approved it).
 				continue
 			}
 			deal.Status = StatusRefunded

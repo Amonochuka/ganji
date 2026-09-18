@@ -47,6 +47,10 @@ type fakeDealRepo struct {
 	getDealErr  error
 	updateErr   error
 	updateCalls []Status
+	// raceMoveTo simulates another actor moving the row between the caller's
+	// read and its guarded write: on the next guarded update, the row is first
+	// moved to raceMoveTo and the guard reports itself as lost.
+	raceMoveTo Status
 }
 
 func newFakeDealRepo() *fakeDealRepo {
@@ -138,6 +142,11 @@ func (f *fakeDealRepo) UpdateStatusIfCurrent(ctx context.Context, dealID string,
 	if !ok {
 		return false, ErrDealNotFound
 	}
+	if f.raceMoveTo != "" {
+		deal.Status = f.raceMoveTo
+		f.raceMoveTo = ""
+		return false, nil
+	}
 	if deal.Status != expected {
 		return false, nil
 	}
@@ -146,13 +155,40 @@ func (f *fakeDealRepo) UpdateStatusIfCurrent(ctx context.Context, dealID string,
 	return true, nil
 }
 
-func (f *fakeDealRepo) UpdateDispute(ctx context.Context, dealID, reason string) error {
+func (f *fakeDealRepo) UpdateDisputeIfCurrent(ctx context.Context, dealID string, expected Status, reason string) (bool, error) {
+	deal, ok := f.deals[dealID]
+	if !ok {
+		return false, ErrDealNotFound
+	}
+	if f.raceMoveTo != "" {
+		deal.Status = f.raceMoveTo
+		f.raceMoveTo = ""
+		return false, nil
+	}
+	if deal.Status != expected {
+		return false, nil
+	}
+	deal.Status = StatusDisputed
+	deal.DisputeReason = reason
+	return true, nil
+}
+
+func (f *fakeDealRepo) MarkPayoutAttempted(ctx context.Context, dealID string) error {
 	deal, ok := f.deals[dealID]
 	if !ok {
 		return ErrDealNotFound
 	}
-	deal.Status = StatusDisputed
-	deal.DisputeReason = reason
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	return nil
+}
+
+func (f *fakeDealRepo) ClearPayoutTracking(ctx context.Context, dealID string) error {
+	deal, ok := f.deals[dealID]
+	if !ok {
+		return ErrDealNotFound
+	}
+	deal.PayoutCheckingID = ""
+	deal.PayoutAttemptedAt = sql.NullTime{}
 	return nil
 }
 
@@ -1390,5 +1426,322 @@ func TestApproveDealSurvivesAnchorFailure(t *testing.T) {
 	}
 	if updated.Status != StatusReleased {
 		t.Fatalf("expected released, got %s", updated.Status)
+	}
+}
+
+func TestApproveDealConfirmedPayoutDoesNotRepay(t *testing.T) {
+	// A retry after the release crashed post-payout: payout_checking_id is set
+	// and LNbits confirms it was paid. Approve must release WITHOUT settling or
+	// paying again — any extra network call fails the test.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+	deal.PayoutCheckingID = "oc1"
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/payments/oc1" {
+			t.Errorf("confirmed payout must not touch the network beyond verification, got %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"oc1","status":"SETTLED"}}`))
+	}))
+
+	updated, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if updated.Status != StatusReleased {
+		t.Fatalf("expected released, got %s", updated.Status)
+	}
+}
+
+func TestApproveDealAmbiguousPayoutBlocked(t *testing.T) {
+	// payout_checking_id is set but LNbits says the payout is still pending:
+	// the outcome is unknown, so approve must NOT resend — it surfaces
+	// ErrPayoutInFlight and leaves the deal untouched.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+	deal.PayoutCheckingID = "oc1"
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/payments/oc1" {
+			t.Errorf("unexpected network call %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"oc1","status":"PENDING"}}`))
+	}))
+
+	_, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if !errors.Is(err, ErrPayoutInFlight) {
+		t.Fatalf("expected ErrPayoutInFlight, got %v", err)
+	}
+	if repo.deals[deal.ID].Status == StatusReleased {
+		t.Fatal("expected the deal to stay unreleased")
+	}
+}
+
+func TestApproveDealClearsConfirmedFailedPayoutAndRepays(t *testing.T) {
+	// payout_checking_id is set but LNbits definitively reports FAILED: the
+	// earlier attempt never sent money, so clearing it and re-paying is safe.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+	deal.PayoutCheckingID = "oc1"
+
+	var paidOut bool
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/payments/oc1":
+			_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"oc1","status":"FAILED"}}`))
+		case "/api/v1/payments/settle":
+			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
+		case "/api/v1/payments":
+			paidOut = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"payment_hash":"o2","checking_id":"oc2"}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+
+	updated, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !paidOut {
+		t.Fatal("expected the payout to be re-attempted after a confirmed failure")
+	}
+	if updated.Status != StatusReleased {
+		t.Fatalf("expected released, got %s", updated.Status)
+	}
+	if repo.deals[deal.ID].PayoutCheckingID != "oc2" {
+		t.Fatalf("expected the new payout id to be recorded, got %q", repo.deals[deal.ID].PayoutCheckingID)
+	}
+}
+
+func TestApproveDealBlocksUnconfirmedCrashWindow(t *testing.T) {
+	// payout_attempted_at is set but no payout_checking_id was ever recorded —
+	// the exact crash-window between PayInvoice and the release update. The
+	// system must refuse to auto-resend (money may have moved). An empty LNbits
+	// URL proves zero network calls happen.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := NewService(repo, &lnbits.Client{})
+
+	_, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if !errors.Is(err, ErrPayoutInFlight) {
+		t.Fatalf("expected ErrPayoutInFlight, got %v", err)
+	}
+	if repo.deals[deal.ID].Status == StatusReleased {
+		t.Fatal("expected the deal to stay unreleased")
+	}
+}
+
+func TestApproveDealRefusedPayoutRetriesLater(t *testing.T) {
+	// A 4xx from LNbits is a provable non-send: the marker is cleared so a later
+	// approve can legally re-run the payout. The second attempt succeeds.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+
+	payCalls := 0
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/payments/settle":
+			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
+		case "/api/v1/payments":
+			payCalls++
+			if payCalls == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"detail":"insufficient balance"}`))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"payment_hash":"o1","checking_id":"oc1"}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+
+	if _, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID); !errors.Is(err, lnbits.ErrPayoutRefused) {
+		t.Fatalf("expected refused payout error, got %v", err)
+	}
+	if repo.deals[deal.ID].PayoutAttemptedAt.Valid {
+		t.Fatal("expected the attempt marker to be cleared after a definite refusal")
+	}
+	if repo.deals[deal.ID].Status == StatusReleased {
+		t.Fatal("expected the deal to stay unreleased")
+	}
+
+	updated, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got %v", err)
+	}
+	if updated.Status != StatusReleased {
+		t.Fatalf("expected released after retry, got %s", updated.Status)
+	}
+}
+
+func TestReconcilePayoutConfirmReleasesVerifiedPayout(t *testing.T) {
+	// An operator confirmed in LNbits history that the freelancer WAS paid and
+	// records the real payout_checking_id: the hung deal is released without any
+	// money moving.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReviewing
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/payments/oc9" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"oc9","status":"COMPLETE"}}`))
+	}))
+
+	updated, err := service.ReconcilePayout(context.Background(), "arbiter@example.com", deal.ID, ReconcileConfirmPayout, "oc9")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if updated.Status != StatusReleased {
+		t.Fatalf("expected released, got %s", updated.Status)
+	}
+	if repo.deals[deal.ID].PayoutCheckingID != "oc9" {
+		t.Fatalf("expected the reconciled payout id to be recorded, got %q", repo.deals[deal.ID].PayoutCheckingID)
+	}
+}
+
+func TestReconcilePayoutConfirmRejectsUnconfirmedID(t *testing.T) {
+	// The operator's claimed payout must actually verify as paid; a still-pending
+	// LNbits status is not enough to release money-was-moved bookkeeping.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReviewing
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"oc9","status":"PENDING"}}`))
+	}))
+
+	_, err := service.ReconcilePayout(context.Background(), "arbiter@example.com", deal.ID, ReconcileConfirmPayout, "oc9")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+	if repo.deals[deal.ID].Status == StatusReleased {
+		t.Fatal("expected the deal to stay unreleased")
+	}
+}
+
+func TestReconcilePayoutConfirmRequiresCheckingID(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+
+	service := newTestService(repo)
+
+	if _, err := service.ReconcilePayout(context.Background(), "arbiter@example.com", deal.ID, ReconcileConfirmPayout, "  "); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for a missing payout id, got %v", err)
+	}
+}
+
+func TestReconcilePayoutResetClearsHungAttempt(t *testing.T) {
+	// The operator verified the earlier attempt never moved money: clearing the
+	// tracking lets the client re-approve and run the payout fresh.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReviewing
+	deal.PayoutCheckingID = "oc-stale"
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := newTestService(repo)
+
+	updated, err := service.ReconcilePayout(context.Background(), "arbiter@example.com", deal.ID, ReconcileResetPayout, "")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if updated.Status != StatusReviewing {
+		t.Fatalf("expected the deal to stay where it was, got %s", updated.Status)
+	}
+	stored := repo.deals[deal.ID]
+	if stored.PayoutCheckingID != "" || stored.PayoutAttemptedAt.Valid {
+		t.Fatal("expected the payout tracking to be cleared")
+	}
+}
+
+func TestReconcilePayoutResetRefusesTerminalOrUntracked(t *testing.T) {
+	repo := newFakeDealRepo()
+
+	released := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	released.Status = StatusReleased
+	released.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	untracked := escrowDeal(repo, "deal-2", "freelancer-1", "client@example.com")
+	untracked.Status = StatusWorkSubmitted
+
+	service := newTestService(repo)
+
+	if _, err := service.ReconcilePayout(context.Background(), "arbiter@example.com", released.ID, ReconcileResetPayout, ""); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition for a terminal deal, got %v", err)
+	}
+	if _, err := service.ReconcilePayout(context.Background(), "arbiter@example.com", untracked.ID, ReconcileResetPayout, ""); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for a deal with nothing in flight, got %v", err)
+	}
+}
+
+func TestSweepSkipsDealMovedByConcurrentActor(t *testing.T) {
+	// The sweep reads a deal as expired, but a concurrent approve releases it
+	// before the guarded refund write: the guard must lose, leaving the released
+	// deal untouched instead of flipping it to refunded.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusLocked
+	deal.CreatedAt = time.Now().Add(-48 * time.Hour)
+
+	repo.raceMoveTo = StatusReleased
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"bb","status":"UNPAID"}}`))
+	}))
+
+	swept, err := service.SweepExpiredHolds(context.Background(), time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if swept != 0 {
+		t.Fatalf("expected 0 swept when the deal was already moved, got %d", swept)
+	}
+	if repo.deals[deal.ID].Status != StatusReleased {
+		t.Fatalf("expected the concurrently-released deal to stay released, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
+func TestDisputeDealGuardLosesToConcurrentRelease(t *testing.T) {
+	// A dispute racing an approve must not flip a released (money-moved) deal
+	// back to disputed: the guarded write reports the expected status is gone
+	// and DisputeDeal surfaces ErrInvalidTransition.
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusReviewing
+
+	repo.raceMoveTo = StatusReleased
+
+	service := newTestService(repo)
+
+	if _, err := service.DisputeDeal(context.Background(), "client@example.com", deal.ID, "deliverable does not match"); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition, got %v", err)
+	}
+	if repo.deals[deal.ID].Status != StatusReleased {
+		t.Fatalf("expected the released deal to stay released, got %s", repo.deals[deal.ID].Status)
 	}
 }
