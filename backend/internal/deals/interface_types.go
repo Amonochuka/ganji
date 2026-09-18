@@ -15,6 +15,10 @@ type DealRepository interface {
 	ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error)
 	ListForUser(ctx context.Context, userID, email string) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
+	// UpdateStatusIfCurrent atomically changes a status only when the row is
+	// still in expected. The boolean reports whether this caller won the
+	// transition, which is essential for one-time side effects such as email.
+	UpdateStatusIfCurrent(ctx context.Context, dealID string, expected, status Status) (bool, error)
 	UpdateDispute(ctx context.Context, dealID, reason string) error
 	UpdateDisputeResolution(ctx context.Context, dealID string, status Status, resolvedBy string) error
 	GetDealForUpdate(ctx context.Context, dealID string) (*Deal, error)

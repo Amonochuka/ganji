@@ -3,26 +3,88 @@ package email
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
+	"log"
+	"mime"
+	"net"
+	"net/mail"
 	"net/smtp"
 	"strings"
 	"time"
 
+	"github.com/Amonochuka/ganji-backend/internal/auth"
 	"github.com/Amonochuka/ganji-backend/internal/config"
+	"github.com/Amonochuka/ganji-backend/internal/deals"
 )
 
-type Service struct {
-	cfg *config.Config
+const sendTimeout = 15 * time.Second
+
+type UserFinder interface {
+	FindByID(ctx context.Context, id string) (*auth.User, error)
 }
 
-func NewService(cfg *config.Config) *Service {
-	return &Service{cfg: cfg}
+type Service struct {
+	cfg   *config.Config
+	users UserFinder
+}
+
+func NewService(cfg *config.Config, users UserFinder) *Service {
+	return &Service{cfg: cfg, users: users}
 }
 
 func (s *Service) Enabled() bool {
-	return s.cfg.SMTPHost != "" && s.cfg.SMTPUser != "" && s.cfg.SMTPPass != ""
+	return s.cfg.SMTPHost != "" && s.cfg.SMTPPort > 0 && s.cfg.SMTPFrom != "" &&
+		((s.cfg.SMTPUser == "") == (s.cfg.SMTPPass == ""))
+}
+
+// PaymentLocked, DealDisputed, DealReleased and DealRefunded satisfy
+// deals.DealNotifier. They run asynchronously with a bounded lifetime so a
+// slow mail server never delays an escrow state transition.
+func (s *Service) PaymentLocked(_ context.Context, deal *deals.Deal) {
+	s.notify(deal, func(ctx context.Context, to, name string) error {
+		return s.SendPaymentReceived(ctx, to, name, deal.Title, deal.AmountSats, deal.ID)
+	})
+}
+
+func (s *Service) DealDisputed(_ context.Context, deal *deals.Deal) {
+	s.notify(deal, func(ctx context.Context, to, name string) error {
+		return s.SendDealDisputed(ctx, to, name, deal.Title, deal.DisputeReason, deal.ID)
+	})
+}
+
+func (s *Service) DealReleased(_ context.Context, deal *deals.Deal) {
+	s.notify(deal, func(ctx context.Context, to, name string) error {
+		return s.SendDealReleased(ctx, to, name, deal.Title, deal.ID)
+	})
+}
+
+func (s *Service) DealRefunded(_ context.Context, deal *deals.Deal) {
+	s.notify(deal, func(ctx context.Context, to, name string) error {
+		return s.SendDealRefunded(ctx, to, name, deal.Title, deal.ID)
+	})
+}
+
+func (s *Service) notify(deal *deals.Deal, send func(context.Context, string, string) error) {
+	if !s.Enabled() || s.users == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+		defer cancel()
+		user, err := s.users.FindByID(ctx, deal.FreelancerID)
+		if err != nil || user == nil {
+			log.Printf("email: look up freelancer for deal %s: %v", deal.ID, err)
+			return
+		}
+		if err := send(ctx, user.Email, FirstName(user.DisplayName)); err != nil {
+			log.Printf("email: notify freelancer for deal %s: %v", deal.ID, err)
+		}
+	}()
 }
 
 func (s *Service) SendPaymentReceived(ctx context.Context, freelancerEmail, freelancerName, dealTitle string, amountSats int64, dealID string) error {
@@ -74,20 +136,43 @@ func (s *Service) SendDealRefunded(ctx context.Context, freelancerEmail, freelan
 }
 
 func (s *Service) send(ctx context.Context, to, subject, textBody, htmlBody string) error {
-	msg := buildMessage(s.cfg.SMTPFrom, to, subject, textBody, htmlBody)
-
-	auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
+	fromAddress, err := parseMailbox(s.cfg.SMTPFrom)
+	if err != nil {
+		return fmt.Errorf("invalid smtp from address: %w", err)
+	}
+	toAddress, err := parseMailbox(to)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address: %w", err)
+	}
+	if err := safeHeader(subject); err != nil {
+		return fmt.Errorf("invalid email subject: %w", err)
+	}
+	msg, err := buildMessage(s.cfg.SMTPFrom, to, subject, textBody, htmlBody)
+	if err != nil {
+		return err
+	}
 	addr := fmt.Sprintf("%s:%d", s.cfg.SMTPHost, s.cfg.SMTPPort)
-
-	// Use TLS
 	tlsConfig := &tls.Config{
 		ServerName: s.cfg.SMTPHost,
+		MinVersion: tls.VersionTLS12,
 	}
-	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("dial smtp: %w", err)
 	}
 	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	if s.cfg.SMTPEncryption == "implicit_tls" {
+		tlsConn := tls.Client(conn, tlsConfig)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			return fmt.Errorf("smtp tls handshake: %w", err)
+		}
+		conn = tlsConn
+	}
 
 	client, err := smtp.NewClient(conn, s.cfg.SMTPHost)
 	if err != nil {
@@ -95,14 +180,27 @@ func (s *Service) send(ctx context.Context, to, subject, textBody, htmlBody stri
 	}
 	defer client.Quit()
 
-	if err := client.Auth(auth); err != nil {
-		return fmt.Errorf("smtp auth: %w", err)
+	if s.cfg.SMTPEncryption == "starttls" {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return errors.New("smtp server does not advertise STARTTLS")
+		}
+		if err := client.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
+	} else if s.cfg.SMTPEncryption != "none" && s.cfg.SMTPEncryption != "implicit_tls" {
+		return fmt.Errorf("unsupported SMTP_ENCRYPTION %q", s.cfg.SMTPEncryption)
 	}
 
-	if err := client.Mail(s.cfg.SMTPFrom); err != nil {
+	if s.cfg.SMTPUser != "" {
+		auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+	if err := client.Mail(fromAddress); err != nil {
 		return fmt.Errorf("smtp mail from: %w", err)
 	}
-	if err := client.Rcpt(to); err != nil {
+	if err := client.Rcpt(toAddress); err != nil {
 		return fmt.Errorf("smtp rcpt to: %w", err)
 	}
 
@@ -122,24 +220,54 @@ func (s *Service) send(ctx context.Context, to, subject, textBody, htmlBody stri
 	return nil
 }
 
-func buildMessage(from, to, subject, textBody, htmlBody string) []byte {
+func buildMessage(from, to, subject, textBody, htmlBody string) ([]byte, error) {
+	boundary, err := mimeBoundary()
+	if err != nil {
+		return nil, err
+	}
 	var buf bytes.Buffer
 	buf.WriteString(fmt.Sprintf("From: %s\r\n", from))
 	buf.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	buf.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	buf.WriteString(fmt.Sprintf("Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", subject)))
 	buf.WriteString("MIME-Version: 1.0\r\n")
-	buf.WriteString("Content-Type: multipart/alternative; boundary=\"boundary123\"\r\n")
+	buf.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary))
 	buf.WriteString("\r\n")
-	buf.WriteString("--boundary123\r\n")
+	buf.WriteString("--" + boundary + "\r\n")
 	buf.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
 	buf.WriteString(textBody)
 	buf.WriteString("\r\n\r\n")
-	buf.WriteString("--boundary123\r\n")
+	buf.WriteString("--" + boundary + "\r\n")
 	buf.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
 	buf.WriteString(htmlBody)
 	buf.WriteString("\r\n\r\n")
-	buf.WriteString("--boundary123--\r\n")
-	return buf.Bytes()
+	buf.WriteString("--" + boundary + "--\r\n")
+	return buf.Bytes(), nil
+}
+
+func parseMailbox(value string) (string, error) {
+	if err := safeHeader(value); err != nil {
+		return "", err
+	}
+	address, err := mail.ParseAddress(value)
+	if err != nil || address.Address == "" {
+		return "", errors.New("not an email address")
+	}
+	return address.Address, nil
+}
+
+func safeHeader(value string) error {
+	if strings.ContainsAny(value, "\r\n") {
+		return errors.New("header contains a newline")
+	}
+	return nil
+}
+
+func mimeBoundary() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate MIME boundary: %w", err)
+	}
+	return "ganji-" + hex.EncodeToString(b), nil
 }
 
 func formatSats(sats int64) string {
@@ -172,13 +300,13 @@ func paymentReceivedHTML(name, title string, amountSats int64, dealID, frontendU
 </html>
 `
 	data := map[string]string{
-		"Name":       name,
-		"Title":      title,
-		"Amount":     formatSats(amountSats),
-		"Sats":       fmt.Sprintf("%d", amountSats),
-		"DealID":     dealID,
+		"Name":        name,
+		"Title":       title,
+		"Amount":      formatSats(amountSats),
+		"Sats":        fmt.Sprintf("%d", amountSats),
+		"DealID":      dealID,
 		"FrontendURL": frontendURL,
-		"Time":       time.Now().Format("Jan 2, 2006 15:04 MST"),
+		"Time":        time.Now().Format("Jan 2, 2006 15:04 MST"),
 	}
 	return renderTemplate(tmpl, data)
 }

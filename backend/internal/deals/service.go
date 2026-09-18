@@ -30,6 +30,16 @@ type CVAnchorer interface {
 	AnchorReleasedDeal(ctx context.Context, freelancerID, dealID string) error
 }
 
+// DealNotifier delivers best-effort notifications after a durable state
+// transition. Implementations must never make escrow correctness depend on
+// notification delivery.
+type DealNotifier interface {
+	PaymentLocked(ctx context.Context, deal *Deal)
+	DealDisputed(ctx context.Context, deal *Deal)
+	DealReleased(ctx context.Context, deal *Deal)
+	DealRefunded(ctx context.Context, deal *Deal)
+}
+
 // maxDisputeReasonRunes caps how much the client can write when raising a
 // dispute. Enough to explain the problem, short enough to not become an
 // attachments dump.
@@ -41,6 +51,7 @@ type Service struct {
 	cv             CVAnchorer
 	storage        storage.Storage
 	maxUploadBytes int64
+	notifier       DealNotifier
 }
 
 type Option func(*Service)
@@ -58,6 +69,11 @@ func WithStorage(st storage.Storage, maxUploadBytes int64) Option {
 		s.storage = st
 		s.maxUploadBytes = maxUploadBytes
 	}
+}
+
+// WithNotifier wires best-effort deal-status notifications.
+func WithNotifier(n DealNotifier) Option {
+	return func(s *Service) { s.notifier = n }
 }
 
 func NewService(repo DealRepository, lnbits *lnbits.Client, opts ...Option) *Service {
@@ -146,11 +162,9 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	// Rollback is safe after Commit (it returns sql.ErrTxDone), and unlike an
+	// err-guard it cannot be defeated by a shadowed err in a later branch.
+	defer tx.Rollback()
 
 	repo := s.repo.WithTx(tx)
 
@@ -274,7 +288,16 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
 
-	deal, err := s.repo.GetDealByID(ctx, dealID)
+	// Keep the deal row locked through the payout bookkeeping. This prevents
+	// concurrent approve requests from both observing an empty payout ID.
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	repo := s.repo.WithTx(tx)
+
+	deal, err := repo.GetDealForUpdate(ctx, dealID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,17 +310,21 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
 	}
 
-	if err := s.settleAndPayEscrow(ctx, deal); err != nil {
+	if err := s.settleAndPayEscrowWithRepo(ctx, deal, repo); err != nil {
 		return nil, err
 	}
 
-	if err := s.repo.UpdateStatus(ctx, dealID, StatusReleased); err != nil {
+	if err := repo.UpdateStatus(ctx, dealID, StatusReleased); err != nil {
 		return nil, fmt.Errorf("releasing escrow for deal %s: %w", dealID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	deal.Status = StatusReleased
 
 	s.anchorReleasedDeal(ctx, deal)
+	s.notifyReleased(deal)
 
 	return deal, nil
 }
@@ -424,6 +451,7 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID, reason string)
 	deal.Status = StatusDisputed
 	deal.DisputeReason = reason
 	deal.DisputedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	s.notifyDisputed(deal)
 	return deal, nil
 }
 
@@ -474,11 +502,7 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
 	repo := s.repo.WithTx(tx)
 
@@ -517,6 +541,9 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 
 	if target == StatusReleased {
 		s.anchorReleasedDeal(ctx, deal)
+		s.notifyReleased(deal)
+	} else {
+		s.notifyRefunded(deal)
 	}
 
 	return deal, nil
@@ -602,13 +629,41 @@ func (s *Service) refreshPaymentStatus(ctx context.Context, deal *Deal) error {
 	}
 
 	if deal.Status == StatusAwaitingPayment {
-		if err := s.repo.UpdateStatus(ctx, deal.ID, StatusLocked); err != nil {
+		transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, StatusAwaitingPayment, StatusLocked)
+		if err != nil {
 			return err
 		}
-		deal.Status = StatusLocked
+		if transitioned {
+			deal.Status = StatusLocked
+			s.notifyPaymentLocked(deal)
+		}
 	}
 
 	return nil
+}
+
+func (s *Service) notifyPaymentLocked(deal *Deal) {
+	if s.notifier != nil {
+		s.notifier.PaymentLocked(context.Background(), deal)
+	}
+}
+
+func (s *Service) notifyDisputed(deal *Deal) {
+	if s.notifier != nil {
+		s.notifier.DealDisputed(context.Background(), deal)
+	}
+}
+
+func (s *Service) notifyReleased(deal *Deal) {
+	if s.notifier != nil {
+		s.notifier.DealReleased(context.Background(), deal)
+	}
+}
+
+func (s *Service) notifyRefunded(deal *Deal) {
+	if s.notifier != nil {
+		s.notifier.DealRefunded(context.Background(), deal)
+	}
 }
 
 // SweepExpiredHolds reconciles DB state with LNbits for old open deals.
@@ -642,6 +697,8 @@ func (s *Service) SweepExpiredHolds(ctx context.Context, cutoff time.Time) (int,
 			if err := s.repo.UpdateStatus(ctx, deal.ID, StatusRefunded); err != nil {
 				continue
 			}
+			deal.Status = StatusRefunded
+			s.notifyRefunded(deal)
 			swept++
 		default:
 			// HOLD / ACCEPTED / SETTLED — funds still committed.

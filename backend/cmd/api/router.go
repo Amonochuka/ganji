@@ -62,13 +62,13 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 		},
 	)
 
+	emailSvc := email.NewService(cfg, authRepo)
 	dealService := deals.NewService(dealRepo, lnbitsClient,
 		deals.WithCVAnchorer(cvService),
 		deals.WithStorage(uploadStore, cfg.MaxUploadBytes),
+		deals.WithNotifier(emailSvc),
 	)
 	dealHandler := deals.NewHandler(dealService)
-
-	emailSvc := email.NewService(cfg)
 
 	router.GET("/health", health.Handler(dbConn, lnbitsClient))
 
@@ -85,7 +85,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	operator.Use(middleware.OperatorRequired())
 	deals.RegisterArbitrationRoutes(operator, dealHandler)
 
-	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient, authRepo, emailSvc)
+	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient, emailSvc)
 	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret)
 	webhook.RegisterRoutes(router, webhookHandler)
 

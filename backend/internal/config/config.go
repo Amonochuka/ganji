@@ -30,6 +30,7 @@ type Config struct {
 	SMTPUser                 string
 	SMTPPass                 string
 	SMTPFrom                 string
+	SMTPEncryption           string
 }
 
 func Load() *Config {
@@ -58,6 +59,7 @@ func Load() *Config {
 		SMTPUser:                 getEnv("SMTP_USER", ""),
 		SMTPPass:                 getEnv("SMTP_PASS", ""),
 		SMTPFrom:                 getEnv("SMTP_FROM", "noreply@ganji.local"),
+		SMTPEncryption:           getEnv("SMTP_ENCRYPTION", "starttls"),
 	}
 
 	return cfg

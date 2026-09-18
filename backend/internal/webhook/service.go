@@ -4,11 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-
-	"github.com/Amonochuka/ganji-backend/internal/auth"
 	"github.com/Amonochuka/ganji-backend/internal/deals"
-	"github.com/Amonochuka/ganji-backend/internal/email"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
@@ -23,6 +19,7 @@ var (
 type DealReader interface {
 	GetDealByCheckingID(ctx context.Context, checkingID string) (*deals.Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status deals.Status) error
+	UpdateStatusIfCurrent(ctx context.Context, dealID string, expected, status deals.Status) (bool, error)
 }
 
 // PaymentChecker abstracts the LNbits method needed by the webhook.
@@ -32,23 +29,24 @@ type PaymentChecker interface {
 
 // EmailSender abstracts the email service for notifications.
 type EmailSender interface {
-	SendPaymentReceived(ctx context.Context, freelancerEmail, freelancerName, dealTitle string, amountSats int64, dealID string) error
+	PaymentLocked(ctx context.Context, deal *deals.Deal)
 }
 
 type Service struct {
 	repo   DealReader
 	lnbits PaymentChecker
-	auth   *auth.Repository
 	email  EmailSender
 }
 
-func NewService(repo DealReader, lnbitsClient PaymentChecker, authRepo *auth.Repository, emailSvc EmailSender) *Service {
-	return &Service{
+func NewService(repo DealReader, lnbitsClient PaymentChecker, emailSvcs ...EmailSender) *Service {
+	s := &Service{
 		repo:   repo,
 		lnbits: lnbitsClient,
-		auth:   authRepo,
-		email:  emailSvc,
 	}
+	if len(emailSvcs) > 0 {
+		s.email = emailSvcs[0]
+	}
+	return s
 }
 
 // HandlePayment processes an LNbits payment notification and transitions
@@ -76,26 +74,12 @@ func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotifi
 		return fmt.Errorf("lookup deal by checking_id: %w", err)
 	}
 
-	if deal.Status != deals.StatusAwaitingPayment {
-		return nil
-	}
-
-	if err := s.repo.UpdateStatus(ctx, deal.ID, deals.StatusLocked); err != nil {
+	transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, deals.StatusAwaitingPayment, deals.StatusLocked)
+	if err != nil {
 		return fmt.Errorf("transition deal %s to locked: %w", deal.ID, err)
 	}
-
-	// Send email notification to freelancer (async, non-blocking)
-	if s.email != nil && s.auth != nil {
-		go func() {
-			user, err := s.auth.FindByID(context.Background(), deal.FreelancerID)
-			if err != nil || user == nil {
-				log.Printf("email: failed to find freelancer %s: %v", deal.FreelancerID, err)
-				return
-			}
-			if err := s.email.SendPaymentReceived(context.Background(), user.Email, email.FirstName(user.DisplayName), deal.Title, deal.AmountSats, deal.ID); err != nil {
-				log.Printf("email: failed to send payment received to %s: %v", user.Email, err)
-			}
-		}()
+	if transitioned && s.email != nil {
+		s.email.PaymentLocked(context.Background(), deal)
 	}
 
 	return nil

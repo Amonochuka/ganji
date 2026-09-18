@@ -81,6 +81,10 @@ func (f *fakeDealRepo) GetDealByCheckingID(ctx context.Context, checkingID strin
 	return nil, ErrDealNotFound
 }
 
+func (f *fakeDealRepo) GetDealForUpdate(ctx context.Context, id string) (*Deal, error) {
+	return f.GetDealByID(ctx, id)
+}
+
 func (f *fakeDealRepo) GetDealByShareToken(ctx context.Context, shareToken string) (*Deal, error) {
 	for _, deal := range f.deals {
 		if deal.ShareToken == shareToken {
@@ -124,6 +128,22 @@ func (f *fakeDealRepo) UpdateStatus(ctx context.Context, dealID string, status S
 	}
 	deal.Status = status
 	return nil
+}
+
+func (f *fakeDealRepo) UpdateStatusIfCurrent(ctx context.Context, dealID string, expected, status Status) (bool, error) {
+	if f.updateErr != nil {
+		return false, f.updateErr
+	}
+	deal, ok := f.deals[dealID]
+	if !ok {
+		return false, ErrDealNotFound
+	}
+	if deal.Status != expected {
+		return false, nil
+	}
+	f.updateCalls = append(f.updateCalls, status)
+	deal.Status = status
+	return true, nil
 }
 
 func (f *fakeDealRepo) UpdateDispute(ctx context.Context, dealID, reason string) error {
@@ -172,6 +192,15 @@ func (f *fakeDealRepo) UpdateShareToken(ctx context.Context, dealID, shareToken 
 		return ErrDealNotFound
 	}
 	deal.ShareToken = shareToken
+	return nil
+}
+
+func (f *fakeDealRepo) UpdatePayoutCheckingID(ctx context.Context, dealID, payoutCheckingID string) error {
+	deal, ok := f.deals[dealID]
+	if !ok {
+		return ErrDealNotFound
+	}
+	deal.PayoutCheckingID = payoutCheckingID
 	return nil
 }
 

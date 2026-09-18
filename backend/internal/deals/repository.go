@@ -350,6 +350,24 @@ func (r *Repository) UpdateStatus(ctx context.Context, dealID string, status Sta
 	return nil
 }
 
+func (r *Repository) UpdateStatusIfCurrent(ctx context.Context, dealID string, expected, status Status) (bool, error) {
+	query := `
+		UPDATE deals
+		SET status = $1,
+			verified_at = CASE WHEN $1 = 'released' THEN NOW() ELSE verified_at END
+		WHERE id = $2 AND status = $3;
+	`
+	result, err := r.q.ExecContext(ctx, query, status, dealID, expected)
+	if err != nil {
+		return false, fmt.Errorf("repository: conditionally update deal status: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("repository: conditionally update deal status: %w", err)
+	}
+	return rowsAffected == 1, nil
+}
+
 // UpdateDispute raises a dispute: it moves the deal into the 'disputed'
 // arbitration state and records the client's written reason. No money moves
 // here — the hold stays held until an arbiter resolves the dispute.

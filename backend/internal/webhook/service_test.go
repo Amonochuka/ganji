@@ -59,6 +59,20 @@ func (f *fakeDealReader) UpdateStatus(
 	return nil
 }
 
+func (f *fakeDealReader) UpdateStatusIfCurrent(
+	ctx context.Context,
+	dealID string,
+	expected, status deals.Status,
+) (bool, error) {
+	if f.deal == nil || f.deal.Status != expected {
+		return false, nil
+	}
+	f.updatedDealID = dealID
+	f.updatedStatus = status
+	f.deal.Status = status
+	return true, nil
+}
+
 func TestHandlePaymentLocksPaidDeal(t *testing.T) {
 	paymentChecker := &fakePaymentChecker{
 		payment: &lnbits.CheckPaymentResponse{

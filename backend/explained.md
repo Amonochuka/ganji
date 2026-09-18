@@ -746,61 +746,75 @@ SMTP_PASS=app-password          # SMTP password (app-specific)
 SMTP_FROM=noreply@ganji.local   # From address
 ```
 
-If any SMTP var is empty, email sending is silently skipped (dev-friendly).
+Set `SMTP_ENCRYPTION` to one of `starttls` (default; port 587),
+`implicit_tls` (normally port 465), or `none` (local development only). SMTP
+is skipped when the host or sender is absent, or when only one of username and
+password is configured.
 
 ### Events & Templates
 
 | Event | Trigger | Template | Freelancer Action |
 |-------|---------|----------|-------------------|
-| **Payment Received** | Webhook: deal → `locked` | Green, "View Deal" button | Submit work |
+| **Payment Received** | First durable deal → `locked` transition | Green, "View Deal" button | Submit work |
 | **Dispute Raised** | Client: `DisputeDeal` | Amber, client reason shown | Wait for operator |
 | **Deal Released** | Operator/Client: `release` | Green, CV anchor mentioned | Funds in wallet |
 | **Deal Refunded** | Operator: `refund` | Red, no further action | Move on |
 
 ### Implementation
 
-```go
-// In webhook handler after successful lock:
-if s.email != nil && s.auth != nil {
-    go func() {
-        user, _ := s.auth.FindByID(context.Background(), deal.FreelancerID)
-        if user != nil {
-            s.email.SendPaymentReceived(context.Background(), 
-                user.Email, email.FirstName(user.DisplayName), 
-                deal.Title, deal.AmountSats, deal.ID)
-        }
-    }()
-}
-```
+Notifications are injected into the deal service and fired only after the
+status update has completed. The webhook uses the same notifier when it wins
+the locked transition. This keeps polling, public-link refreshes, webhooks,
+approvals, disputes, arbitration, and expiry sweeps consistent.
 
 **Key design choices:**
 
-1. **Async (goroutine)** — Email failure never blocks webhook response
-2. **Fail silently** — Log error, continue; payment processing unaffected
-3. **HTML + Text** — Multipart MIME for compatibility
-4. **Frontend URL** — Links point to `FRONTEND_URL/deals/{dealID}`
-5. **First name** — Extracted from `display_name` for personalization
+1. **Async and bounded** — a 15-second context prevents a slow SMTP server
+   from blocking an escrow transition.
+2. **Best effort** — delivery failures never affect payment processing.
+3. **HTML + Text** — multipart/alternative with a random MIME boundary.
+4. **Frontend URL** — links point to `FRONTEND_URL/deals/{dealID}`.
+5. **First name** — extracted from `display_name` for personalization.
 
 ### SMTP Details
 
-- Uses `STARTTLS` (port 587) with `crypto/tls`
-- `smtp.PlainAuth` for authentication
+- Uses `STARTTLS` (port 587) by default; implicit TLS is explicitly supported
+  for port 465.
+- Uses `smtp.PlainAuth` only when both SMTP credentials are configured.
 - Multipart/alternative: `text/plain` + `text/html`
-- 30-second dial timeout (via context)
+- Rejects CR/LF in mail headers and MIME-encodes non-ASCII subjects.
+- 15-second end-to-end send timeout (via context).
 
 ### Testing
 
 ```bash
 # With MailHog (local dev)
-SMTP_HOST=localhost SMTP_PORT=1025 SMTP_USER= SMTP_PASS= SMTP_FROM=test@local
+SMTP_HOST=localhost SMTP_PORT=1025 SMTP_ENCRYPTION=none SMTP_USER= SMTP_PASS= SMTP_FROM=test@local
 
 # With Gmail (app password required)
-SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_USER=you@gmail.com SMTP_PASS=abcd1234
+SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_ENCRYPTION=starttls SMTP_USER=you@gmail.com SMTP_PASS=abcd1234
 ```
 
 ### Future Extensions
 
-- **Dispute/Release/Refund emails** — Add to `ApproveDeal`, `ResolveDispute`, `DisputeDeal`
 - **Retry queue** — Persist failed emails, retry with backoff
 - **Preferences** — User opt-out per event type
-- **Webhook fallback** — If SMTP down, queue for later
+- **Outbox** — persist intended notifications before dispatch so delivery can
+  be retried across process restarts.
+
+## 22. Fixes
+
+- Corrected SMTP transport selection: the default port 587 now uses STARTTLS;
+  implicit TLS (465) and plaintext local development are explicit modes.
+- Added bounded SMTP operations, randomized MIME boundaries, encoded subjects,
+  and header newline rejection to prevent hangs, malformed messages, and
+  header injection through a deal title.
+- Connected dispute, release, refund, payment polling, and expiry-sweep
+  transitions to the same freelancer notification service. A conditional
+  `awaiting_payment → locked` update ensures only the caller that performs the
+  transition sends the payment-received message.
+- Fixed transaction cleanup so failed deal creation, approval, or arbitration
+  always rolls back; rollback after commit is intentionally ignored.
+- Serialized client approval with `SELECT FOR UPDATE` through payout tracking
+  and the final release status update, preventing concurrent approval requests
+  from racing the payout path.
