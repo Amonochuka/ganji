@@ -273,3 +273,457 @@ Key test files:
 - **Outbox pattern** for reliable webhook delivery / event publishing
 - **Saga orchestration** if adding more external dependencies
 - **Partitioning** `deals` by `created_at` for large datasets
+
+---
+
+## 11. Hold Invoice Creation
+
+### How the Escrow Hold Invoice Is Created
+
+When a deal is created, Ganji generates a **cryptographic preimage** (32 random bytes) and derives its **payment hash** (SHA-256). This hash locks the incoming payment — only revealing the preimage can settle it.
+
+```go
+// 1. Generate preimage (32 random bytes)
+preimage := make([]byte, 32)
+rand.Read(preimage)
+
+// 2. Derive payment hash (SHA-256)
+hash := sha256.Sum256(preimage)
+deal.Preimage = hex.EncodeToString(preimage)
+deal.PreimageHash = hex.EncodeToString(hash[:])
+
+// 3. Create hold invoice on LNbits
+hold, err := lnbits.CreateHoldInvoice(CreateHoldInvoiceRequest{
+    Out:         false,           // incoming payment
+    Amount:      deal.AmountSats, // sats
+    Memo:        deal.Title,
+    PaymentHash: deal.PreimageHash, // locks to our preimage
+    Webhook:     cfg.WebhookURL,    // LNbits posts here on payment
+    Expiry:      cfg.HoldExpirySec, // auto-cancel after this many seconds
+})
+```
+
+**Key Points:**
+
+| Aspect | Detail |
+|--------|--------|
+| **Preimage** | 32 bytes (256 bits entropy), stored as hex in DB. Never logged. |
+| **Payment hash** | `sha256(preimage)` — LNbits uses this to lock the HTLC. |
+| **Hold invoice** | LNbits holds funds on Lightning network. Cannot be paid to anyone until settled with preimage. |
+| **Webhook** | Attached per-invoice. LNbits POSTs to `WebhookURL` when payment arrives. |
+| **Expiry** | Default 30 days (2,592,000 sec). After expiry, LNbits auto-cancels, funds return to payer. |
+
+### Preimage Lifecycle
+
+```
+CREATE DEAL
+    │
+    ▼
+Generate preimage (32 random bytes)
+    │
+    ▼
+hash = sha256(preimage)  ──▶ sent to LNbits as payment_hash
+    │
+    ▼
+Store preimage (raw hex) in DB
+Store preimage_hash (hex) in DB
+    │
+    ▼
+Client pays hold invoice (locked to preimage_hash)
+    │
+    ▼
+LNbits holds funds (HTLC locked)
+    │
+    ▼
+OPERATOR/CLIENT DECIDES:
+    ├── RELEASE → SettleHold(preimage) → funds to wallet → PayInvoice(payee)
+    └── REFUND  → CancelHold(preimage_hash) → funds return to client
+```
+
+**Security:** Preimage is the **single secret** that releases funds. If leaked before dispute resolution, anyone could settle the hold. That's why:
+- Never logged
+- Only used in `SettleHold` call
+- Deal moves to `disputed` on client complaint — freezes money until operator decides
+
+---
+
+## 12. Webhook Signature Verification
+
+### LNbits Webhook Security
+
+LNbits signs each webhook payload with HMAC-SHA256 using the wallet's `webhook_secret`. This prevents spoofed payment notifications.
+
+**Header Format:**
+```
+LNbits-Signature: t=<unix_timestamp>,v1=<hex_hmac_sha256>
+```
+
+**Verification (in `internal/webhook/signature.go`):**
+
+```go
+func VerifyLNbitsSignature(payload []byte, header, secret string) bool {
+    // Parse: t=1699999999,v1=abc123...
+    parts := strings.Split(header, ",")
+    var timestamp, signature string
+    for _, p := range parts {
+        if strings.HasPrefix(p, "t=") {
+            timestamp = strings.TrimPrefix(p, "t=")
+        }
+        if strings.HasPrefix(p, "v1=") {
+            signature = strings.TrimPrefix(p, "v1=")
+        }
+    }
+
+    // Reject old timestamps (replay protection) — 5 min window
+    ts, _ := strconv.ParseInt(timestamp, 10, 64)
+    if time.Now().Unix()-ts > 300 {
+        return false
+    }
+
+    // Compute expected signature: HMAC-SHA256(secret, timestamp + "." + payload)
+    msg := timestamp + "." + string(payload)
+    expected := hmac.New(sha256.New, []byte(secret))
+    expected.Write([]byte(msg))
+    expectedSig := hex.EncodeToString(expected.Sum(nil))
+
+    // Constant-time compare
+    return hmac.Equal([]byte(signature), []byte(expectedSig))
+}
+```
+
+**Why This Matters:**
+
+| Threat | Mitigation |
+|--------|------------|
+| Attacker forges "payment received" | Can't generate valid HMAC without `webhook_secret` |
+| Replay old webhook | Timestamp check rejects >5 min old |
+| Timing attack on signature compare | `hmac.Equal` constant-time comparison |
+
+**Configuration:**
+- Set `LNBITS_WEBHOOK_SECRET` in env (from LNbits wallet settings)
+- If empty, webhook endpoint accepts unsigned requests (dev only)
+
+---
+
+## 13. Share Token Rotation
+
+### Why Separate Token from Deal UUID?
+
+| Problem with UUID in URL | Solution: Share Token |
+|-------------------------|----------------------|
+| UUID is permanent — can't revoke leaked link | Token is rotatable — `RotateShareLink` generates new one |
+| UUID leaks internal DB primary key | Token is random, no correlation to internal ID |
+| Can't track which link was shared | Each rotation invalidates previous token |
+
+**Implementation:**
+
+```go
+// Creation: 32 random bytes, base64url-encoded (no padding)
+func generateShareToken() (string, error) {
+    b := make([]byte, 32)
+    rand.Read(b)
+    return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// Storage: UNIQUE index on share_token
+CREATE UNIQUE INDEX idx_deals_share_token ON deals(share_token);
+
+// Rotation: Freelancer-only, frozen after release/refund
+func (s *Service) RotateShareLink(ctx, userID, dealID) {
+    // Verify ownership + deal not terminal
+    token, _ := generateShareToken()
+    repo.UpdateShareToken(ctx, dealID, token)
+    // Old token now returns 404
+}
+```
+
+**Public Deal View (`GET /public/deals/:shareToken`):**
+- No auth required
+- Exposes only: title, amount, invoice, status, dispute_reason, created_at
+- **Never exposes:** preimage, payee_invoice, client_email, checking_id, internal UUID
+- Refreshes payment status from LNbits before responding (handles missed webhooks)
+
+---
+
+## 14. CV Anchoring
+
+### Live CV: Verifiable Work History
+
+When a deal is **released**, its artifacts are anchored as verified CV entries for the freelancer.
+
+```go
+// After successful release (client approve or operator release)
+func (s *Service) anchorReleasedDeal(ctx, deal *Deal) {
+    if s.cv != nil {
+        s.cv.AnchorReleasedDeal(ctx, deal.FreelancerID, deal.ID)
+    }
+}
+```
+
+**Anchor Process (in `cv` package):**
+1. Fetch all artifacts for the deal
+2. For each artifact, create a `Verification` record:
+   - `method`: `sandbox` / `preview_pdf` / `preview_image`
+   - `reference`: URL or hash of the artifact
+   - `status`: `ready`
+   - `expires_at`: 90 days (renewable)
+3. These become **verified CV entries** on freelancer's public profile
+
+**Public CV (`GET /cv/:slug`):**
+- Shows verified work with cryptographic proofs
+- Anyone can verify: artifact hash matches on-chain anchor
+- Self-healing: missing anchors re-created on next read
+
+---
+
+## 15. Artifact Storage
+
+### Upload/Download Flow
+
+**Upload (Freelancer only, before work_submitted):**
+```
+POST /deals/:dealID/artifacts
+  ├── Validate: deal status allows upload (not submitted/released/disputed)
+  ├── Validate: artifact kind (source_code | source_file)
+  ├── Stream to storage (size-capped at MAX_UPLOAD_BYTES)
+  │   └── CountingReader enforces limit before commit
+  ├── Save metadata to DB (deal_id, kind, storage_key)
+  │   └── On DB failure: delete blob (best-effort cleanup)
+  └── Return artifact metadata
+```
+
+**Download (Freelancer OR Client):**
+```
+GET /deals/:dealID/artifacts/:artifactID
+  ├── Verify artifact belongs to deal
+  ├── Verify requester is freelancer OR client_email match
+  ├── Open storage key → stream response
+  └── Set Content-Type from sanitized extension
+```
+
+**Storage Key Format:**
+```
+deals/<dealID>/<32-random-hex><.ext>
+```
+- Random prefix prevents enumeration
+- Extension preserved (sanitized: alphanumeric, 2-10 chars) for Content-Type
+
+**Size Limit:** Configurable via `MAX_UPLOAD_BYTES` (default 10MB). Enforced during stream — oversized uploads rejected before blob committed.
+
+---
+
+## 16. Operator Promotion
+
+### Startup-Time Role Assignment
+
+Operators are **not self-serve**. They're promoted via `OPERATOR_EMAILS` env var at every boot:
+
+```go
+// In router setup, runs on every startup
+authService.ApplyOperatorRole(ctx, cfg.OperatorEmails)
+```
+
+**`ApplyOperatorRole` logic:**
+```go
+func (s *Service) ApplyOperatorRole(ctx context.Context, emails []string) error {
+    for _, email := range emails {
+        user, err := s.repo.GetByEmail(ctx, email)
+        if err != nil {
+            if errors.Is(err, ErrUserNotFound) {
+                continue // user hasn't registered yet
+            }
+            return err
+        }
+        if !user.IsOperator {
+            user.IsOperator = true
+            if err := s.repo.Update(ctx, user); err != nil {
+                return err
+            }
+        }
+    }
+    return nil
+}
+```
+
+**JWT Claims:**
+- On login, access token includes `is_operator` claim
+- `OperatorRequired` middleware checks this claim
+- Token refresh picks up new claim automatically
+
+**Why at startup?** Survives token rotation, no manual DB edits, config-driven.
+
+---
+
+## 17. Status Transition Matrix
+
+### Valid Transitions (`types.go`)
+
+```go
+var ValidTransitions = map[Status][]Status{
+    StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusDisputed, StatusRefunded},
+    StatusLocked:          {StatusWorkSubmitted, StatusDisputed},
+    StatusWorkSubmitted:   {StatusReviewing, StatusReleased, StatusDisputed},
+    StatusReviewing:       {StatusReleased, StatusDisputed},
+    StatusDisputed:        {StatusReleased, StatusRefunded},
+    StatusReleased:        {}, // terminal
+    StatusRefunded:        {}, // terminal
+}
+```
+
+### Why Each Transition Exists
+
+| From → To | Trigger | Why Allowed |
+|-----------|---------|-------------|
+| `awaiting_payment` → `locked` | Webhook/poll detects payment | LNbits confirms hold paid (CLN) |
+| `awaiting_payment` → `work_submitted` | Freelancer submits without payment | LND holds never report "paid" — freelancer works on trust, client approves later |
+| `awaiting_payment` → `disputed` | Client disputes before payment | Client refuses to pay — freezes (no money to freeze yet) |
+| `awaiting_payment` → `refunded` | Sweep job (expired hold) | Hold expired/unpaid — network already returned funds |
+| `locked` → `work_submitted` | Freelancer submits work | Normal flow after payment confirmed |
+| `locked` → `disputed` | Client disputes after payment | Money frozen on network, arbitration starts |
+| `work_submitted` → `reviewing` | Client starts formal review | Optional phase before approve/dispute |
+| `work_submitted` → `released` | Client approves | Settle hold + pay freelancer |
+| `work_submitted` → `disputed` | Client disputes work | Freeze money, operator decides |
+| `reviewing` → `released` | Client approves after review | Same as above |
+| `reviewing` → `disputed` | Client disputes after review | Same as above |
+| `disputed` → `released` | Operator releases | Settle hold + pay freelancer (CV anchor) |
+| `disputed` → `refunded` | Operator refunds | Cancel hold, funds return to client |
+
+### LND vs CLN Difference
+
+| Backend | Hold Invoice Behavior | Ganji Handling |
+|---------|----------------------|----------------|
+| **CLN** (Core Lightning) | `paid=true` immediately on payment | Webhook → `awaiting_payment` → `locked` instantly |
+| **LND** | `paid=false` until **settle** | Poll/webhook sees unpaid → freelancer submits → client approves → `settle` proves funds were held all along |
+
+**Design:** `awaiting_payment` → `work_submitted` allowed specifically for LND. Freelancer submits, client approves, settle atomically proves hold was funded.
+
+---
+
+## 18. LNbits Error Handling
+
+### Common Error Patterns
+
+**LNbits Response Format:**
+```json
+// Success
+{"ok": true, "checking_id": "abc", "payment_hash": "def", ...}
+
+// Failure
+{"ok": false, "error_message": "payment already settled"}
+```
+
+**Client Wrapper (`internal/lnbits/client.go`):**
+
+```go
+func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
+    var out SimpleInvoiceResponse
+    err := c.postJSON(ctx, "/api/v1/payments/settle", c.adminKey, 
+        SettleHoldRequest{Preimage: preimage}, &out)
+    if err != nil {
+        return &out, err
+    }
+    if !out.OK {
+        return &out, fmt.Errorf("lnbits refused to settle: %s", out.ErrorMessage)
+    }
+    return &out, nil
+}
+```
+
+**Key Patterns:**
+
+| Operation | Failure Handling |
+|-----------|------------------|
+| `SettleHold` | If `ok:false` + "already settled" → verify via `CheckPayment` → if `SETTLED`, treat as success |
+| `CancelHold` | If `ok:false` → verify via `CheckPayment` → if `UNPAID/EXPIRED/CANCELLED`, treat as success |
+| `PayInvoice` | HTTP 5xx / timeout → **no idempotency key** (LNbits doesn't support) → verify via `CheckPayment` on returned `checking_id` |
+| `CreateHoldInvoice` | Retry with new preimage (idempotent at Ganji level) |
+
+**Retry Logic:** All network calls use `context.Context` for timeout/cancellation. No automatic retry — caller decides (e.g., operator retries resolution).
+
+---
+
+## 19. Deploy & Operations
+
+### Required Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | ✅ | — | Postgres connection string |
+| `JWT_SECRET` | ✅ | — | Access token signing key (32+ chars) |
+| `JWT_REFRESH_SECRET` | ✅ | — | Refresh token signing key (32+ chars) |
+| `LNBITS_URL` | ✅ | — | LNbits instance URL (e.g., `https://lnbits.example.com`) |
+| `LNBITS_API_KEY` | ✅ | — | Invoice key (read/create) |
+| `LNBITS_ADMIN_KEY` | ✅ | — | Admin key (settle/cancel/pay) |
+| `LNBITS_WEBHOOK_SECRET` | ⚠️ | "" | Wallet webhook secret (empty = dev mode) |
+| `WEBHOOK_URL` | ⚠️ | "" | Public URL for LNbits webhooks (e.g., `https://api.ganji.com/webhooks/lnbits`) |
+| `PORT` | ❌ | 8080 | HTTP listen port |
+| `FRONTEND_URL` | ❌ | localhost:3000 | CORS origin |
+| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | ❌ | 2,592,000 | Hold invoice expiry (30 days) |
+| `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | ❌ | 21,600 | Sweep interval (6 hours) |
+| `STORAGE_PATH` | ❌ | ./uploads | Local artifact storage path |
+| `MAX_UPLOAD_BYTES` | ❌ | 10,485,760 | Max artifact size (10MB) |
+| `OPERATOR_EMAILS` | ❌ | [] | Comma-separated operator emails |
+
+### Migrations
+
+```bash
+# Run all pending migrations
+migrate -path backend/migrations -database "$DATABASE_URL" up
+
+# Rollback last migration
+migrate -path backend/migrations -database "$DATABASE_URL" down 1
+```
+
+**Migration Rules:**
+- Never edit applied migrations — create new ones
+- `up.sql` + `down.sql` pairs
+- Consolidate before production (as done in v000002, v000003)
+
+### Health Checks
+
+```bash
+# Liveness (k8s)
+curl http://localhost:8080/health
+# {"status":"ok","db":"connected","lnbits":"connected"}
+
+# Readiness (includes LNbits)
+curl http://localhost:8080/health
+```
+
+### Graceful Shutdown
+
+```go
+// main.go: 30s grace period for in-flight requests
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+srv.Shutdown(ctx)
+
+// Workers cancelled via context
+runCancel() // stops sweep ticker
+```
+
+### Scaling Considerations
+
+| Component | Horizontal Scale? | Notes |
+|-----------|-------------------|-------|
+| API server | ✅ | Stateless, shared DB |
+| Sweep worker | ❌ | Single instance (cron) — use advisory lock if multiple |
+| Webhook handler | ✅ | Idempotent by `checking_id` + status check |
+| LNbits | External | Single wallet per Ganji instance |
+
+---
+
+## 20. Security Checklist
+
+| Area | Implementation |
+|------|----------------|
+| **Authentication** | JWT (RS256), short-lived access (15m), rotating refresh (7d) |
+| **Authorization** | Role-based (`is_operator`), ownership checks on every endpoint |
+| **Rate Limiting** | `middleware.RateLimit` (configurable per-route) |
+| **CORS** | Restricted to `FRONTEND_URL`, credentials allowed |
+| **Input Validation** | Server-side on all handlers (email, UUID, amounts, file types) |
+| **File Upload** | Size limit, extension sanitization, random storage keys, no direct serving |
+| **Secrets** | Env vars only, never in code/logs, `webhook_secret` for HMAC |
+| **SQL Injection** | Parameterized queries everywhere (`$1`, `$2`...) |
+| **Timing Attacks** | `hmac.Equal` for signatures, constant-time email compare |
+| **Replay Protection** | Webhook timestamp window (5 min), JWT `jti` claim |
+| **Audit Trail** | `resolved_by`, `resolved_at`, `disputed_at`, `verified_at` on all money moves |
