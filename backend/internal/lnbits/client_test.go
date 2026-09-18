@@ -254,7 +254,8 @@ func TestPayInvoiceUsesAdminKey(t *testing.T) {
 		_, _ = w.Write([]byte(`{"payment_hash":"out1","checking_id":"oc1"}`))
 	})
 
-	if err := client.PayInvoice(context.Background(), "lnbc2"); err != nil {
+	_, err := client.PayInvoice(context.Background(), "lnbc2")
+	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
@@ -269,7 +270,7 @@ func TestPayInvoiceError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"no route"}`))
 	})
 
-	err := client.PayInvoice(context.Background(), "lnbc2")
+	_, err := client.PayInvoice(context.Background(), "lnbc2")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

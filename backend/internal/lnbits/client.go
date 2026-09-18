@@ -145,13 +145,14 @@ func (c *Client) CancelHold(ctx context.Context, paymentHash string) (*SimpleInv
 
 // PayInvoice instructs LNbits to pay an outgoing invoice (out: true) from
 // the wallet's balance. Used to forward settled escrow to the freelancer.
-func (c *Client) PayInvoice(ctx context.Context, bolt11 string) error {
+// Returns the checking_id of the outgoing payment for idempotency tracking.
+func (c *Client) PayInvoice(ctx context.Context, bolt11 string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"out":    true,
 		"bolt11": bolt11,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal pay invoice request: %w", err)
+		return "", fmt.Errorf("marshal pay invoice request: %w", err)
 	}
 
 	request, err := http.NewRequestWithContext(
@@ -161,7 +162,7 @@ func (c *Client) PayInvoice(ctx context.Context, bolt11 string) error {
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		return fmt.Errorf("create pay invoice request: %w", err)
+		return "", fmt.Errorf("create pay invoice request: %w", err)
 	}
 
 	request.Header.Set("Content-Type", "application/json")
@@ -169,23 +170,28 @@ func (c *Client) PayInvoice(ctx context.Context, bolt11 string) error {
 
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("send pay invoice request: %w", err)
+		return "", fmt.Errorf("send pay invoice request: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode >= http.StatusMultipleChoices {
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
-			return fmt.Errorf(
+			return "", fmt.Errorf(
 				"lnbits returned %d and response body could not be read: %w",
 				response.StatusCode,
 				err,
 			)
 		}
-		return fmt.Errorf("lnbits returned %d: %s", response.StatusCode, string(body))
+		return "", fmt.Errorf("lnbits returned %d: %s", response.StatusCode, string(body))
 	}
 
-	return nil
+	var resp CreateInvoiceResponse
+	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
+		return "", fmt.Errorf("decode pay invoice response: %w", err)
+	}
+
+	return resp.CheckingID, nil
 }
 
 // postJSON performs a JSON POST and optionally decodes a 2xx response into
