@@ -6,24 +6,56 @@ This document explains the database patterns, concurrency controls, and idempote
 
 ## 1. Transaction Boundaries
 
-### Explicit Transactions for Multi-Step Operations
+### The Simple Pattern (read → write, no payout leg)
 
-Operations that span **read → network call → write** must run in a single transaction to prevent races:
+Read → write operations need explicit transactions so a `SELECT` and a later
+`UPDATE` can't be interleaved by a concurrent request:
 
 ```go
-func (s *Service) ResolveDispute(...) {
-    tx, _ := s.repo.BeginTx(ctx)
-    repo := s.repo.WithTx(tx)
-    defer func() { if err != nil { _ = tx.Rollback() } }()
+tx, _ := s.repo.BeginTx(ctx)
+repo := s.repo.WithTx(tx)
+defer tx.Rollback()
 
-    deal, _ := repo.GetDealForUpdate(ctx, dealID)  // SELECT FOR UPDATE
-    // ... network calls (LNbits) ...
-    repo.UpdateDisputeResolution(ctx, ...)          // same transaction
-    tx.Commit()                                     // releases lock
-}
+deal, _ := repo.GetDealForUpdate(ctx, dealID)  // SELECT FOR UPDATE
+// ... decision + bookkeeping ...
+repo.UpdateDisputeResolution(ctx, ...)          // same transaction
+tx.Commit()                                     // releases lock
 ```
 
-**Why not autocommit?** Each `ExecContext`/`QueryContext` in autocommit mode is its own transaction. Without explicit `BEGIN`, a `SELECT` and subsequent `UPDATE` are separate transactions — another request can sneak in between them.
+**Why not autocommit?** Each `ExecContext`/`QueryContext` in autocommit mode
+is its own transaction. Without explicit `BEGIN`, a `SELECT` and subsequent
+`UPDATE` are separate transactions — another request can sneak in between them.
+
+### The Split Pattern: Two-Phase Release (`releaseEscrow`)
+
+The *release* paths (approve → `released`, dispute-resolve → `released`) are
+deliberately NOT a single lock-around-everything transaction. Holding a
+`SELECT FOR UPDATE` lock for the seconds of LNbits network I/O pins both the
+row and a pooled connection, so an LNbits stall hangs every deal write.
+Instead `releaseEscrow` runs two short transactions AROUND the network legs:
+
+```
+Phase 1 (own tx, locked):        Phase 2 (network, NO lock):      Phase 3 (own tx, locked):
+  SELECT FOR UPDATE                SettleHold(preimage)             SELECT FOR UPDATE
+  authorize the release            PayInvoice(payee_invoice)        re-validate the transition
+  MarkPayoutAttempted ──► COMMIT   (each call has a 15s HTTP        record payout_checking_id
+                                   timeout)                          finalize ──► COMMIT
+```
+
+- The durable `payout_attempted_at` marker is committed in Phase 1, so a
+  crash during Phase 2 is visible to any later request and blocks auto-resend
+  (see §3).
+- The row lock is free between Phase 1 and Phase 3, so another actor may
+  dispute, sweep, or re-approve in the meantime — Phase 3 therefore re-locks
+  and re-validates the transition before finalizing.
+- The one path that still keeps its network call inside a single locked
+  transaction is the refund (`refundDispute`): `cancelEscrowHold` is provably
+  idempotent (a refused cancel is verified, and "already cancelled" counts as
+  success), so holding the lock across it cannot create a second or partial
+  cancel.
+- The expiry sweep uses a single guarded statement,
+  `UpdateStatusIfCurrent(dealID, expected, refunded)`, instead of a
+  lock-and-verify transaction at all (see §4).
 
 ### Deferred Rollback Pattern
 
@@ -75,7 +107,13 @@ UPDATE ...                     -- still same transaction
 COMMIT                         -- LOCK RELEASED here
 ```
 
-**Critical**: The lock must span the **entire operation**, including external API calls. That's why we use explicit `BEGIN`/`COMMIT` wrapping everything.
+**Critical**: The lock must span the **entire transaction**, and every read
+and write of a single logical operation must live inside it — otherwise two
+callers can read the same pre-state and both proceed. This is NOT the same as
+saying the lock should also cover LNbits network calls. For the payout release
+the network legs run deliberately outside the lock in two short transactions
+(§1); refunds keep the cancel inside the lock only because `cancelEscrowHold`
+is provably idempotent.
 
 ---
 
@@ -157,14 +195,25 @@ Reconciles DB with network for stale deals:
 func (s *Service) SweepExpiredHolds(ctx, cutoff) {
     open := repo.ListOpenBefore(ctx, cutoff)  // awaiting_payment/locked older than cutoff
     for deal in open {
-        payment := lnbits.CheckPayment(deal.CheckingID)
-        switch payment.Status {
+        payment, err := lnbits.CheckPayment(deal.CheckingID)
+        if err != nil { continue }            // LNbits unreachable; next sweep
+        switch payment.Details.Status {
         case "UNPAID", "EXPIRED", "CANCELLED":
-            repo.UpdateStatus(deal.ID, StatusRefunded)  // network already returned funds
+            // Guarded single statement, no lock-and-verify transaction: the
+            // deal may have moved (e.g. just approved or disputed) while the
+            // sweep was deciding. UpdateStatusIfCurrent only wins if the row
+            // is still exactly what this sweep read.
+            if repo.UpdateStatusIfCurrent(deal.ID, deal.Status, StatusRefunded) {
+                notifyRefunded(deal)
+            }
         }
     }
 }
 ```
+
+The guard prevents a sweep from refunding a deal that a concurrent approve
+already released or a client already disputed after the funds moved. LNbits
+holes (unreachable, pending) are skipped rather than forced.
 
 **Triggers:** Client never paid, or paid after hold expired (LNbits auto-returns funds).
 
@@ -240,12 +289,12 @@ DB records: resolved_at, resolved_by, payout_checking_id
 
 | Operation | Protection |
 |-----------|------------|
-| `ResolveDispute` | `SELECT FOR UPDATE` in explicit transaction |
-| `ApproveDeal` | Single-threaded per deal (client-only, no concurrent approve) |
-| `DisputeDeal` | Client-only, status check prevents double-dispute |
-| `SweepExpiredHolds` | Idempotent: only touches `awaiting_payment`/`locked` |
-| `PayInvoice` retry | `payout_checking_id` verification |
-| `SettleHold` retry | LNbits native idempotency (preimage-based) |
+| `ApproveDeal` / dispute-release | Two-phase `releaseEscrow` (§1): Phase-1 `SELECT FOR UPDATE` + durable `payout_attempted_at` (committed before money moves), network legs unlock, Phase-3 re-lock + re-validated transition. Concurrent approves share the payout tracking and cannot double-pay. |
+| `DisputeDeal` | `UpdateDisputeIfCurrent` — guard loses if a concurrent release already moved the deal past the state this dispute read |
+| `Refund` (`refundDispute`) | Single locked transaction; `cancelEscrowHold` is provably idempotent |
+| `SweepExpiredHolds` | Reads open deals, then a guarded `UpdateStatusIfCurrent(dealID, expected, refunded)` per deal; LNbits-unreachable is skipped, never forced |
+| `PayInvoice` retry | Status-token verdict (§23): confirmed → release w/o resend; failed/refused → clear + retry; ambiguous → `ErrPayoutInFlight`, operator reconcile only |
+| `SettleHold` retry | LNbits native idempotency (preimage-based); already-settled verified and treated as success |
 
 ---
 
@@ -265,15 +314,25 @@ Both converge on: `CheckPayment` → if paid + `awaiting_payment` → `UpdateSta
 
 ## 9. Testing Strategy
 
-- **Unit tests**: Fake repository + mocked LNbits client
-- **Integration tests**: Real Postgres (testcontainers) + real LNbits (testnet)
-- **Concurrency tests**: Goroutine races on `ResolveDispute` to verify locking
-- **Idempotency tests**: Simulate crash after `PayInvoice` → verify no double-pay
+- **Unit tests**: Fake repository + mocked LNbits client (`service_test.go`)
+- **HTTP contract**: LNbits client against real HTTP semantics (`client_test.go`)
+- **Concurrency tests**: Fake repo's `raceMoveTo` hook simulates another actor
+  moving the row mid-flight; covers the dispute guard, the sweep guard, and
+  payout-verification races
+- **Idempotency tests**: Simulate an ambiguous/confirmed/failed prior payout →
+  machine never re-sends without proof; the operator reconcile endpoint is
+  covered via `reconcile_handler_test.go`
+
+Not yet automated: an end-to-end DB test against a real Postgres. The schema
+and repository SQL were validated once against Postgres 16 (migrations +
+payout tracking + guarded updates) using a throwaway driver that is not part
+of the suite.
 
 Key test files:
 - `arbitration_handler_test.go` — full auth+operator middleware chain
+- `reconcile_handler_test.go` — operator reconcile endpoint (`confirm_payout` / `reset_payout`)
 - `service_test.go` — business logic with fake repo
-- `client_test.go` — LNbits HTTP contract
+- `client_test.go` — LNbits HTTP contract (4xx refusal classification)
 
 ---
 
