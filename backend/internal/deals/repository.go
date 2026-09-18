@@ -101,6 +101,13 @@ const dealColumns = `
 	`
 
 func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
+	var (
+		preimage     sql.NullString
+		payeeInvoice sql.NullString
+		checkingID   sql.NullString
+		payoutID     sql.NullString
+		resolvedBy   sql.NullString
+	)
 	deal := &Deal{}
 	if err := row.Scan(
 		&deal.ID,
@@ -110,23 +117,28 @@ func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 		&deal.AmountSats,
 		&deal.SourcePlatform,
 		&deal.PreimageHash,
-		&deal.Preimage,
-		&deal.PayeeInvoice,
+		&preimage,
+		&payeeInvoice,
 		&deal.Invoice,
-		&deal.CheckingID,
-		&deal.PayoutCheckingID,
+		&checkingID,
+		&payoutID,
 		&deal.PayoutAttemptedAt,
 		&deal.ShareToken,
 		&deal.Status,
 		&deal.DisputeReason,
 		&deal.DisputedAt,
 		&deal.ResolvedAt,
-		&deal.ResolvedBy,
+		&resolvedBy,
 		&deal.CreatedAt,
 		&deal.VerifiedAt,
 	); err != nil {
 		return nil, err
 	}
+	deal.Preimage = preimage.String
+	deal.PayeeInvoice = payeeInvoice.String
+	deal.CheckingID = checkingID.String
+	deal.PayoutCheckingID = payoutID.String
+	deal.ResolvedBy = resolvedBy.String
 	return deal, nil
 }
 
