@@ -35,8 +35,6 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 		AllowCredentials: true,
 	}))
 
-	router.GET("/health", health.Handler(dbConn))
-
 	tokenManager := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTRefreshSecret)
 
 	authRepo := auth.NewRepository(dbConn)
@@ -68,6 +66,8 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 		deals.WithStorage(uploadStore, cfg.MaxUploadBytes),
 	)
 	dealHandler := deals.NewHandler(dealService)
+
+	router.GET("/health", health.Handler(dbConn, lnbitsClient))
 
 	protected := router.Group("/")
 	protected.Use(middleware.AuthRequired(tokenManager))

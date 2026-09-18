@@ -82,6 +82,35 @@ func (c *Client) CheckPayment(ctx context.Context, checkingID string) (*CheckPay
 	return &payment, nil
 }
 
+// HealthCheck verifies LNbits connectivity by querying the wallet endpoint.
+// Returns error if LNbits is unreachable or auth fails.
+func (c *Client) HealthCheck(ctx context.Context) error {
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.url+"/api/v1/wallet",
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("create health check request: %w", err)
+	}
+
+	request.Header.Set("X-Api-Key", c.apiKey)
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("send health check request: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(response.Body)
+		return fmt.Errorf("lnbits health check failed: %d %s", response.StatusCode, string(body))
+	}
+
+	return nil
+}
+
 // CreateHoldInvoice creates a hold invoice locked to the given payment hash
 // (sha256 of the preimage Ganji generated). It uses the invoice key, like a
 // regular receive invoice. LNbits derives the payment hash from the preimage,
