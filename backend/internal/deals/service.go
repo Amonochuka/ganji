@@ -311,10 +311,16 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 // Idempotency: a settle that fails because the hold is already settled is
 // treated as success (verified via CheckPayment) and we move straight to the
 // payout, so a retry after a crash between the legs cannot double-settle.
+// Payout idempotency: if payout_checking_id is already set, we verify the
+// payout status with LNbits instead of sending again (double-pay prevention).
 // Payout is only ever attempted once LNbits confirms the escrow is settled.
 // It is shared by the client's approve and an operator's release resolution —
 // the money legs are identical, only the authorization differs.
 func (s *Service) settleAndPayEscrow(ctx context.Context, deal *Deal) error {
+	return s.settleAndPayEscrowWithRepo(ctx, deal, s.repo)
+}
+
+func (s *Service) settleAndPayEscrowWithRepo(ctx context.Context, deal *Deal, repo DealRepository) error {
 	if deal.Preimage == "" {
 		return fmt.Errorf("%w: cannot release a deal without an escrow preimage", ErrInvalidInput)
 	}
@@ -326,8 +332,37 @@ func (s *Service) settleAndPayEscrow(ctx context.Context, deal *Deal) error {
 		}
 	}
 
-	if err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice); err != nil {
+	// Payout idempotency: if we already have a payout_checking_id, verify it
+	// instead of sending again. This handles crashes between PayInvoice and
+	// DB update.
+	if deal.PayoutCheckingID != "" {
+		payment, err := s.lnbits.CheckPayment(ctx, deal.PayoutCheckingID)
+		if err != nil {
+			return fmt.Errorf("verifying existing payout for deal %s: %w", deal.ID, err)
+		}
+		if !payment.Paid || payment.Details.Status != "SETTLED" {
+			// Payout not confirmed — clear the tracking ID and retry below
+			if err := repo.UpdatePayoutCheckingID(ctx, deal.ID, ""); err != nil {
+				log.Printf("failed to clear stale payout_checking_id for deal %s: %v", deal.ID, err)
+			}
+			deal.PayoutCheckingID = ""
+		} else {
+			// Payout already confirmed
+			return nil
+		}
+	}
+
+	payoutCheckingID, err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice)
+	if err != nil {
 		return fmt.Errorf("paying freelancer for deal %s: %w", deal.ID, err)
+	}
+
+	// Record payout checking_id immediately after successful PayInvoice so
+	// a crash before UpdateDisputeResolution doesn't cause double-pay on retry.
+	if err := repo.UpdatePayoutCheckingID(ctx, deal.ID, payoutCheckingID); err != nil {
+		// If DB update fails, we still have the payout_checking_id from LNbits.
+		// On retry, we'll verify it instead of paying again.
+		log.Printf("warning: payout sent but failed to record checking_id for deal %s: %v", deal.ID, err)
 	}
 
 	return nil
@@ -432,7 +467,23 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 		return nil, fmt.Errorf("%w: resolution must be %q or %q", ErrInvalidInput, DisputeResolutionRelease, DisputeResolutionRefund)
 	}
 
-	deal, err := s.repo.GetDealByID(ctx, dealID)
+	// Run the entire resolution in a transaction so the SELECT FOR UPDATE
+	// lock is held until the final UPDATE commits. This prevents concurrent
+	// operators from both reading 'disputed' and both proceeding to move money.
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	repo := s.repo.WithTx(tx)
+
+	// Lock the deal row for the duration of this resolution.
+	deal, err := repo.GetDealForUpdate(ctx, dealID)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +494,7 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 
 	switch resolution {
 	case DisputeResolutionRelease:
-		if err := s.settleAndPayEscrow(ctx, deal); err != nil {
+		if err := s.settleAndPayEscrowWithRepo(ctx, deal, repo); err != nil {
 			return nil, err
 		}
 	case DisputeResolutionRefund:
@@ -452,8 +503,12 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 		}
 	}
 
-	if err := s.repo.UpdateDisputeResolution(ctx, dealID, target, operatorEmail); err != nil {
+	if err := repo.UpdateDisputeResolution(ctx, dealID, target, operatorEmail); err != nil {
 		return nil, fmt.Errorf("recording dispute resolution for deal %s: %w", dealID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	deal.Status = target
