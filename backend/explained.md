@@ -645,7 +645,7 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 |-----------|------------------|
 | `SettleHold` | If `ok:false` + "already settled" → verify via `CheckPayment` → if `SETTLED`, treat as success |
 | `CancelHold` | If `ok:false` → verify via `CheckPayment` → if `UNPAID/EXPIRED/CANCELLED`, treat as success |
-| `PayInvoice` | Persist intent first; on timeout/lost response, find the outgoing payment by exact BOLT11 in LNbits history. Never automatically resend an ambiguous attempt. |
+| `PayInvoice` | Persist intent first (`payout_attempted_at`); 4xx → `ErrPayoutRefused` (provable non-send, safe to retry later); 5xx/timeout → ambiguous → `ErrPayoutInFlight`, never auto-resend. Operator reconciles a hung attempt via `POST /deals/:dealID/reconcile`. |
 | `CreateHoldInvoice` | Retry with new preimage (idempotent at Ganji level) |
 
 **Retry Logic:** All network calls use `context.Context` for timeout/cancellation. No automatic retry — caller decides (e.g., operator retries resolution).
@@ -828,3 +828,104 @@ SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_ENCRYPTION=starttls SMTP_USER=you@gm
 - Serialized client approval with `SELECT FOR UPDATE` through payout tracking
   and the final release status update, preventing concurrent approval requests
   from racing the payout path.
+- Fixed `scanDeal` to read nullable deal columns (`preimage`, `payee_invoice`,
+  `checking_id`, `payout_checking_id`, `resolved_by`) via `sql.NullString` so
+  fresh deals — which start with those cells NULL — no longer crash reads.
+
+---
+
+## 23. LNbits: Payout Verification & Operator Reconciliation
+
+Status of the LNbits integration as it stands, and the items still to
+research on LNbits 1.5.6.
+
+### What has been done
+
+**Why Ganji cannot rely on LNbits for double-pay prevention.**
+LNbits has no idempotency key for outgoing payments: every
+`POST /api/v1/payments` with `out:true` creates a new attempt with a new
+`checking_id`. Two identical `PayInvoice` calls → two payment attempts. The
+protocol only shields against re-settling the *same* invoice (a payment_hash
+settles once); a retry can still land twice if the freelancer rotated their
+payee invoice or the first attempt was still routing. Dedup must therefore
+live in Ganji — it does, in `payout_tracking`.
+
+**Two-phase release (`releaseEscrow`, `service.go`).**
+1. **Phase 1** — own transaction, before any money moves:
+   `SELECT FOR UPDATE`, authorize, `MarkPayoutAttempted`
+   (`payout_attempted_at = NOW()`), commit.
+2. **Phase 2** — network legs run OUTSIDE any DB lock with a bounded HTTP
+   client (15s): `SettleHold(preimage)` (already-settled treated as success),
+   then `PayInvoice(payee_invoice)`.
+3. **Phase 3** — re-lock, re-validate the transition, record
+   `payout_checking_id`, finalize to `released`, commit, anchor, notify.
+
+A crash can no longer roll back the evidence an attempt started, so an
+auto-retry can never look like a fresh approve.
+
+**Payout verdicts (`isPayoutConfirmed` / `isPayoutFailed`, `service.go`).**
+On retry, Ganji asks LNbits to check the recorded `payout_checking_id`:
+
+| CheckPayment outcome | Token set | Action |
+|----------------------|-----------|--------|
+| Confirmed paid | `SETTLED`, `COMPLETE`, `SUCCEEDED`, `PAID` | Release without re-sending |
+| Confirmed not-paid | `FAILED`, `UNPAID`, `CANCELLED`, `EXPIRED` | Clear tracking, safe auto-retry |
+| Ambiguous (pending, error, other token, or crash-window with no id) | anything else | `ErrPayoutInFlight` — stuck, operator only |
+
+A 4xx response from `PayInvoice` is classified as a *provable non-send*
+(`ErrPayoutRefused`) — LNbits rejects before enqueueing — so tracking is
+cleared and a retry is legal; 5xx/timeout are treated as ambiguous.
+
+**Operator reconcile endpoint.** The human backstop for the stuck state:
+`POST /deals/:dealID/reconcile` (operator-only).
+- `{"action":"confirm_payout","payout_checking_id":"..."}` — operator verified
+  in the LNbits UI that the freelancer was paid; Ganji re-verifies, records the
+  real id, and releases. No money moves.
+- `{"action":"reset_payout"}` — operator verified the earlier attempt never
+  moved money; tracking is cleared so a normal approve/release re-runs.
+
+### What to research / confirm on LNbits 1.5.6
+
+Open LNbits and report back the following (see §23 “Checking", below, for how):
+
+1. **Successful outgoing payment status.** The exact `status` string a
+   successful payout reports. Expected: `COMPLETE`, `PAID`, `SUCCEEDED`, or
+   `SETTLED`. If it is anything else (e.g. `SUCCESS`), add that token to
+   `isPayoutConfirmed` in `service.go` — until then such deals err on the safe
+   side: `ErrPayoutInFlight`, reconcilable via the endpoint.
+2. **Unsuccessful outgoing payment status.** The exact string for a
+   failed/expired/cancelled payout — expected inside
+   `FAILED`, `UNPAID`, `CANCELLED`, `EXPIRED`.
+3. **`CheckPayment` reliability for outgoing payments.** Whether the
+   `paid` field of `GET /api/v1/payments/{checking_id}` is trustworthy for
+   outgoing payments on the backend Ganji runs against (LND vs CLN vs
+   c-lightning-REST differ). If it is not, the confirm path stays operator-
+   assisted (current design already tolerates that).
+4. **History lookup by BOLT11.** Whether 1.5.6 offers a payments-history list
+   that could locate an outgoing attempt by exact BOLT11. This is the fumble
+   alternative to operator reconciliation that the docs originally assumed; it
+   was intentionally NOT automated because matching by bolt11 is unreliable
+   across backends. Research only — worth revisiting if it becomes trustworthy.
+5. **Webhook for outgoing payments.** Whether 1.5.6 pushes a payment-status
+   webhook for outgoing payments (the current webhook design targets incoming
+   hold payments). If yes, the reconcile step could eventually be automated.
+
+**Rule of thumb for any finding:** when in doubt, LNbits reports something
+unexpected → the deal sticks (never auto-resend). Stuck is deliberate:
+it is visible, reconcilable, and cannot double-spend. Only ever widen an
+accepted-success token after observing a real successful payout report it.
+
+### How to check status values on LNbits
+
+From the LNbits UI (easiest): open the payout wallet → **Payments** tab → find
+a payment that completed (the outgoing arrow) and read the status column. Same
+for a failed one.
+
+From the API (wallet `X-Api-Key` from the wallet's API info page):
+
+```bash
+curl -H "X-Api-Key: <wallet-api-key>" \
+  "https://<lnbits-host>/lnbits/api/v1/payments/<checking_id>"
+```
+
+Report the `status` field verbatim for a successful and a failed payout.
