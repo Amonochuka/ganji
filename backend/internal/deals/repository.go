@@ -39,11 +39,12 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 			payee_invoice,
 			invoice,
 			checking_id,
+			payout_checking_id,
 			share_token,
 			status
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		)
 		RETURNING id, created_at;
 	`
@@ -61,6 +62,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		nullString(deal.PayeeInvoice),
 		deal.Invoice,
 		deal.CheckingID,
+		nullString(deal.PayoutCheckingID),
 		deal.ShareToken,
 		deal.Status,
 	)
@@ -86,6 +88,7 @@ const dealColumns = `
 		payee_invoice,
 		invoice,
 		checking_id,
+		payout_checking_id,
 		share_token,
 		status,
 		dispute_reason,
@@ -110,6 +113,7 @@ func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 		&deal.PayeeInvoice,
 		&deal.Invoice,
 		&deal.CheckingID,
+		&deal.PayoutCheckingID,
 		&deal.ShareToken,
 		&deal.Status,
 		&deal.DisputeReason,
@@ -270,6 +274,28 @@ func (r *Repository) UpdateShareToken(ctx context.Context, dealID, shareToken st
 	return nil
 }
 
+// UpdatePayoutCheckingID records the LNbits checking_id for the outgoing
+// payout to the freelancer. Used for idempotency: on retry we can check if
+// the payout was already sent instead of sending again.
+func (r *Repository) UpdatePayoutCheckingID(ctx context.Context, dealID, payoutCheckingID string) error {
+	query := `UPDATE deals SET payout_checking_id = $1 WHERE id = $2;`
+
+	result, err := r.q.ExecContext(ctx, query, payoutCheckingID, dealID)
+	if err != nil {
+		return fmt.Errorf("repository: update payout checking_id: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: update payout checking_id: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+
+	return nil
+}
+
 // ListOpenBefore returns deals still awaiting payment or locked that were
 // created before the cutoff — the candidates for the hold-expiry sweep. Left
 // alone, a deal whose hold expired (or was never funded) would sit in the DB
@@ -407,6 +433,20 @@ func (r *Repository) UpdateDisputeResolution(ctx context.Context, dealID string,
 	}
 
 	return nil
+}
+
+// GetDealForUpdate locks a deal row for update (SELECT FOR UPDATE) so
+// concurrent ResolveDispute calls serialize on the same deal.
+func (r *Repository) GetDealForUpdate(ctx context.Context, dealID string) (*Deal, error) {
+	query := "SELECT" + dealColumns + "FROM deals WHERE id = $1 FOR UPDATE;"
+	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, dealID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrDealNotFound
+		}
+		return nil, fmt.Errorf("repository: get deal for update: %w", err)
+	}
+	return deal, nil
 }
 
 func (r *Repository) CreateArtifact(ctx context.Context, artifact *Artifact) error {
