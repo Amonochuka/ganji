@@ -727,3 +727,80 @@ runCancel() // stops sweep ticker
 | **Timing Attacks** | `hmac.Equal` for signatures, constant-time email compare |
 | **Replay Protection** | Webhook timestamp window (5 min), JWT `jti` claim |
 | **Audit Trail** | `resolved_by`, `resolved_at`, `disputed_at`, `verified_at` on all money moves |
+
+---
+
+## 21. Email Notifications
+
+### Overview
+
+Email notifications alert freelancers of key deal events without requiring an open dashboard tab. Implemented in `internal/email/service.go`.
+
+### Configuration
+
+```bash
+SMTP_HOST=smtp.gmail.com        # SMTP server
+SMTP_PORT=587                   # TLS port
+SMTP_USER=ganji@example.com     # SMTP username
+SMTP_PASS=app-password          # SMTP password (app-specific)
+SMTP_FROM=noreply@ganji.local   # From address
+```
+
+If any SMTP var is empty, email sending is silently skipped (dev-friendly).
+
+### Events & Templates
+
+| Event | Trigger | Template | Freelancer Action |
+|-------|---------|----------|-------------------|
+| **Payment Received** | Webhook: deal → `locked` | Green, "View Deal" button | Submit work |
+| **Dispute Raised** | Client: `DisputeDeal` | Amber, client reason shown | Wait for operator |
+| **Deal Released** | Operator/Client: `release` | Green, CV anchor mentioned | Funds in wallet |
+| **Deal Refunded** | Operator: `refund` | Red, no further action | Move on |
+
+### Implementation
+
+```go
+// In webhook handler after successful lock:
+if s.email != nil && s.auth != nil {
+    go func() {
+        user, _ := s.auth.FindByID(context.Background(), deal.FreelancerID)
+        if user != nil {
+            s.email.SendPaymentReceived(context.Background(), 
+                user.Email, email.FirstName(user.DisplayName), 
+                deal.Title, deal.AmountSats, deal.ID)
+        }
+    }()
+}
+```
+
+**Key design choices:**
+
+1. **Async (goroutine)** — Email failure never blocks webhook response
+2. **Fail silently** — Log error, continue; payment processing unaffected
+3. **HTML + Text** — Multipart MIME for compatibility
+4. **Frontend URL** — Links point to `FRONTEND_URL/deals/{dealID}`
+5. **First name** — Extracted from `display_name` for personalization
+
+### SMTP Details
+
+- Uses `STARTTLS` (port 587) with `crypto/tls`
+- `smtp.PlainAuth` for authentication
+- Multipart/alternative: `text/plain` + `text/html`
+- 30-second dial timeout (via context)
+
+### Testing
+
+```bash
+# With MailHog (local dev)
+SMTP_HOST=localhost SMTP_PORT=1025 SMTP_USER= SMTP_PASS= SMTP_FROM=test@local
+
+# With Gmail (app password required)
+SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_USER=you@gmail.com SMTP_PASS=abcd1234
+```
+
+### Future Extensions
+
+- **Dispute/Release/Refund emails** — Add to `ApproveDeal`, `ResolveDispute`, `DisputeDeal`
+- **Retry queue** — Persist failed emails, retry with backoff
+- **Preferences** — User opt-out per event type
+- **Webhook fallback** — If SMTP down, queue for later
