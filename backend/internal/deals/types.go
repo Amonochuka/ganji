@@ -29,27 +29,29 @@ const (
 // only describes the transaction itself. Preimage holds the raw hex
 // preimage (needed to settle the hold); PreimageHash is sha256(preimage)
 // for verification and CV anchoring. PayeeInvoice is the freelancer's
-// Lightning destination for the payout leg.
+// Lightning destination for the payout leg. PayoutCheckingID tracks the
+// outgoing payout payment for idempotency (double-pay prevention).
 type Deal struct {
-	ID             string       `json:"id"`
-	FreelancerID   string       `json:"freelancer_id"`
-	ClientEmail    string       `json:"client_email"`
-	Title          string       `json:"title"`
-	AmountSats     int64        `json:"amount_sats"`
-	SourcePlatform string       `json:"source_platform"`
-	PreimageHash   string       `json:"preimage_hash"`
-	Preimage       string       `json:"preimage,omitempty"`
-	PayeeInvoice   string       `json:"payee_invoice,omitempty"`
-	Invoice        string       `json:"invoice"`
-	CheckingID     string       `json:"checking_id"`
-	ShareToken     string       `json:"share_token"`
-	Status         Status       `json:"status"`
-	DisputeReason  string       `json:"dispute_reason"`
-	DisputedAt     sql.NullTime `json:"disputed_at"`
-	ResolvedAt     sql.NullTime `json:"resolved_at"`
-	ResolvedBy     string       `json:"resolved_by,omitempty"`
-	CreatedAt      time.Time    `json:"created_at"`
-	VerifiedAt     sql.NullTime `json:"verified_at"`
+	ID                string       `json:"id"`
+	FreelancerID      string       `json:"freelancer_id"`
+	ClientEmail       string       `json:"client_email"`
+	Title             string       `json:"title"`
+	AmountSats        int64        `json:"amount_sats"`
+	SourcePlatform    string       `json:"source_platform"`
+	PreimageHash      string       `json:"preimage_hash"`
+	Preimage          string       `json:"preimage,omitempty"`
+	PayeeInvoice      string       `json:"payee_invoice,omitempty"`
+	Invoice           string       `json:"invoice"`
+	CheckingID        string       `json:"checking_id"`
+	PayoutCheckingID  string       `json:"payout_checking_id,omitempty"`
+	ShareToken        string       `json:"share_token"`
+	Status            Status       `json:"status"`
+	DisputeReason     string       `json:"dispute_reason"`
+	DisputedAt        sql.NullTime `json:"disputed_at"`
+	ResolvedAt        sql.NullTime `json:"resolved_at"`
+	ResolvedBy        string       `json:"resolved_by,omitempty"`
+	CreatedAt         time.Time    `json:"created_at"`
+	VerifiedAt        sql.NullTime `json:"verified_at"`
 }
 
 // DisputeResolution is the operator's verdict on a disputed deal. It is the
