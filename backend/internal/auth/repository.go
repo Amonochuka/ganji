@@ -97,6 +97,31 @@ func (r *Repository) FindBySlug(ctx context.Context, slug string) (*User, error)
 	return &u, nil
 }
 
+// FindByID looks up a user by their ID. Used for notifications.
+func (r *Repository) FindByID(ctx context.Context, id string) (*User, error) {
+	query := `
+		SELECT id, email, display_name, slug, bitcoin_address, trust_score, is_operator, created_at
+		FROM users
+		WHERE id = $1
+	`
+
+	var u User
+	var bitcoinAddress sql.NullString
+
+	err := r.q.QueryRowContext(ctx, query, id).Scan(
+		&u.ID, &u.Email, &u.DisplayName, &u.Slug, &bitcoinAddress, &u.TrustScore, &u.IsOperator, &u.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("repository: find user by id: %w", err)
+	}
+
+	u.BitcoinAddress = bitcoinAddress.String
+	return &u, nil
+}
+
 func (r *Repository) EmailExists(ctx context.Context, email string) (bool, error) {
 	var exists bool
 	err := r.q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists)

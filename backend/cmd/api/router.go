@@ -12,6 +12,7 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/config"
 	"github.com/Amonochuka/ganji-backend/internal/cv"
 	"github.com/Amonochuka/ganji-backend/internal/deals"
+	"github.com/Amonochuka/ganji-backend/internal/email"
 	"github.com/Amonochuka/ganji-backend/internal/health"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 	"github.com/Amonochuka/ganji-backend/internal/middleware"
@@ -67,6 +68,8 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	)
 	dealHandler := deals.NewHandler(dealService)
 
+	emailSvc := email.NewService(cfg)
+
 	router.GET("/health", health.Handler(dbConn, lnbitsClient))
 
 	protected := router.Group("/")
@@ -82,8 +85,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	operator.Use(middleware.OperatorRequired())
 	deals.RegisterArbitrationRoutes(operator, dealHandler)
 
-	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient)
-	//webhookService := webhook.NewService(dealRepo, lnbitsClient)
+	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient, authRepo, emailSvc)
 	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret)
 	webhook.RegisterRoutes(router, webhookHandler)
 

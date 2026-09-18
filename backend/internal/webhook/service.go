@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
+	"github.com/Amonochuka/ganji-backend/internal/auth"
 	"github.com/Amonochuka/ganji-backend/internal/deals"
+	"github.com/Amonochuka/ganji-backend/internal/email"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
@@ -27,15 +30,24 @@ type PaymentChecker interface {
 	CheckPayment(ctx context.Context, checkingID string) (*lnbits.CheckPaymentResponse, error)
 }
 
+// EmailSender abstracts the email service for notifications.
+type EmailSender interface {
+	SendPaymentReceived(ctx context.Context, freelancerEmail, freelancerName, dealTitle string, amountSats int64, dealID string) error
+}
+
 type Service struct {
 	repo   DealReader
 	lnbits PaymentChecker
+	auth   *auth.Repository
+	email  EmailSender
 }
 
-func NewService(repo DealReader, lnbitsClient PaymentChecker) *Service {
+func NewService(repo DealReader, lnbitsClient PaymentChecker, authRepo *auth.Repository, emailSvc EmailSender) *Service {
 	return &Service{
 		repo:   repo,
 		lnbits: lnbitsClient,
+		auth:   authRepo,
+		email:  emailSvc,
 	}
 }
 
@@ -70,6 +82,20 @@ func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotifi
 
 	if err := s.repo.UpdateStatus(ctx, deal.ID, deals.StatusLocked); err != nil {
 		return fmt.Errorf("transition deal %s to locked: %w", deal.ID, err)
+	}
+
+	// Send email notification to freelancer (async, non-blocking)
+	if s.email != nil && s.auth != nil {
+		go func() {
+			user, err := s.auth.FindByID(context.Background(), deal.FreelancerID)
+			if err != nil || user == nil {
+				log.Printf("email: failed to find freelancer %s: %v", deal.FreelancerID, err)
+				return
+			}
+			if err := s.email.SendPaymentReceived(context.Background(), user.Email, email.FirstName(user.DisplayName), deal.Title, deal.AmountSats, deal.ID); err != nil {
+				log.Printf("email: failed to send payment received to %s: %v", user.Email, err)
+			}
+		}()
 	}
 
 	return nil

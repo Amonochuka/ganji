@@ -25,6 +25,11 @@ type Config struct {
 	StoragePath              string
 	MaxUploadBytes           int64
 	OperatorEmails           []string
+	SMTPHost                 string
+	SMTPPort                 int
+	SMTPUser                 string
+	SMTPPass                 string
+	SMTPFrom                 string
 }
 
 func Load() *Config {
@@ -48,6 +53,11 @@ func Load() *Config {
 		StoragePath:              getEnv("STORAGE_PATH", "./uploads"),
 		MaxUploadBytes:           getEnvInt("MAX_UPLOAD_BYTES", 10*1024*1024),
 		OperatorEmails:           getEnvList("OPERATOR_EMAILS"),
+		SMTPHost:                 getEnv("SMTP_HOST", ""),
+		SMTPPort:                 int(getEnvInt("SMTP_PORT", 587)),
+		SMTPUser:                 getEnv("SMTP_USER", ""),
+		SMTPPass:                 getEnv("SMTP_PASS", ""),
+		SMTPFrom:                 getEnv("SMTP_FROM", "noreply@ganji.local"),
 	}
 
 	return cfg
