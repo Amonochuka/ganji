@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
+	"github.com/gin-gonic/gin"
 )
 
 // Handler returns the /health route handler. Confirms the server is up
