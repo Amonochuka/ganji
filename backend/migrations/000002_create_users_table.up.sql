@@ -7,6 +7,7 @@ CREATE TABLE users (
     slug TEXT UNIQUE NOT NULL,
     bitcoin_address TEXT,
     trust_score NUMERIC DEFAULT 100,
+    is_operator BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

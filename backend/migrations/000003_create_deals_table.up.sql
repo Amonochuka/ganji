@@ -22,6 +22,11 @@ CREATE TABLE deals (
     status TEXT NOT NULL DEFAULT 'awaiting_payment',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     verified_at TIMESTAMPTZ,
+    -- Dispute/arbitration columns
+    dispute_reason TEXT NOT NULL DEFAULT '',
+    disputed_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ,
+    resolved_by TEXT,
 
     CONSTRAINT valid_status CHECK (
         status IN (
