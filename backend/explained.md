@@ -91,40 +91,36 @@ settleAndPayEscrow():
      ↑ crash here → retry → step 2 runs AGAIN
 ```
 
-### Solution: Track Payout with `payout_checking_id`
+### Payout recovery: durable intent before network I/O
 
 **Schema addition:**
 ```sql
+ALTER TABLE deals ADD COLUMN payout_attempted_at TIMESTAMPTZ;
 ALTER TABLE deals ADD COLUMN payout_checking_id TEXT;
 CREATE INDEX idx_deals_disputed_at ON deals(disputed_at);
 ```
 
 **Flow:**
 ```go
-func settleAndPayEscrow(ctx, deal, repo) {
-    // 1. Settle hold (idempotent)
-    SettleHold(preimage)
+// 1. Persist and commit the attempt before any external money move.
+markPayoutAttempted(deal.ID)
 
-    // 2. Check if payout already recorded
-    if deal.PayoutCheckingID != "" {
-        payment := CheckPayment(deal.PayoutCheckingID)
-        if payment.Status == "SETTLED" {
-            return nil  // already paid, skip
-        }
-        // else: stale ID, clear and retry below
-        repo.UpdatePayoutCheckingID(deal.ID, "")
-    }
+// 2. Settle the hold, then submit the outgoing BOLT11 payment.
+SettleHold(preimage)
+checkingID := PayInvoice(payeeInvoice)
 
-    // 3. Send payout, IMMEDIATELY record checking_id
-    payoutCheckingID := PayInvoice(payeeInvoice)
-    repo.UpdatePayoutCheckingID(deal.ID, payoutCheckingID)  // part of same tx
-}
+// 3. Persist its provider ID, verify it, then mark the deal released.
+recordPayoutCheckingID(deal.ID, checkingID)
 ```
 
 **Guarantees:**
-- If crash after `PayInvoice` but before DB update: `payout_checking_id` exists in LNbits, next retry verifies it
-- If crash before `PayInvoice`: no `checking_id` recorded, safe to retry
-- `UpdatePayoutCheckingID` uses the **transaction repo** → atomic with final status update
+- A retry first queries LNbits payment history for the exact outgoing BOLT11;
+  a successful provider payment is recorded and released without re-sending.
+- A confirmed provider failure is eligible for a controlled retry.
+- If the attempt is durable but LNbits cannot identify its outcome, Ganji does
+  **not** call `PayInvoice` again. The deal remains reconciliation-required;
+  this deliberately favors a visible pending release over a possible duplicate
+  payout.
 
 ---
 
@@ -635,7 +631,7 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 |-----------|------------------|
 | `SettleHold` | If `ok:false` + "already settled" → verify via `CheckPayment` → if `SETTLED`, treat as success |
 | `CancelHold` | If `ok:false` → verify via `CheckPayment` → if `UNPAID/EXPIRED/CANCELLED`, treat as success |
-| `PayInvoice` | HTTP 5xx / timeout → **no idempotency key** (LNbits doesn't support) → verify via `CheckPayment` on returned `checking_id` |
+| `PayInvoice` | Persist intent first; on timeout/lost response, find the outgoing payment by exact BOLT11 in LNbits history. Never automatically resend an ambiguous attempt. |
 | `CreateHoldInvoice` | Retry with new preimage (idempotent at Ganji level) |
 
 **Retry Logic:** All network calls use `context.Context` for timeout/cancellation. No automatic retry — caller decides (e.g., operator retries resolution).
