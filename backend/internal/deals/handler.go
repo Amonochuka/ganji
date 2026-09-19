@@ -63,7 +63,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"deal": deal,
+		"deal": deal.View(),
 	})
 }
 
@@ -90,7 +90,7 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"deal": deal,
+		"deal": deal.View(),
 	})
 }
 
@@ -112,7 +112,7 @@ func (h *Handler) ListDeals(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"deals": deals,
+		"deals": dealsView(deals),
 	})
 }
 
@@ -193,7 +193,7 @@ func (h *Handler) CheckPayment(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"deal": deal,
+		"deal": deal.View(),
 	})
 }
 
@@ -221,7 +221,7 @@ func (h *Handler) SubmitWork(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "work submitted",
-		"deal":    deal,
+		"deal":    deal.View(),
 	})
 }
 
@@ -249,7 +249,7 @@ func (h *Handler) ApproveDeal(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "deal approved and escrow released",
-		"deal":    deal,
+		"deal":    deal.View(),
 	})
 }
 
@@ -289,7 +289,7 @@ func (h *Handler) DisputeDeal(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "dispute raised — funds frozen pending arbitration",
-		"deal":    deal,
+		"deal":    deal.View(),
 	})
 }
 
@@ -307,7 +307,7 @@ func (h *Handler) ListDisputes(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"disputes": disputed})
+	c.JSON(http.StatusOK, gin.H{"disputes": dealsView(disputed)})
 }
 
 // ResolveDispute closes a frozen dispute as an operator: release (settle +
@@ -345,7 +345,7 @@ func (h *Handler) ResolveDispute(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": message,
-		"deal":    deal,
+		"deal":    deal.View(),
 	})
 }
 
@@ -401,7 +401,7 @@ func (h *Handler) ReconcileDeal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"deal": deal,
+		"deal": deal.View(),
 	})
 }
 
@@ -439,7 +439,7 @@ func (h *Handler) UpdatePayeeInvoice(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "payee invoice updated",
-		"deal":    deal,
+		"deal":    deal.View(),
 	})
 }
 
@@ -490,6 +490,6 @@ func (h *Handler) RotateShareLink(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "share link regenerated",
-		"deal":    deal,
+		"deal":    deal.View(),
 	})
 }

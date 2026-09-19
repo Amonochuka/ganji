@@ -198,7 +198,10 @@ back to the client).
 `Deal` stores both sides of the secret: `preimage` (raw hex — needed later to
 settle) and `preimage_hash = sha256(preimage)` (what LNbits locked the invoice
 to). The preimage and the freelancer's `payee_invoice` are persisted but never
-serialized into API responses (`omitempty` + the public view drops them).
+serialized into API responses: **every** authenticated deal endpoint serves the
+redacted `DealView` (drops `preimage`, `payee_invoice`, and the payout-tracking
+fields), and the public share link serves `PublicDeal`. The raw `*Deal` stays
+internal to the service layer.
 
 ### CreateDeal (`service.go`)
 
@@ -443,12 +446,26 @@ Backend:
   funded (the sweep already covers stale open deals).
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
 - **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
+- **Client-facing notifications.** Emails today go only to the freelancer
+  (payment locked, disputed, released, refunded); the client — who is the one
+  that paid and is waiting — hears nothing (e.g. no "work submitted — come
+  review"). The notifier interface only has freelancer-scoped events.
+- **Deletion endpoints.** There is no user-facing way to delete a deal, an
+  artifact, or a verification — artifacts in particular accumulate forever.
+- **Refresh-token GC.** `refresh_tokens` rows are never cleaned up after
+  expiry, so the table grows without bound.
+- **`GET /me`.** Your own profile is only returned at signup/login; there is no
+  authenticated endpoint to fetch the current user.
+- **Structured logging.** Everything is `log.Printf`; no `slog` / leveled
+  loggers / request correlation IDs.
 - **Hardening (future): `client_email` masking.** Already excluded from the
   public share-link view, but the authed deal payloads (`POST /deals`,
   `GET /deals`, `GET /deals/:id`) return the full email to both parties. If we
   want stricter contact privacy later: return a masked value
   (`c***@example.com`) outside approve/dispute contexts, or drop it from list
   views entirely.
+
+Known bugs and doc-vs-code mismatches are tracked in **§10 Known Issues** below.
 
 Frontend (out of scope this session): `frontend/` exists but the shared deal/
 public-link UI is not implemented.
@@ -471,3 +488,109 @@ critical ones:
 - `OPERATOR_EMAILS` — comma-separated emails promoted to arbitration
   operators at boot (`is_operator` claim). Empty by default; no operator means
   disputes can be raised but not resolved.
+
+---
+
+## 10. Known Issues & Bugs
+
+Documented bugs and doc-vs-code mismatches, roughly ordered by severity. Fix
+these before relying on the docs' claims. (Audited 2026-09-19.)
+
+### Money / secrets
+
+1. **Escrow preimage + payee invoice leak into authed API responses.**
+   ~~`API_REFERENCE.md` §3 and §6 below claim the raw `preimage` (the settle
+   secret) and the freelancer's `payee_invoice` are "intentionally omitted"
+   from responses. They are not. The `Deal` struct tags them `omitempty`, but
+   that only suppresses **empty** values — and the repository always loads both
+   from the DB (see the `scanDeal` in `repository.go`). So every endpoint that
+   returns the full `Deal` (`GET /deals`, `GET /deals/:id`, approve, submit,
+   payee rotation, …) exposes the settle preimage and the payout invoice to
+   **both parties, including the client** (authorized by `client_email`
+   match). The public share link (`PublicDeal`) is genuinely safe; the authed
+   views were not.~~ **Fixed 2026-09-19:** handlers now serialize the redacted
+   `DealView` (`types.go`) instead of the raw `*Deal` — it drops `preimage`,
+   `payee_invoice`, and the payout-tracking fields, and keeps everything the
+   docs promise. All authed deal endpoints (`POST /deals`, `GET /deals`,
+   `GET /deals/:id`, approve, submit, payee rotation, arbitration, reconcile)
+   and the dispute queue are covered. Regression-guarded by
+   `deal_view_test.go` (`TestDealResponsesRedactSecrets`,
+   `TestListDealsResponsesRedactSecrets`). Note for future work: `*Deal`
+   remains serializable via Go's reflection (e.g. if a new handler forgets the
+   view), so keep routing leak-prone endpoints through `Deal.View()` /
+   `dealsView()`. A lint rule (`mustusefuncs.dealview`) would enforce it.
+
+2. **`CreateDeal` orphans the hold invoice if the DB insert fails.**
+   In `service.go`, `CreateDeal` draws the LNbits hold invoice **before** the
+   row insert. If `repo.CreateDeal` fails (constraint, outage), the standing
+   hold has no DB row behind it: nothing can settle or cancel it, and a client
+   who pays it is stuck until the hold expires. Fix: best-effort
+   `CancelHold(preimage_hash)` on insert failure.
+
+3. **No expiry handling for `disputed` deals.**
+   `ListOpenBefore` only selects `awaiting_payment` and `locked`. A hold that
+   expires/cancels while the deal is `disputed` returns the sats to the client
+   on the network, but the DB row stays `disputed` forever — the money truth
+   and the DB diverge permanently. The sweep should also reconcile `disputed`
+   rows whose hold the network reports as released (`UNPAID`/`EXPIRED`/
+   `CANCELLED`) — this is the "automated resolution for never-funded
+   disputes" noted in §8.
+
+### Correctness / robustness
+
+4. **CV self-heal failure breaks the public CV (contradicts the docs).**
+   `cv/service.go GetProfile` returns an error from `healAnchors`, so a
+   transient DB problem makes `GET /cv/:slug` 500 — while the code comment and
+   `API_REFERENCE.md` promise self-healing that "never blocks reading the CV."
+   Trust-score refresh already degrades gracefully; `healAnchors` should too
+   (log + serve the last-known state).
+
+5. **Artifacts can be uploaded to `refunded` deals.**
+   The upload gate in `service.go UploadArtifact` blocks
+   `work_submitted`/`reviewing`/`released`/`disputed` but omits `refunded` — a
+   terminal refunded deal should have a frozen deliverable set. The same block
+   carries a stale `TEMP` comment about pre-escrow behavior.
+
+6. **Uploads are buffered, not streamed; the size cap is checked late.**
+   gin's `FormFile` (`artifact_handler.go`) calls `ParseMultipartForm(32MB)`,
+   buffering the whole file into memory (or a temp file) before
+   `UploadArtifact` streams it to storage. The `MAX_UPLOAD_BYTES` cap is only
+   enforced after that buffering. Use `c.Request.MultipartReader()` to stream
+   and cap as the bytes arrive — otherwise a huge file is fully buffered
+   (memory/temp-disk spike) before it is rejected.
+
+7. **CV anchor binds the storage key, not the file bytes.**
+   `cv/service.go` anchors `sha256(storage_key)`. Replacing the stored blob
+   under the same key passes `GET /cv/:slug/verify/:entryID`. The
+   "cryptographically anchored reputation" is only as strong as key
+   immutability; hashing the actual file bytes (size + content digest) at
+   release would make verification meaningful.
+
+8. **`approve` racing `dispute` during the release window can drop the
+   dispute.**
+   In `releaseEscrow`, phase 3 re-validates only `CanTransition(disputed,
+   released)` (which returns true by design), so a dispute recorded while
+   phase 2's network legs were in flight is silently overwritten by the
+   release and the payout still happens. The `dispute_reason` is left behind
+   on a `released` row.
+
+### Minor / hardening
+
+9. **Webhook body read is unbounded on a public endpoint.**
+   `webhook/handler.go` `io.ReadAll`s the request body before verifying the
+   `LNbits-Signature` (which is also skipped entirely when
+   `LNBITS_WEBHOOK_SECRET` is empty). No body cap → memory DoS vector and
+   LNbits-retry spam. Use `http.MaxBytesReader`.
+
+10. **`Local.Save` is non-atomic.** A crash mid-write leaves a partial blob
+    that the download path will happily serve (and `Content-Length` comes from
+    `os.Stat`, matching the partial file — so corrupt data is served with a
+    valid-looking length). Write to a temp file + rename + fsync.
+
+11. **Notifications are freelancer-only and untracked.** `DealNotifier`
+    emails go only to the freelancer, and each send spawns an un-bounded
+    goroutine with no waitgroup/rate limit.
+
+12. **Dead code / stale stubs.** `pkg/hash/preimage.go` and `pkg/sanitize`
+    are empty (preimage generation is inline in `deals/service.go`);
+    `ErrPaymentNotPaid` (`deals/errors.go`) is never used.

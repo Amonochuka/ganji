@@ -228,6 +228,13 @@ Create a new deal. Generates a fresh escrow preimage, draws a **hold invoice** o
 
 The raw `preimage` (the network secret that can settle the escrow) and the freelancer's `payee_invoice` are stored server-side but intentionally **omitted** from API responses.
 
+> ✅ **Fixed (2026-09-19).** The omission is now enforced: every authenticated
+> deal endpoint (and the dispute queue) serializes the redacted `DealView`
+> (`internal/deals/types.go`) instead of the raw `Deal` — `preimage`,
+> `payee_invoice`, and the payout-tracking fields never leave the server.
+> Regression-guarded by `internal/deals/deal_view_test.go`. See
+> `explained.md` §10 #1.
+
 `share_token` is the token for the public payment link (`GET /public/deals/:shareToken`) — there is one per deal from creation, rotatable via `POST /deals/:dealID/share-link`.
 
 ### `GET /deals`

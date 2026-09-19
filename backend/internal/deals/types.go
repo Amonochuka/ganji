@@ -104,6 +104,70 @@ type PublicDeal struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// DealView is the safe authed view of a deal. It is what every authenticated
+// deal endpoint serializes instead of the full *Deal, which carries secrets
+// that must never leave the server:
+//
+//   - Preimage — the raw escrow settle secret (revealing it completes the held
+//     payment).
+//   - PayeeInvoice — the freelancer's Lightning payout destination.
+//   - PayoutCheckingID / PayoutAttemptedAt — internal payout-tracking markers,
+//     part of the double-pay-prevention machinery, of no use to either party.
+//
+// Everything else is surfaced to both the freelancer and the client (the
+// client is authorized by email match). See explained.md §10 #1.
+type DealView struct {
+	ID             string       `json:"id"`
+	FreelancerID   string       `json:"freelancer_id"`
+	ClientEmail    string       `json:"client_email"`
+	Title          string       `json:"title"`
+	AmountSats     int64        `json:"amount_sats"`
+	SourcePlatform string       `json:"source_platform"`
+	PreimageHash   string       `json:"preimage_hash"`
+	Invoice        string       `json:"invoice"`
+	CheckingID     string       `json:"checking_id"`
+	ShareToken     string       `json:"share_token"`
+	Status         Status       `json:"status"`
+	DisputeReason  string       `json:"dispute_reason"`
+	DisputedAt     sql.NullTime `json:"disputed_at"`
+	ResolvedAt     sql.NullTime `json:"resolved_at"`
+	ResolvedBy     string       `json:"resolved_by,omitempty"`
+	CreatedAt      time.Time    `json:"created_at"`
+	VerifiedAt     sql.NullTime `json:"verified_at"`
+}
+
+// View redacts a deal for API responses (see DealView).
+func (d *Deal) View() DealView {
+	return DealView{
+		ID:             d.ID,
+		FreelancerID:   d.FreelancerID,
+		ClientEmail:    d.ClientEmail,
+		Title:          d.Title,
+		AmountSats:     d.AmountSats,
+		SourcePlatform: d.SourcePlatform,
+		PreimageHash:   d.PreimageHash,
+		Invoice:        d.Invoice,
+		CheckingID:     d.CheckingID,
+		ShareToken:     d.ShareToken,
+		Status:         d.Status,
+		DisputeReason:  d.DisputeReason,
+		DisputedAt:     d.DisputedAt,
+		ResolvedAt:     d.ResolvedAt,
+		ResolvedBy:     d.ResolvedBy,
+		CreatedAt:      d.CreatedAt,
+		VerifiedAt:     d.VerifiedAt,
+	}
+}
+
+// dealsView maps a deal slice to its redacted views.
+func dealsView(deals []Deal) []DealView {
+	views := make([]DealView, 0, len(deals))
+	for i := range deals {
+		views = append(views, deals[i].View())
+	}
+	return views
+}
+
 // ValidTransitions defines which status transitions are allowed. This is
 // the enforcement point for the dispute flow design from Section 3.3 —
 // nothing can jump straight from awaiting_payment to released, for
