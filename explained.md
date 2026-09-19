@@ -215,6 +215,33 @@ internal to the service layer.
 
 No money moves on creation.
 
+### Orphan-hold protection (CreateDeal failure cleanup)
+
+If `repo.CreateDeal` (or the transaction begin/commit) fails **after** the hold
+invoice was created at LNbits, the invoice would otherwise remain on the network
+with no deal row behind it — a client who pays it has their sats held for the
+full 30-day expiry with no one able to settle or cancel (the preimage and
+`preimage_hash` exist only in the uncommitted transaction).
+
+To prevent this, `CreateDeal` now calls a best-effort `cancelOrphanHold(preimageHash)`
+on **every failure path after the hold is drawn**:
+
+| Failure point | What happens |
+|---|---|
+| `BeginTx` fails | Cancel hold → no orphan possible (no row could exist) |
+| `repo.CreateDeal` fails (constraint, outage) | Cancel hold → prevents the exact orphan bug |
+| `tx.Commit` fails | Cancel hold — **ambiguous**: the row may have persisted server-side. Erring toward cancellation is safer: a dead invoice on a live row is swept to `refunded` by the hold-expiry sweep; an orphaned hold strands a paying client for 30 days. |
+
+`cancelOrphanHold` uses the LNbits **admin key** to call `POST /api/v1/payments/cancel`
+with the `preimage_hash` (the `payment_hash` LNbits locked the invoice to). LNbits
+tears down the HTLC, returning sats to the payer if they already paid, or making the
+invoice unpayable if they haven't. A refused cancel (already settled/expired) is
+logged, not returned — the caller's original error surfaces to the freelancer, who
+can retry `CreateDeal` immediately with a fresh hold invoice.
+
+The hold-expiry sweep (every 6 h) remains the ultimate backstop: it reconciles any
+`UNPAID/EXPIRED/CANCELLED` holds to `refunded`.
+
 ### Paid ⇒ locked detection — autodetect, backend chooses
 
 Whether LNbits reports a *held-but-unsettled* invoice as `paid` depends on its
@@ -521,11 +548,22 @@ these before relying on the docs' claims. (Audited 2026-09-19.)
    `dealsView()`. A lint rule (`mustusefuncs.dealview`) would enforce it.
 
 2. **`CreateDeal` orphans the hold invoice if the DB insert fails.**
-   In `service.go`, `CreateDeal` draws the LNbits hold invoice **before** the
+   ~~In `service.go`, `CreateDeal` draws the LNbits hold invoice **before** the
    row insert. If `repo.CreateDeal` fails (constraint, outage), the standing
    hold has no DB row behind it: nothing can settle or cancel it, and a client
-   who pays it is stuck until the hold expires. Fix: best-effort
-   `CancelHold(preimage_hash)` on insert failure.
+   who pays it is stuck until the hold expires.~~ **Fixed 2026-09-19:**
+   `service.go CreateDeal` now tears the hold back down on any failure after
+   the invoice is drawn and before the row is durably committed — `BeginTx`
+   error, `CreateDeal` error (constraint/outage), or `tx.Commit` error. A
+   commit error is ambiguous (the row may have landed server-side either way),
+   so the code errs toward cancellation: a dead invoice on a live row is swept
+   to `refunded`, whereas an orphaned hold strands a paying client for the
+   full expiry window. The cleanup goes through a small best-effort
+   `cancelOrphanHold(preimageHash)` helper — a refused cancel is logged and the
+   caller's original error is preserved (the hold-expiry sweep remains the
+   backstop). Regression-tested by `TestCreateDealCancelsHoldOnInsertFailure`
+   in `service_test.go` (hold created → insert fails → cancel called with the
+   deal's `preimage_hash`, no row persisted).
 
 3. **No expiry handling for `disputed` deals.**
    `ListOpenBefore` only selects `awaiting_payment` and `locked`. A hold that
@@ -552,12 +590,18 @@ these before relying on the docs' claims. (Audited 2026-09-19.)
    carries a stale `TEMP` comment about pre-escrow behavior.
 
 6. **Uploads are buffered, not streamed; the size cap is checked late.**
-   gin's `FormFile` (`artifact_handler.go`) calls `ParseMultipartForm(32MB)`,
+   ~~gin's `FormFile` (`artifact_handler.go`) calls `ParseMultipartForm(32MB)`,
    buffering the whole file into memory (or a temp file) before
    `UploadArtifact` streams it to storage. The `MAX_UPLOAD_BYTES` cap is only
-   enforced after that buffering. Use `c.Request.MultipartReader()` to stream
-   and cap as the bytes arrive — otherwise a huge file is fully buffered
-   (memory/temp-disk spike) before it is rejected.
+   enforced after that buffering.~~ **Fixed 2026-09-19:**
+   `artifact_handler.go CreateArtifact` now streams the multipart body with
+   `c.Request.MultipartReader()` — no whole-file buffering. The `kind` field is
+   read with a 64-byte cap, the request body is bounded with
+   `http.MaxBytesReader(maxUploadBytes + 1 MiB)`, the per-file cap is still
+   enforced while streaming in `UploadArtifact`, and an oversized upload leaves
+   no blob (regression-tested). Note: `kind` must now precede the `artifact`
+   file part (the file is streamed the moment it is seen; there is no second
+   pass). Oversized body is mapped to 413; oversized file to 400.
 
 7. **CV anchor binds the storage key, not the file bytes.**
    `cv/service.go` anchors `sha256(storage_key)`. Replacing the stored blob
@@ -577,10 +621,14 @@ these before relying on the docs' claims. (Audited 2026-09-19.)
 ### Minor / hardening
 
 9. **Webhook body read is unbounded on a public endpoint.**
-   `webhook/handler.go` `io.ReadAll`s the request body before verifying the
+   ~~`webhook/handler.go` `io.ReadAll`s the request body before verifying the
    `LNbits-Signature` (which is also skipped entirely when
    `LNBITS_WEBHOOK_SECRET` is empty). No body cap → memory DoS vector and
-   LNbits-retry spam. Use `http.MaxBytesReader`.
+   LNbits-retry spam.~~ **Fixed 2026-09-19:** the body is now read through
+   `http.MaxBytesReader` (1 MiB cap — notifications are ~300 bytes); a body
+   over the cap is rejected with 413 before any parsing or signature work.
+   Regression-tested. The empty-secret skip remains a deployment concern:
+   set `LNBITS_WEBHOOK_SECRET` (a public endpoint with no auth at all).
 
 10. **`Local.Save` is non-atomic.** A crash mid-write leaves a partial blob
     that the download path will happily serve (and `Content-Length` comes from

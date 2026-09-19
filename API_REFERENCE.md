@@ -453,11 +453,14 @@ while the deal is still open to work (not after `work_submitted` /
 **Request** — `multipart/form-data`
 | Fields |
 |---|
-| `kind` — `"source_code"` or `"source_file"` (required) |
+| `kind` — `"source_code"` or `"source_file"` (required, must precede the file part) |
 | `artifact` — the file itself (required) |
 
-Uploads larger than `MAX_UPLOAD_BYTES` (default 10 MB) are rejected with `400`
-and no blob is committed.
+The body is **streamed** (not buffered). The `kind` field must be sent before
+the file part — the file is consumed the moment it is seen, so there is no
+reordering. Uploads larger than `MAX_UPLOAD_BYTES` (default 10 MB) are
+rejected with `400` and no blob is committed; a request whose total body
+exceeds the cap plus 1 MiB of multipart envelope is rejected with `413`.
 
 **Response `201`**
 ```json
@@ -678,9 +681,14 @@ Public endpoint called by LNbits when an invoice is paid. No JWT auth required.
 | `400` | Malformed payload (missing `checking_id`, etc.) | `{"error": "malformed payload"}` |
 | `401` | Invalid or missing HMAC signature | `{"error": "invalid signature"}` |
 | `404` | No deal found for `checking_id` | `{"error": "no deal for checking_id"}` |
+| `413` | Request body larger than 1 MiB (notifications are ~300 bytes) | `{"error": "request body too large"}` |
 | `500` | Unexpected internal failure | `{"error": "internal failure"}` |
 
-Payment-not-successful returns `200` because the webhook was received and understood — nothing for Ganji to do. Returning non-2xx would cause LNbits to retry unnecessarily.
+The request body is capped at **1 MiB** via `http.MaxBytesReader` and rejected
+with `413` when exceeded, before any parsing or signature work — this public
+endpoint must not be able to force unbounded buffering. Payment-not-successful
+returns `200` because the webhook was received and understood — nothing for
+Ganji to do. Returning non-2xx would cause LNbits to retry unnecessarily.
 
 **Signature verification:**
 - The signed payload is `"{timestamp}.{raw_body}"`

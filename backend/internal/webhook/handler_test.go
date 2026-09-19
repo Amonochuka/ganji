@@ -143,6 +143,31 @@ func signBody(body, secret string, timestamp int64) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+func TestHandleLNbitsWebhookRejectsOversizedBody(t *testing.T) {
+	dealReader := &fakeDealReader{
+		deal: &deals.Deal{ID: "deal-123", Status: deals.StatusAwaitingPayment},
+	}
+
+	service := NewService(dealReader, &handlerPaymentChecker{paid: true})
+	router := setupWebhookRouter(service)
+
+	// maxWebhookBodyBytes is 1 MiB; send over the cap. The body must be
+	// rejected before it is parsed or forwarded to the service.
+	oversized := strings.Repeat("x", maxWebhookBodyBytes+1)
+	request := httptest.NewRequest(http.MethodPost, "/webhooks/lnbits", strings.NewReader(oversized))
+	request.Header.Set("Content-Type", "application/json")
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status 413, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if dealReader.updatedDealID != "" {
+		t.Fatalf("expected no deal update, got %q", dealReader.updatedDealID)
+	}
+}
+
 func TestHandleLNbitsWebhookReturnsOKForPaidPayment(t *testing.T) {
 	paymentChecker := &handlerPaymentChecker{
 		paid: true,

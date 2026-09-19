@@ -46,6 +46,7 @@ type fakeDealRepo struct {
 	artifacts   map[string][]Artifact
 	getDealErr  error
 	updateErr   error
+	createErr   error
 	updateCalls []Status
 	// raceMoveTo simulates another actor moving the row between the caller's
 	// read and its guarded write: on the next guarded update, the row is first
@@ -61,6 +62,9 @@ func newFakeDealRepo() *fakeDealRepo {
 }
 
 func (f *fakeDealRepo) CreateDeal(ctx context.Context, deal *Deal) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
 	f.deals[deal.ID] = deal
 	return nil
 }
@@ -375,6 +379,64 @@ func TestCreateDealCreatesHoldInvoice(t *testing.T) {
 	}
 	if stored.ShareToken == "" {
 		t.Error("expected a share token to be generated for the public link")
+	}
+}
+
+func TestCreateDealCancelsHoldOnInsertFailure(t *testing.T) {
+	var cancelled []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode lnbits request: %v", err)
+		}
+
+		if r.URL.Path == "/api/v1/payments/cancel" {
+			if r.Header.Get("X-Api-Key") == "" {
+				t.Error("expected admin key on cancel")
+			}
+			cancelled = append(cancelled, body["payment_hash"].(string))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"chk-1"}`))
+			return
+		}
+
+		paymentHash := body["payment_hash"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"checking_id":"chk-1","payment_hash":"` + paymentHash + `","payment_request":"lnbc1"}`))
+	}))
+	defer server.Close()
+
+	client := lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key", AdminKey: "admin-key"})
+
+	repo := newFakeDealRepo()
+	repo.createErr = errors.New("constraint violation")
+	service := NewService(repo, client)
+
+	deal := &Deal{
+		FreelancerID:   "freelancer-1",
+		ClientEmail:    "client@example.com",
+		Title:          "Build a site",
+		AmountSats:     5000,
+		SourcePlatform: "telegram",
+		PayeeInvoice:   "lnbc5000n1...",
+	}
+
+	if err := service.CreateDeal(context.Background(), deal); !errors.Is(err, repo.createErr) {
+		t.Fatalf("expected %v, got %v", repo.createErr, err)
+	}
+
+	if len(deal.PreimageHash) != 64 {
+		t.Fatalf("expected a 64-char preimage hash recorded before insert, got %q", deal.PreimageHash)
+	}
+	if len(cancelled) != 1 {
+		t.Fatalf("expected the orphaned hold to be cancelled once, got %v", cancelled)
+	}
+	if cancelled[0] != deal.PreimageHash {
+		t.Errorf("cancel was called with %s, expected %s", cancelled[0], deal.PreimageHash)
+	}
+	if len(repo.deals) != 0 {
+		t.Error("failed insert must not persist the deal row")
 	}
 }
 

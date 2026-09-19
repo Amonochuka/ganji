@@ -124,6 +124,82 @@ func TestCreateArtifactRejectsMissingFile(t *testing.T) {
 	}
 }
 
+func TestCreateArtifactStreamsAndRejectsOversizedFile(t *testing.T) {
+	repo := newFakeDealRepo()
+	_ = escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	root := t.TempDir()
+	st, err := storage.NewLocal(root)
+	if err != nil {
+		t.Fatalf("new local storage: %v", err)
+	}
+	defer st.Close()
+
+	service := NewService(repo, &lnbits.Client{}, WithStorage(st, 1024))
+	router := newTestArtifactRouter(t, service, "freelancer-1", "freelancer-1@example.com")
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	if err := w.WriteField("kind", string(ArtifactSourceCode)); err != nil {
+		t.Fatalf("write kind: %v", err)
+	}
+	part, err := w.CreateFormFile("artifact", "huge.bin")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("z"), 4096)); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
+	w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/deals/deal-1/artifacts", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized file, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if n := fileCount(root); n != 0 {
+		t.Errorf("expected no stored blob for a rejected upload, found %d", n)
+	}
+}
+
+func TestCreateArtifactRequiresKindBeforeFile(t *testing.T) {
+	repo := newFakeDealRepo()
+	_ = escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	st, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("new local storage: %v", err)
+	}
+	defer st.Close()
+
+	service := NewService(repo, &lnbits.Client{}, WithStorage(st, 1024))
+	router := newTestArtifactRouter(t, service, "freelancer-1", "freelancer-1@example.com")
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("artifact", "patch.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	_, _ = part.Write([]byte("x"))
+	if err := w.WriteField("kind", string(ArtifactSourceCode)); err != nil {
+		t.Fatalf("write kind: %v", err)
+	}
+	w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/deals/deal-1/artifacts", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when the file precedes kind, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestDownloadArtifactStreamsBlob(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")

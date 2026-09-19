@@ -159,6 +159,7 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
+		s.cancelOrphanHold(ctx, deal.PreimageHash)
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
@@ -169,14 +170,31 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	repo := s.repo.WithTx(tx)
 
 	if err := repo.CreateDeal(ctx, deal); err != nil {
+		s.cancelOrphanHold(ctx, deal.PreimageHash)
 		return err
 	}
 
 	if err := tx.Commit(); err != nil {
+		// A commit error is ambiguous — the row may or may not have persisted
+		// server-side. Either way the safer money truth is to tear the hold
+		// down: a dead invoice on a live row is swept to refunded, whereas an
+		// orphaned hold strands a paying client for the full expiry window.
+		s.cancelOrphanHold(ctx, deal.PreimageHash)
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 
 	return nil
+}
+
+// cancelOrphanHold tears down a hold invoice that was drawn before its deal
+// row could be persisted, so a paying client is never stranded against a hold
+// with no DB row behind it. Best-effort: cancellation failure is logged, not
+// returned — the caller's original error is the one the client must see (and
+// the hold-expiry sweep is the backstop for anything left standing).
+func (s *Service) cancelOrphanHold(ctx context.Context, preimageHash string) {
+	if _, err := s.lnbits.CancelHold(ctx, preimageHash); err != nil {
+		log.Printf("warn: cancelling orphaned hold %s: %v", preimageHash, err)
+	}
 }
 
 func (s *Service) GetDealByID(ctx context.Context, dealID, userID, email string) (*Deal, error) {
@@ -1005,6 +1023,13 @@ func (s *Service) UpdatePayeeInvoice(ctx context.Context, userID, dealID, bolt11
 // the reader is size-capped so an oversized upload is rejected without a byte
 // being committed. If the DB record cannot be written afterwards, the
 // just-saved blob is best-effort deleted so storage never accumulates orphans.
+func (s *Service) MaxUploadBytes() int64 {
+	if s.maxUploadBytes <= 0 {
+		return 0
+	}
+	return s.maxUploadBytes
+}
+
 func (s *Service) UploadArtifact(ctx context.Context, userID, dealID string, kind ArtifactKind, filename string, r io.Reader) (*Artifact, error) {
 	if s.storage == nil {
 		return nil, fmt.Errorf("%w: artifact storage is not configured", ErrInvalidInput)

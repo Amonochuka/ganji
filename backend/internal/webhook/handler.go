@@ -19,13 +19,23 @@ func NewHandler(service *Service, secret string) *Handler {
 	return &Handler{service: service, secret: secret}
 }
 
+// maxWebhookBodyBytes caps the webhook request body. LNbits notifications are
+// ~300 bytes of JSON; the cap is generous for forward-compat but bounds how much
+// memory an unauthenticated caller can force us to buffer before verification.
+const maxWebhookBodyBytes = 1 << 20 // 1 MiB
+
 // HandleLNbitsWebhook receives payment notifications from LNbits.
 // This is a public endpoint and does not require JWT authentication. When
 // LNBITS_WEBHOOK_SECRET (the wallet's webhook_secret) is set, inbound
 // requests must carry a valid LNbits-Signature: t=<unix>,v1=<hmac_sha256>.
 func (h *Handler) HandleLNbitsWebhook(c *gin.Context) {
-	rawBody, err := io.ReadAll(c.Request.Body)
+	rawBody, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxWebhookBodyBytes))
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
 		return
 	}
