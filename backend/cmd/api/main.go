@@ -30,7 +30,7 @@ func main() {
 	}
 	defer uploadStore.Close()
 
-	router, dealService := setupRouter(cfg, dbConn, uploadStore)
+	router, dealService, _ := setupRouter(cfg, dbConn, uploadStore)
 
 	// Hold-expiry sweep: periodically reconcile stale open deals with LNbits
 	// so expired/cancelled/unfunded holds don't stay awaiting_payment forever.

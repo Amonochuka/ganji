@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/health"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 	"github.com/Amonochuka/ganji-backend/internal/middleware"
+	"github.com/Amonochuka/ganji-backend/internal/ots"
 	"github.com/Amonochuka/ganji-backend/internal/storage"
 	"github.com/Amonochuka/ganji-backend/internal/webhook"
 )
@@ -26,7 +28,7 @@ import (
 // route logic directly, only wiring. The *deals.Service is returned so main
 // can run background workers (e.g. the hold-expiry sweep) against it.
 // uploadStore is the artifact blob backend, owned (and closed) by main.
-func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage) (*gin.Engine, *deals.Service) {
+func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage) (*gin.Engine, *deals.Service, *cv.Service) {
 	router := gin.Default()
 
 	router.Use(cors.New(cors.Config{
@@ -50,7 +52,11 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	}
 
 	dealRepo := deals.NewRepository(dbConn)
-	cvService := cv.NewService(cv.NewRepository(dbConn))
+
+	// OpenTimestamps client for blockchain anchoring
+	otsClient := ots.NewClient()
+
+	cvService := cv.NewService(cv.NewRepository(dbConn), uploadStore, otsClient)
 
 	lnbitsClient := lnbits.NewClient(
 		lnbits.Config{
@@ -91,5 +97,18 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 
 	cv.RegisterRoutes(router, cv.NewHandler(cvService))
 
-	return router, dealService
+	// Start OTS proof upgrade worker (runs every 6 hours)
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			if err := cvService.UpgradeOTSProofs(ctx); err != nil {
+				log.Printf("cv: ots upgrade worker error: %v", err)
+			}
+			cancel()
+		}
+	}()
+
+	return router, dealService, cvService
 }
