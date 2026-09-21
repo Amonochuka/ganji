@@ -492,6 +492,8 @@ Backend:
   (`c***@example.com`) outside approve/dispute contexts, or drop it from list
   views entirely.
 
+- **OpenTimestamps (OTS) integration** (`internal/ots/`, `internal/cv/`): artifact hashes submitted to public OTS calendars on deal release; initial `.ots` proof stored in `cv_entries`. Background worker (`router.go`) upgrades proofs every 6h via `/upgrade` endpoint. `GET /cv/:slug/verify/:entryID` returns `OTSVerified`, `OTSBlockHeight`, `OTSConfirmedAt`. Full Bitcoin block header verification pending `opentimestamps-go` library integration (see §10 Known Issues).
+
 Known bugs and doc-vs-code mismatches are tracked in **§10 Known Issues** below.
 
 Frontend (out of scope this session): `frontend/` exists but the shared deal/
