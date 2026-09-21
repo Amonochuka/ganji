@@ -2,11 +2,18 @@ package cv
 
 import (
 	"context"
+	"encoding/hex"
+	"errors"
+	"hash"
+	"io"
 	"log"
 	"math"
 	"strings"
+	"time"
 
-	"github.com/Amonochuka/ganji-backend/pkg/hash"
+	"github.com/Amonochuka/ganji-backend/internal/ots"
+	"github.com/Amonochuka/ganji-backend/internal/storage"
+	ghash "github.com/Amonochuka/ganji-backend/pkg/hash"
 )
 
 // Trust-score derivation. Every freelancer starts at the signup default
@@ -18,12 +25,27 @@ const (
 	trustScoreCap     = 1000.0
 )
 
-type Service struct {
-	repo CVRepository
+// OTSClient defines the interface for OpenTimestamps operations
+type OTSClient interface {
+	Submit(ctx context.Context, hash []byte) ([]byte, error)
+	Upgrade(ctx context.Context, otsProof []byte) ([]byte, error)
+	GetProof(ctx context.Context, hash []byte) ([]byte, error)
 }
 
-func NewService(repo CVRepository) *Service {
-	return &Service{repo: repo}
+type Service struct {
+	repo      CVRepository
+	store     storage.Storage
+	otsClient OTSClient
+	hasher    func() hash.Hash
+}
+
+func NewService(repo CVRepository, store storage.Storage, otsClient OTSClient) *Service {
+	return &Service{
+		repo:      repo,
+		store:     store,
+		otsClient: otsClient,
+		hasher:    ghash.NewSHA256,
+	}
 }
 
 // GetProfile builds the public CV for a freelancer's slug. Before answering
@@ -43,7 +65,7 @@ func (s *Service) GetProfile(ctx context.Context, slug string) (*Profile, error)
 	}
 
 	if err := s.healAnchors(ctx, row.ID); err != nil {
-		return nil, err
+		log.Printf("cv: healAnchors failed for %s: %v", row.Slug, err)
 	}
 
 	// A stale score must not take the CV down — fall back to the stored one.
@@ -86,10 +108,11 @@ func (s *Service) AnchorReleasedDeal(ctx context.Context, freelancerID, dealID s
 
 // VerifyEntry checks that a CV entry on a freelancer's CV is intact. It
 // recomputes the release-time SHA-256 anchor from the artifact's current
-// storage reference and compares it to the stored hash. A slug mismatch — an
+// file content and compares it to the stored hash. A slug mismatch — an
 // entry that belongs to someone else's CV — is indistinguishable from
 // "not found" (ErrNotFound) so the endpoint never confirms an entry's
 // existence under a foreign slug.
+// Also verifies OpenTimestamps proof if available.
 func (s *Service) VerifyEntry(ctx context.Context, slug, entryID string) (*VerifyResult, error) {
 	slug = strings.TrimSpace(slug)
 	entryID = strings.TrimSpace(entryID)
@@ -102,19 +125,47 @@ func (s *Service) VerifyEntry(ctx context.Context, slug, entryID string) (*Verif
 		return nil, err
 	}
 
-	recomputed := hash.SumSHA256([]byte(rec.StorageKey))
-	valid := rec.Hash == recomputed
+	r, err := s.store.Open(ctx, rec.StorageKey)
+	if err != nil {
+		return nil, err
+	}
+	h := s.hasher()
+	if _, err := io.Copy(h, r); err != nil {
+		r.Close()
+		return nil, err
+	}
+	if err := r.Close(); err != nil {
+		return nil, err
+	}
+	recomputed := h.Sum(nil)
+	recomputedHex := hex.EncodeToString(recomputed)
+	valid := rec.Hash == recomputedHex
 
-	return &VerifyResult{
+	result := &VerifyResult{
 		Valid:          valid,
 		EntryID:        rec.ID,
 		Slug:           slug,
 		Hash:           rec.Hash,
 		Algorithm:      rec.Algorithm,
-		MatchesCurrent: recomputed == rec.Hash,
+		MatchesCurrent: recomputedHex == rec.Hash,
 		DealTitle:      rec.DealTitle,
 		VerifiedAt:     rec.VerifiedAt,
-	}, nil
+		OTSProof:       rec.OTSProof,
+		OTSConfirmedAt: rec.OTSConfirmedAt,
+	}
+
+	// Verify OTS proof if available
+	if len(rec.OTSProof) > 0 && rec.OTSConfirmedAt != nil && s.otsClient != nil {
+		hashBytes, _ := hex.DecodeString(rec.Hash)
+		blockHeight, timestamp, err := ots.VerifyProof(rec.OTSProof, hashBytes)
+		if err == nil {
+			result.OTSVerified = true
+			result.OTSBlockHeight = blockHeight
+			result.OTSConfirmedAt = &timestamp
+		}
+	}
+
+	return result, nil
 }
 
 func (s *Service) healAnchors(ctx context.Context, freelancerID string) error {
@@ -128,14 +179,45 @@ func (s *Service) healAnchors(ctx context.Context, freelancerID string) error {
 	return s.insertAnchors(ctx, candidates)
 }
 
-// insertAnchors hashes each artifact's storage reference and persists the
+// insertAnchors hashes each artifact's file content and persists the
 // anchors. Idempotent: any anchor that already exists (raced insert) is
-// silently skipped.
+// silently skipped. After anchoring, submits hash to OpenTimestamps calendars.
 func (s *Service) insertAnchors(ctx context.Context, candidates []AnchorCandidate) error {
 	for _, c := range candidates {
-		digest := hash.SumSHA256([]byte(c.StorageKey))
-		if err := s.repo.InsertAnchor(ctx, c.ArtifactID, digest); err != nil {
+		r, err := s.store.Open(ctx, c.StorageKey)
+		if err != nil {
 			return err
+		}
+		h := s.hasher()
+		if _, err := io.Copy(h, r); err != nil {
+			r.Close()
+			return err
+		}
+		if err := r.Close(); err != nil {
+			return err
+		}
+		digest := h.Sum(nil)
+		digestHex := hex.EncodeToString(digest)
+		if err := s.repo.InsertAnchor(ctx, c.ArtifactID, digestHex); err != nil {
+			return err
+		}
+
+		// Submit to OpenTimestamps (best-effort, non-blocking)
+		if s.otsClient != nil {
+			go func(artifactID string, hash []byte) {
+				subCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+
+				otsProof, err := s.otsClient.Submit(subCtx, hash)
+				if err != nil {
+					log.Printf("cv: ots submit failed for artifact %s: %v", artifactID, err)
+					return
+				}
+				now := time.Now()
+				if err := s.repo.UpdateAnchorOTS(subCtx, artifactID, otsProof, &now, nil); err != nil {
+					log.Printf("cv: ots proof store failed for artifact %s: %v", artifactID, err)
+				}
+			}(c.ArtifactID, digest)
 		}
 	}
 	return nil
@@ -155,4 +237,36 @@ func (s *Service) refreshTrustScore(ctx context.Context, accountID string, curre
 		return score, nil
 	}
 	return score, s.repo.UpdateTrustScore(ctx, accountID, score)
+}
+
+// UpgradeOTSProofs checks calendars for upgraded proofs for pending anchors.
+// Should be run periodically (e.g., every 6 hours) via a background worker.
+func (s *Service) UpgradeOTSProofs(ctx context.Context) error {
+	if s.otsClient == nil {
+		return nil
+	}
+
+	pending, err := s.repo.ListPendingOTSAnchors(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, a := range pending {
+		upgraded, err := s.otsClient.Upgrade(ctx, a.OTSProof)
+		if err != nil {
+			if errors.Is(err, ots.ErrProofNotReady) {
+				continue // not ready yet, will retry next cycle
+			}
+			log.Printf("cv: ots upgrade failed for entry %s: %v", a.EntryID, err)
+			continue
+		}
+
+		now := time.Now()
+		if err := s.repo.UpdateAnchorOTS(ctx, a.ArtifactID, upgraded, nil, &now); err != nil {
+			log.Printf("cv: ots upgraded proof store failed for entry %s: %v", a.EntryID, err)
+		}
+		log.Printf("cv: ots proof confirmed for entry %s", a.EntryID)
+	}
+
+	return nil
 }

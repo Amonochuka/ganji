@@ -7,15 +7,18 @@ import "time"
 // the artifact's storage reference at release time, so a claim on the CV can
 // be cryptographically re-verified (see VerifyResult).
 type Entry struct {
-	ID             string    `json:"id"`
-	DealTitle      string    `json:"deal_title"`
-	AmountSats     int64     `json:"amount_sats"`
-	SourcePlatform string    `json:"source_platform"`
-	ArtifactKind   string    `json:"artifact_kind"`
-	Hash           string    `json:"hash"`
-	Algorithm      string    `json:"algorithm"`
-	VerifiedAt     time.Time `json:"verified_at"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string     `json:"id"`
+	DealTitle      string     `json:"deal_title"`
+	AmountSats     int64      `json:"amount_sats"`
+	SourcePlatform string     `json:"source_platform"`
+	ArtifactKind   string     `json:"artifact_kind"`
+	Hash           string     `json:"hash"`
+	Algorithm      string     `json:"algorithm"`
+	VerifiedAt     time.Time  `json:"verified_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	OTSProof       []byte     `json:"ots_proof,omitempty"`
+	OTSSubmittedAt *time.Time `json:"ots_submitted_at,omitempty"`
+	OTSConfirmedAt *time.Time `json:"ots_confirmed_at,omitempty"`
 }
 
 // Profile is the public Live CV of a freelancer: identity info plus all
@@ -40,6 +43,12 @@ type VerifyResult struct {
 	MatchesCurrent bool      `json:"matches_current"`
 	DealTitle      string    `json:"deal_title"`
 	VerifiedAt     time.Time `json:"verified_at"`
+
+	// OpenTimestamps verification
+	OTSVerified    bool       `json:"ots_verified"`
+	OTSProof       []byte     `json:"ots_proof,omitempty"`
+	OTSConfirmedAt *time.Time `json:"ots_confirmed_at,omitempty"`
+	OTSBlockHeight int        `json:"ots_block_height,omitempty"`
 }
 
 // profileRow is the users row behind a CV. ID is the hidden DB handle used
@@ -62,10 +71,22 @@ type AnchorCandidate struct {
 // entryRecord carries everything VerifyEntry needs to recompute the
 // release-time hash from the artifact's current storage reference.
 type entryRecord struct {
-	ID         string
-	Hash       string
-	Algorithm  string
-	StorageKey string
-	DealTitle  string
-	VerifiedAt time.Time
+	ID              string
+	Hash            string
+	Algorithm       string
+	StorageKey      string
+	DealTitle       string
+	VerifiedAt      time.Time
+	OTSProof        []byte
+	OTSSubmittedAt  *time.Time
+	OTSConfirmedAt  *time.Time
+}
+
+// OTSPendingAnchor represents an anchor with a submitted but unconfirmed OTS proof
+type OTSPendingAnchor struct {
+	ArtifactID    string
+	EntryID       string
+	Hash          string
+	OTSProof      []byte
+	SubmittedAt   time.Time
 }

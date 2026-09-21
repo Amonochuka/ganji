@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // DBTX mirrors the deals package's minimal query interface so the repository
@@ -23,6 +24,8 @@ type CVRepository interface {
 	ListUnanchoredReleasedArtifacts(ctx context.Context, freelancerID string) ([]AnchorCandidate, error)
 	ListUnanchoredDealArtifacts(ctx context.Context, dealID, freelancerID string) ([]AnchorCandidate, error)
 	InsertAnchor(ctx context.Context, artifactID, hash string) error
+	UpdateAnchorOTS(ctx context.Context, artifactID string, proof []byte, submittedAt, confirmedAt *time.Time) error
+	ListPendingOTSAnchors(ctx context.Context) ([]OTSPendingAnchor, error)
 	CountReleasedDeals(ctx context.Context, freelancerID string) (int, error)
 	UpdateTrustScore(ctx context.Context, accountID string, score float64) error
 	GetEntryForVerify(ctx context.Context, entryID, slug string) (*entryRecord, error)
@@ -69,6 +72,9 @@ func (r *Repository) ListEntries(ctx context.Context, slug string) ([]Entry, err
 			a.kind,
 			cv.hash,
 			cv.algorithm,
+			cv.ots_proof,
+			cv.ots_submitted_at,
+			cv.ots_confirmed_at,
 			d.verified_at,
 			cv.created_at
 		FROM cv_entries cv
@@ -88,6 +94,8 @@ func (r *Repository) ListEntries(ctx context.Context, slug string) ([]Entry, err
 	for rows.Next() {
 		var e Entry
 		verifiedAt := sql.NullTime{}
+		submittedAt := sql.NullTime{}
+		confirmedAt := sql.NullTime{}
 		if err := rows.Scan(
 			&e.ID,
 			&e.DealTitle,
@@ -96,6 +104,9 @@ func (r *Repository) ListEntries(ctx context.Context, slug string) ([]Entry, err
 			&e.ArtifactKind,
 			&e.Hash,
 			&e.Algorithm,
+			&e.OTSProof,
+			&submittedAt,
+			&confirmedAt,
 			&verifiedAt,
 			&e.CreatedAt,
 		); err != nil {
@@ -103,6 +114,12 @@ func (r *Repository) ListEntries(ctx context.Context, slug string) ([]Entry, err
 		}
 		if verifiedAt.Valid {
 			e.VerifiedAt = verifiedAt.Time
+		}
+		if submittedAt.Valid {
+			e.OTSSubmittedAt = &submittedAt.Time
+		}
+		if confirmedAt.Valid {
+			e.OTSConfirmedAt = &confirmedAt.Time
 		}
 		entries = append(entries, e)
 	}
@@ -172,6 +189,19 @@ func (r *Repository) InsertAnchor(ctx context.Context, artifactID, hash string) 
 	return nil
 }
 
+// UpdateAnchorOTS updates the OpenTimestamps proof for an anchor.
+func (r *Repository) UpdateAnchorOTS(ctx context.Context, artifactID string, proof []byte, submittedAt, confirmedAt *time.Time) error {
+	query := `
+		UPDATE cv_entries
+		SET ots_proof = $1, ots_submitted_at = $2, ots_confirmed_at = $3
+		WHERE artifact_id = $4;
+	`
+	if _, err := r.q.ExecContext(ctx, query, proof, submittedAt, confirmedAt, artifactID); err != nil {
+		return fmt.Errorf("repository: update cv anchor ots: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) CountReleasedDeals(ctx context.Context, freelancerID string) (int, error) {
 	query := `
 		SELECT COUNT(*)
@@ -199,6 +229,9 @@ func (r *Repository) GetEntryForVerify(ctx context.Context, entryID, slug string
 			cv.id,
 			cv.hash,
 			cv.algorithm,
+			cv.ots_proof,
+			cv.ots_submitted_at,
+			cv.ots_confirmed_at,
 			a.storage_key,
 			d.title,
 			d.verified_at
@@ -210,10 +243,15 @@ func (r *Repository) GetEntryForVerify(ctx context.Context, entryID, slug string
 	`
 	rec := entryRecord{}
 	verifiedAt := sql.NullTime{}
+	submittedAt := sql.NullTime{}
+	confirmedAt := sql.NullTime{}
 	err := r.q.QueryRowContext(ctx, query, entryID, slug).Scan(
 		&rec.ID,
 		&rec.Hash,
 		&rec.Algorithm,
+		&rec.OTSProof,
+		&submittedAt,
+		&confirmedAt,
 		&rec.StorageKey,
 		&rec.DealTitle,
 		&verifiedAt,
@@ -227,5 +265,44 @@ func (r *Repository) GetEntryForVerify(ctx context.Context, entryID, slug string
 	if verifiedAt.Valid {
 		rec.VerifiedAt = verifiedAt.Time
 	}
+	if submittedAt.Valid {
+		rec.OTSSubmittedAt = &submittedAt.Time
+	}
+	if confirmedAt.Valid {
+		rec.OTSConfirmedAt = &confirmedAt.Time
+	}
 	return &rec, nil
+}
+
+// ListPendingOTSAnchors returns anchors that have OTS proofs submitted but not yet confirmed
+func (r *Repository) ListPendingOTSAnchors(ctx context.Context) ([]OTSPendingAnchor, error) {
+	query := `
+		SELECT cv.id, cv.artifact_id, cv.hash, cv.ots_proof, cv.ots_submitted_at
+		FROM cv_entries cv
+		WHERE cv.ots_proof IS NOT NULL
+		  AND cv.ots_submitted_at IS NOT NULL
+		  AND cv.ots_confirmed_at IS NULL;
+	`
+	rows, err := r.q.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list pending ots anchors: %w", err)
+	}
+	defer rows.Close()
+
+	var anchors []OTSPendingAnchor
+	for rows.Next() {
+		var a OTSPendingAnchor
+		submittedAt := sql.NullTime{}
+		if err := rows.Scan(&a.EntryID, &a.ArtifactID, &a.Hash, &a.OTSProof, &submittedAt); err != nil {
+			return nil, fmt.Errorf("repository: scan pending ots anchor: %w", err)
+		}
+		if submittedAt.Valid {
+			a.SubmittedAt = submittedAt.Time
+		}
+		anchors = append(anchors, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate pending ots anchors: %w", err)
+	}
+	return anchors, nil
 }

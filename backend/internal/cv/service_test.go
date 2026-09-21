@@ -1,9 +1,11 @@
 package cv
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,8 +13,52 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Amonochuka/ganji-backend/internal/storage"
 	"github.com/Amonochuka/ganji-backend/pkg/hash"
 )
+
+// fakeStorage is a minimal in-memory Storage for tests.
+type fakeStorage struct {
+	blobs map[string][]byte
+}
+
+func newFakeStorage() *fakeStorage {
+	return &fakeStorage{blobs: map[string][]byte{}}
+}
+
+func (f *fakeStorage) Save(ctx context.Context, key string, r io.Reader) error {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	f.blobs[key] = data
+	return nil
+}
+
+func (f *fakeStorage) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	data, ok := f.blobs[key]
+	if !ok {
+		return nil, storage.ErrNotFound
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (f *fakeStorage) Size(ctx context.Context, key string) (int64, error) {
+	data, ok := f.blobs[key]
+	if !ok {
+		return 0, storage.ErrNotFound
+	}
+	return int64(len(data)), nil
+}
+
+func (f *fakeStorage) Delete(ctx context.Context, key string) error {
+	delete(f.blobs, key)
+	return nil
+}
+
+func (f *fakeStorage) Close() error {
+	return nil
+}
 
 // fakeCVRepo is a minimal in-memory CVRepository for service tests.
 type fakeCVRepo struct {
@@ -72,6 +118,37 @@ func (f *fakeCVRepo) GetEntryForVerify(ctx context.Context, entryID, slug string
 	return f.verifyRec, nil
 }
 
+func (f *fakeCVRepo) ListPendingOTSAnchors(ctx context.Context) ([]OTSPendingAnchor, error) {
+	return nil, nil
+}
+
+func (f *fakeCVRepo) UpdateAnchorOTS(ctx context.Context, artifactID string, proof []byte, submittedAt, confirmedAt *time.Time) error {
+	return nil
+}
+
+// fakeOTSClient is a no-op OTS client for tests
+type fakeOTSClient struct{}
+
+func (f *fakeOTSClient) Submit(ctx context.Context, hash []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (f *fakeOTSClient) Upgrade(ctx context.Context, otsProof []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (f *fakeOTSClient) GetProof(ctx context.Context, hash []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func setupTestService(repo *fakeCVRepo, storageKeys ...string) *Service {
+	store := newFakeStorage()
+	for _, key := range storageKeys {
+		store.blobs[key] = []byte(key)
+	}
+	return NewService(repo, store, &fakeOTSClient{})
+}
+
 func TestGetProfileAnchorsMissingReleaseWork(t *testing.T) {
 	repo := newFakeCVRepo()
 	repo.profile = &profileRow{ID: "u1", DisplayName: "Ada", Slug: "ada", TrustScore: 100}
@@ -86,7 +163,7 @@ func TestGetProfileAnchorsMissingReleaseWork(t *testing.T) {
 		VerifiedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}}
 
-	service := NewService(repo)
+	service := setupTestService(repo, "s3://ganji/work/v1")
 	profile, err := service.GetProfile(context.Background(), "ada")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -102,7 +179,7 @@ func TestGetProfileAnchorsMissingReleaseWork(t *testing.T) {
 		t.Fatalf("expected 1 anchor written, got %d", len(repo.inserted))
 	}
 	if got := repo.inserted["a1"]; got != hash.SumSHA256([]byte("s3://ganji/work/v1")) {
-		t.Errorf("expected sha256 anchor over the storage key, got %s", got)
+		t.Errorf("expected sha256 anchor over file content, got %s", got)
 	}
 	if len(profile.Entries) != 1 {
 		t.Fatalf("expected 1 entry in the profile, got %d", len(profile.Entries))
@@ -114,7 +191,7 @@ func TestGetProfileSkipsTrustScoreWhenUnchanged(t *testing.T) {
 	repo.profile = &profileRow{ID: "u1", DisplayName: "Ada", Slug: "ada", TrustScore: 125} // already correct for 1 deal
 	repo.releasedCount = 1
 
-	service := NewService(repo)
+	service := setupTestService(repo)
 	profile, err := service.GetProfile(context.Background(), "ada")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -129,7 +206,7 @@ func TestGetProfileSkipsTrustScoreWhenUnchanged(t *testing.T) {
 }
 
 func TestGetProfileNotFound(t *testing.T) {
-	service := NewService(newFakeCVRepo())
+	service := setupTestService(newFakeCVRepo())
 
 	_, err := service.GetProfile(context.Background(), "nobody")
 	if !errors.Is(err, ErrNotFound) {
@@ -138,7 +215,7 @@ func TestGetProfileNotFound(t *testing.T) {
 }
 
 func TestGetProfileRejectsEmptySlug(t *testing.T) {
-	service := NewService(newFakeCVRepo())
+	service := setupTestService(newFakeCVRepo())
 
 	_, err := service.GetProfile(context.Background(), "   ")
 	if !errors.Is(err, ErrInvalidInput) {
@@ -152,13 +229,13 @@ func TestAnchorReleasedDealWritesHashes(t *testing.T) {
 		{ArtifactID: "a1", StorageKey: "s3://ganji/work/v1", DealID: "d1"},
 	}
 
-	service := NewService(repo)
+	service := setupTestService(repo, "s3://ganji/work/v1")
 	if err := service.AnchorReleasedDeal(context.Background(), "u1", "d1"); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
 	if got := repo.inserted["a1"]; got != hash.SumSHA256([]byte("s3://ganji/work/v1")) {
-		t.Errorf("expected sha256 anchor over the storage key, got %s", got)
+		t.Errorf("expected sha256 anchor over file content, got %s", got)
 	}
 }
 
@@ -173,7 +250,7 @@ func TestVerifyEntryMatchesHash(t *testing.T) {
 		VerifiedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 
-	service := NewService(repo)
+	service := setupTestService(repo, "s3://ganji/work/v1")
 	result, err := service.VerifyEntry(context.Background(), "ada", "e1")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -196,11 +273,11 @@ func TestVerifyEntryDetectsTamperedAnchor(t *testing.T) {
 		ID:         "e1",
 		Hash:       hash.SumSHA256([]byte("s3://ganji/work/v1")),
 		Algorithm:  "sha256",
-		StorageKey: "s3://ganji/work/tampered", // storage reference changed
+		StorageKey: "s3://ganji/work/tampered", // file content changed
 		DealTitle:  "Build a site",
 	}
 
-	service := NewService(repo)
+	service := setupTestService(repo, "s3://ganji/work/tampered")
 	result, err := service.VerifyEntry(context.Background(), "ada", "e1")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -217,7 +294,7 @@ func TestVerifyEntryDetectsTamperedAnchor(t *testing.T) {
 func TestVerifyEntryHidesForeignSlug(t *testing.T) {
 	repo := newFakeCVRepo()
 
-	service := NewService(repo)
+	service := setupTestService(repo)
 	_, err := service.VerifyEntry(context.Background(), "someone-else", "e1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for a slug/entry mismatch, got %v", err)
@@ -225,7 +302,7 @@ func TestVerifyEntryHidesForeignSlug(t *testing.T) {
 }
 
 func TestVerifyEntryRejectsEmptyInput(t *testing.T) {
-	service := NewService(newFakeCVRepo())
+	service := setupTestService(newFakeCVRepo())
 
 	if _, err := service.VerifyEntry(context.Background(), "", "e1"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput for empty slug, got %v", err)
@@ -255,7 +332,7 @@ func TestGetProfileHandler(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/cv/ada", nil)
 	w := httptest.NewRecorder()
-	ginTestRouter(NewService(repo)).ServeHTTP(w, req)
+	ginTestRouter(setupTestService(repo, "s3://ganji/work/v1")).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -286,7 +363,7 @@ func TestGetProfileHandler(t *testing.T) {
 func TestGetProfileHandlerNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/cv/nobody", nil)
 	w := httptest.NewRecorder()
-	ginTestRouter(NewService(newFakeCVRepo())).ServeHTTP(w, req)
+	ginTestRouter(setupTestService(newFakeCVRepo())).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
@@ -306,7 +383,7 @@ func TestVerifyEntryHandler(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/cv/ada/verify/e1", nil)
 	w := httptest.NewRecorder()
-	ginTestRouter(NewService(repo)).ServeHTTP(w, req)
+	ginTestRouter(setupTestService(repo, "s3://ganji/work/v1")).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())

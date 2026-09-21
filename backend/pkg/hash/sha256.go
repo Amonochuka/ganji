@@ -3,6 +3,7 @@ package hash
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"hash"
 )
 
 // SumSHA256 returns the lowercase hex-encoded SHA-256 digest of data. Used
@@ -12,4 +13,9 @@ import (
 func SumSHA256(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// NewSHA256 returns a new hash.Hash computing the SHA256 checksum.
+func NewSHA256() hash.Hash {
+	return sha256.New()
 }
