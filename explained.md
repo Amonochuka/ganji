@@ -521,7 +521,7 @@ critical ones:
 ## 10. Known Issues & Bugs
 
 Documented bugs and doc-vs-code mismatches, roughly ordered by severity. Fix
-these before relying on the docs' claims. (Audited 2026-09-19.)
+these before relying on the docs' claims. (Audited 2026-09-21.)
 
 ### Money / secrets
 
@@ -565,7 +565,26 @@ these before relying on the docs' claims. (Audited 2026-09-19.)
    in `service_test.go` (hold created → insert fails → cancel called with the
    deal's `preimage_hash`, no row persisted).
 
-3. **No expiry handling for `disputed` deals.**
+3. **`cancelOrphanHold` passes a cancelled context on timeout or client disconnect.**
+   In `deals/service.go CreateDeal`, if `BeginTx` or `repo.CreateDeal` fails
+   because the client disconnected or the request context timed out
+   (`ctx.Done()`), `cancelOrphanHold(ctx, deal.PreimageHash)` is called with that
+   same cancelled context. `s.lnbits.CancelHold(ctx, ...)` immediately aborts
+   with `context.Canceled`, meaning the orphaned hold is **never** cancelled on
+   LNbits when the failure was caused by a client-side timeout or connection drop.
+   It should tear down the hold using `context.WithoutCancel(ctx)` or
+   `context.Background()` with a dedicated short timeout.
+
+4. **Clients can dispute unpaid deals (`awaiting_payment -> disputed`).**
+   In `deals/types.go`, `ValidTransitions[StatusAwaitingPayment]` includes
+   `StatusDisputed`. A client who has not paid a single satoshi can call
+   `POST /deals/:dealID/dispute` with a reason up to 2,000 characters and
+   inject an unfunded deal into the operator's arbitration queue. If an operator
+   resolves it with `release`, the backend attempts to settle an unpaid hold
+   invoice on LNbits. `StatusDisputed` should only be legal from funded states
+   (`locked`, `work_submitted`, `reviewing`).
+
+5. **No expiry handling for `disputed` deals.**
    `ListOpenBefore` only selects `awaiting_payment` and `locked`. A hold that
    expires/cancels while the deal is `disputed` returns the sats to the client
    on the network, but the DB row stays `disputed` forever — the money truth
@@ -576,69 +595,97 @@ these before relying on the docs' claims. (Audited 2026-09-19.)
 
 ### Correctness / robustness
 
-4. **CV self-heal failure breaks the public CV (contradicts the docs).**
+6. **Client is 403 Forbidden from listing or viewing deliverables (`ListArtifactsByDeal` and `GetArtifactByID`).**
+   In `deals/artifact_handler.go` and `service.go`, `ListArtifactsByDeal` and
+   `GetArtifactByID` only check `deal.FreelancerID != userID`. The client email
+   (`c.GetString("email")`) is neither read nor verified. Consequently, a
+   reviewing client who visits `GET /deals/:dealID/artifacts` receives a
+   `403 Forbidden`. They cannot inspect deliverables or obtain the
+   `artifactID`s needed to download them (even though `DownloadArtifact`
+   correctly permits client access). Both `ListArtifactsByDeal` and
+   `GetArtifactByID` must authorize by checking
+   `deal.FreelancerID == userID || strings.EqualFold(deal.ClientEmail, email)`.
+
+7. **Sweep ignores `work_submitted` deals when hold invoices expire.**
+   `ListOpenBefore` in `repository.go` only queries `WHERE status IN ($1, $2)`
+   (`awaiting_payment`, `locked`). If a freelancer submits work and the client
+   becomes inactive or ghosts, when the hold invoice reaches its TTL and
+   auto-expires on the Lightning Network, the deal is never swept to `refunded`.
+   The deal sits in `work_submitted` indefinitely, permanently out of sync with
+   the network.
+
+8. **CV self-heal failure breaks the public CV (contradicts the docs).**
    `cv/service.go GetProfile` returns an error from `healAnchors`, so a
    transient DB problem makes `GET /cv/:slug` 500 — while the code comment and
    `API_REFERENCE.md` promise self-healing that "never blocks reading the CV."
    Trust-score refresh already degrades gracefully; `healAnchors` should too
    (log + serve the last-known state).
 
-5. **Artifacts can be uploaded to `refunded` deals.**
+9. **Artifacts can be uploaded to `refunded` deals.**
    The upload gate in `service.go UploadArtifact` blocks
    `work_submitted`/`reviewing`/`released`/`disputed` but omits `refunded` — a
    terminal refunded deal should have a frozen deliverable set. The same block
    carries a stale `TEMP` comment about pre-escrow behavior.
 
-6. **Uploads are buffered, not streamed; the size cap is checked late.**
-   ~~gin's `FormFile` (`artifact_handler.go`) calls `ParseMultipartForm(32MB)`,
-   buffering the whole file into memory (or a temp file) before
-   `UploadArtifact` streams it to storage. The `MAX_UPLOAD_BYTES` cap is only
-   enforced after that buffering.~~ **Fixed 2026-09-19:**
-   `artifact_handler.go CreateArtifact` now streams the multipart body with
-   `c.Request.MultipartReader()` — no whole-file buffering. The `kind` field is
-   read with a 64-byte cap, the request body is bounded with
-   `http.MaxBytesReader(maxUploadBytes + 1 MiB)`, the per-file cap is still
-   enforced while streaming in `UploadArtifact`, and an oversized upload leaves
-   no blob (regression-tested). Note: `kind` must now precede the `artifact`
-   file part (the file is streamed the moment it is seen; there is no second
-   pass). Oversized body is mapped to 413; oversized file to 400.
+10. **Uploads are buffered, not streamed; the size cap is checked late.**
+    ~~gin's `FormFile` (`artifact_handler.go`) calls `ParseMultipartForm(32MB)`,
+    buffering the whole file into memory (or a temp file) before
+    `UploadArtifact` streams it to storage. The `MAX_UPLOAD_BYTES` cap is only
+    enforced after that buffering.~~ **Fixed 2026-09-19:**
+    `artifact_handler.go CreateArtifact` now streams the multipart body with
+    `c.Request.MultipartReader()` — no whole-file buffering. The `kind` field is
+    read with a 64-byte cap, the request body is bounded with
+    `http.MaxBytesReader(maxUploadBytes + 1 MiB)`, the per-file cap is still
+    enforced while streaming in `UploadArtifact`, and an oversized upload leaves
+    no blob (regression-tested). Note: `kind` must now precede the `artifact`
+    file part (the file is streamed the moment it is seen; there is no second
+    pass). Oversized body is mapped to 413; oversized file to 400.
 
-7. **CV anchor binds the storage key, not the file bytes.**
-   `cv/service.go` anchors `sha256(storage_key)`. Replacing the stored blob
-   under the same key passes `GET /cv/:slug/verify/:entryID`. The
-   "cryptographically anchored reputation" is only as strong as key
-   immutability; hashing the actual file bytes (size + content digest) at
-   release would make verification meaningful.
+11. **CV anchor binds the storage key, not the file bytes.**
+    `cv/service.go` anchors `sha256(storage_key)`. Replacing the stored blob
+    under the same key passes `GET /cv/:slug/verify/:entryID`. The
+    "cryptographically anchored reputation" is only as strong as key
+    immutability; hashing the actual file bytes (size + content digest) at
+    release would make verification meaningful.
 
-8. **`approve` racing `dispute` during the release window can drop the
-   dispute.**
-   In `releaseEscrow`, phase 3 re-validates only `CanTransition(disputed,
-   released)` (which returns true by design), so a dispute recorded while
-   phase 2's network legs were in flight is silently overwritten by the
-   release and the payout still happens. The `dispute_reason` is left behind
-   on a `released` row.
+12. **`approve` racing `dispute` during the release window can drop the
+    dispute.**
+    In `releaseEscrow`, phase 3 re-validates only `CanTransition(disputed,
+    released)` (which returns true by design), so a dispute recorded while
+    phase 2's network legs were in flight is silently overwritten by the
+    release and the payout still happens. The `dispute_reason` is left behind
+    on a `released` row.
 
 ### Minor / hardening
 
-9. **Webhook body read is unbounded on a public endpoint.**
-   ~~`webhook/handler.go` `io.ReadAll`s the request body before verifying the
-   `LNbits-Signature` (which is also skipped entirely when
-   `LNBITS_WEBHOOK_SECRET` is empty). No body cap → memory DoS vector and
-   LNbits-retry spam.~~ **Fixed 2026-09-19:** the body is now read through
-   `http.MaxBytesReader` (1 MiB cap — notifications are ~300 bytes); a body
-   over the cap is rejected with 413 before any parsing or signature work.
-   Regression-tested. The empty-secret skip remains a deployment concern:
-   set `LNBITS_WEBHOOK_SECRET` (a public endpoint with no auth at all).
+13. **Webhook body read is unbounded on a public endpoint.**
+    ~~`webhook/handler.go` `io.ReadAll`s the request body before verifying the
+    `LNbits-Signature` (which is also skipped entirely when
+    `LNBITS_WEBHOOK_SECRET` is empty). No body cap → memory DoS vector and
+    LNbits-retry spam.~~ **Fixed 2026-09-19:** the body is now read through
+    `http.MaxBytesReader` (1 MiB cap — notifications are ~300 bytes); a body
+    over the cap is rejected with 413 before any parsing or signature work.
+    Regression-tested. The empty-secret skip remains a deployment concern:
+    set `LNBITS_WEBHOOK_SECRET` (a public endpoint with no auth at all).
 
-10. **`Local.Save` is non-atomic.** A crash mid-write leaves a partial blob
+14. **`Local.Save` is non-atomic.** A crash mid-write leaves a partial blob
     that the download path will happily serve (and `Content-Length` comes from
     `os.Stat`, matching the partial file — so corrupt data is served with a
     valid-looking length). Write to a temp file + rename + fsync.
 
-11. **Notifications are freelancer-only and untracked.** `DealNotifier`
-    emails go only to the freelancer, and each send spawns an un-bounded
-    goroutine with no waitgroup/rate limit.
+15. **`/health` Ping ignores context timeout.**
+    In `health/handler.go`, a 3-second timeout context is created
+    (`context.WithTimeout(c.Request.Context(), 3*time.Second)`), but the handler
+    calls `dbConn.Ping()` (unbounded context) instead of `dbConn.PingContext(ctx)`.
+    If Postgres hangs or the connection pool is starved, the health check
+    blocks indefinitely instead of failing fast after 3 seconds.
 
-12. **Dead code / stale stubs.** `pkg/hash/preimage.go` and `pkg/sanitize`
+16. **Notifications are freelancer-only, un-refunded to clients, and untracked.**
+    `DealNotifier` emails go only to the freelancer, and each send spawns an
+    un-bounded goroutine with no waitgroup/rate limit. Notably, on `DealRefunded`,
+    the email is dispatched to the freelancer; the client—whose money was
+    actually returned—receives no notification whatsoever.
+
+17. **Dead code / stale stubs.** `pkg/hash/preimage.go` and `pkg/sanitize`
     are empty (preimage generation is inline in `deals/service.go`);
     `ErrPaymentNotPaid` (`deals/errors.go`) is never used.
