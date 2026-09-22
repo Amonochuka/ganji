@@ -8,11 +8,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Amonochuka/ganji-backend/internal/ots"
 	"github.com/Amonochuka/ganji-backend/internal/storage"
 	"github.com/Amonochuka/ganji-backend/pkg/hash"
 )
@@ -134,10 +137,6 @@ func (f *fakeOTSClient) Submit(ctx context.Context, hash []byte) ([]byte, error)
 }
 
 func (f *fakeOTSClient) Upgrade(ctx context.Context, otsProof []byte) ([]byte, error) {
-	return nil, nil
-}
-
-func (f *fakeOTSClient) GetProof(ctx context.Context, hash []byte) ([]byte, error) {
 	return nil, nil
 }
 
@@ -404,5 +403,126 @@ func TestVerifyEntryHandler(t *testing.T) {
 	}
 	if body.Verification.EntryID != "e1" {
 		t.Errorf("expected entry id e1, got %s", body.Verification.EntryID)
+	}
+}
+
+// fixtureBlockHeight is the Bitcoin block the shared OTS fixture proof is
+// attested at — see internal/ots/testdata.
+const fixtureBlockHeight = 891686
+
+// otsFixture returns the confirmed .ots proof, the artifact bytes it anchors,
+// and the artifact's content hash, using the real OTS test proof committed in
+// internal/ots/testdata (a proof produced by the OpenTimestamps project).
+func otsFixture(t *testing.T) (proof []byte, artifact []byte, artifactHash string) {
+	t.Helper()
+	base := filepath.Join("..", "ots", "testdata")
+	proof, err := os.ReadFile(filepath.Join(base, "flatearthers-united.txt.ots"))
+	if err != nil {
+		t.Fatalf("read fixture proof: %v", err)
+	}
+	artifact, err = os.ReadFile(filepath.Join(base, "flatearthers-united.txt"))
+	if err != nil {
+		t.Fatalf("read fixture artifact: %v", err)
+	}
+	return proof, artifact, hash.SumSHA256(artifact)
+}
+
+func TestVerifyEntryWithOTSProof(t *testing.T) {
+	proof, artifact, artifactHash := otsFixture(t)
+	confirmedAt := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+
+	repo := newFakeCVRepo()
+	repo.verifyRec = &entryRecord{
+		ID:             "e1",
+		Hash:           artifactHash,
+		Algorithm:      "sha256",
+		StorageKey:     "s3://ganji/work/v1",
+		DealTitle:      "Build a site",
+		VerifiedAt:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		OTSProof:       proof,
+		OTSConfirmedAt: &confirmedAt,
+	}
+
+	store := newFakeStorage()
+	store.blobs["s3://ganji/work/v1"] = artifact
+	service := NewService(repo, store, &fakeOTSClient{}, WithVerifier(ots.NewVerifier()))
+
+	result, err := service.VerifyEntry(context.Background(), "ada", "e1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.Valid {
+		t.Error("expected the entry to verify")
+	}
+	if !result.OTSVerified {
+		t.Error("expected the OTS proof to verify")
+	}
+	if result.OTSBlockHeight != fixtureBlockHeight {
+		t.Errorf("expected OTS block height %d, got %d", fixtureBlockHeight, result.OTSBlockHeight)
+	}
+	// Offline verification cannot derive a block time, so the confirmed-at
+	// timestamp recorded when the upgrade worker stored the proof is kept.
+	if result.OTSConfirmedAt == nil || !result.OTSConfirmedAt.Equal(confirmedAt) {
+		t.Errorf("expected OTSConfirmedAt %v, got %v", confirmedAt, result.OTSConfirmedAt)
+	}
+}
+
+func TestVerifyEntryWithoutOTSProof(t *testing.T) {
+	_, artifact, artifactHash := otsFixture(t)
+
+	repo := newFakeCVRepo()
+	repo.verifyRec = &entryRecord{
+		ID:         "e1",
+		Hash:       artifactHash,
+		Algorithm:  "sha256",
+		StorageKey: "s3://ganji/work/v1",
+		DealTitle:  "Build a site",
+	}
+
+	store := newFakeStorage()
+	store.blobs["s3://ganji/work/v1"] = artifact
+	service := NewService(repo, store, &fakeOTSClient{}, WithVerifier(ots.NewVerifier()))
+
+	result, err := service.VerifyEntry(context.Background(), "ada", "e1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.Valid {
+		t.Error("expected the entry to verify")
+	}
+	if result.OTSVerified {
+		t.Error("expected OTSVerified false when no proof is stored")
+	}
+}
+
+func TestVerifyEntryWithMismatchedOTSProof(t *testing.T) {
+	proof, _, _ := otsFixture(t) // proof anchors a different artifact
+	confirmedAt := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+
+	content := []byte("some other artifact content")
+	repo := newFakeCVRepo()
+	repo.verifyRec = &entryRecord{
+		ID:             "e1",
+		Hash:           hash.SumSHA256(content),
+		Algorithm:      "sha256",
+		StorageKey:     "s3://ganji/work/v1",
+		DealTitle:      "Build a site",
+		OTSProof:       proof,
+		OTSConfirmedAt: &confirmedAt,
+	}
+
+	store := newFakeStorage()
+	store.blobs["s3://ganji/work/v1"] = content
+	service := NewService(repo, store, &fakeOTSClient{}, WithVerifier(ots.NewVerifier()))
+
+	result, err := service.VerifyEntry(context.Background(), "ada", "e1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.Valid {
+		t.Error("expected the hash verification to pass")
+	}
+	if result.OTSVerified {
+		t.Error("expected OTSVerified false when the proof commits to a different digest")
 	}
 }
