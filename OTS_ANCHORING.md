@@ -100,8 +100,10 @@ these six steps.
 
 ### Step 0 — What gets stored (the data model)
 
-Migration `backend/migrations/000008_add_ots_proof_to_cv_entries.up.sql`
-extends the CV entries table (`cv_entries`), one row per artifact anchor:
+Migration `backend/migrations/000005_create_cv_entries_table.up.sql` defines the
+`cv_entries` table — one row per artifact anchor — with all three
+OpenTimestamps columns as part of the table (no separate column migration is
+needed; the schema is not yet in production):
 
 | Column | Meaning |
 |---|---|
