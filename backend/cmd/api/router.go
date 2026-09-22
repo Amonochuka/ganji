@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"git.intruders.space/public/opentimestamps/verifyer"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
@@ -56,7 +57,17 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	// OpenTimestamps client for blockchain anchoring
 	otsClient := ots.NewClient()
 
-	cvService := cv.NewService(cv.NewRepository(dbConn), uploadStore, otsClient)
+	// OTS proof verifier. Offline proof verification is always available;
+	// when OTS_ESPLORA_URL is set, attested block heights are additionally
+	// checked against the live Bitcoin chain (full block-header verification).
+	otsVerifier := ots.NewVerifier()
+	if cfg.OTSEsploraURL != "" {
+		otsVerifier = ots.NewVerifierWithChain(
+			verifyer.NewEsploraClient(cfg.OTSEsploraURL, time.Duration(cfg.OTSEsploraTimeoutSeconds)*time.Second),
+		)
+	}
+
+	cvService := cv.NewService(cv.NewRepository(dbConn), uploadStore, otsClient, cv.WithVerifier(otsVerifier))
 
 	lnbitsClient := lnbits.NewClient(
 		lnbits.Config{
@@ -96,19 +107,6 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	webhook.RegisterRoutes(router, webhookHandler)
 
 	cv.RegisterRoutes(router, cv.NewHandler(cvService))
-
-	// Start OTS proof upgrade worker (runs every 6 hours)
-	go func() {
-		ticker := time.NewTicker(6 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			if err := cvService.UpgradeOTSProofs(ctx); err != nil {
-				log.Printf("cv: ots upgrade worker error: %v", err)
-			}
-			cancel()
-		}
-	}()
 
 	return router, dealService, cvService
 }
