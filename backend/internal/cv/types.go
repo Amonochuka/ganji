@@ -71,22 +71,22 @@ type AnchorCandidate struct {
 // entryRecord carries everything VerifyEntry needs to recompute the
 // release-time hash from the artifact's current storage reference.
 type entryRecord struct {
-	ID              string
-	Hash            string
-	Algorithm       string
-	StorageKey      string
-	DealTitle       string
-	VerifiedAt      time.Time
-	OTSProof        []byte
-	OTSSubmittedAt  *time.Time
-	OTSConfirmedAt  *time.Time
+	ID             string
+	Hash           string
+	Algorithm      string
+	StorageKey     string
+	DealTitle      string
+	VerifiedAt     time.Time
+	OTSProof       []byte
+	OTSSubmittedAt *time.Time
+	OTSConfirmedAt *time.Time
 }
 
 // OTSPendingAnchor represents an anchor with a submitted but unconfirmed OTS proof
 type OTSPendingAnchor struct {
-	ArtifactID    string
-	EntryID       string
-	Hash          string
-	OTSProof      []byte
-	SubmittedAt   time.Time
+	ArtifactID  string
+	EntryID     string
+	Hash        string
+	OTSProof    []byte
+	SubmittedAt time.Time
 }
