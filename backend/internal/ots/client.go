@@ -3,225 +3,210 @@ package ots
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	otspkg "git.intruders.space/public/opentimestamps/ots"
+	"git.intruders.space/public/opentimestamps/varn"
 )
 
 var (
 	ErrSubmissionFailed = errors.New("ots: submission to calendar failed")
 	ErrInvalidResponse  = errors.New("ots: invalid calendar response")
 	ErrProofNotReady    = errors.New("ots: proof not yet confirmed")
+	ErrInvalidProof     = errors.New("ots: invalid or malformed proof")
 )
 
 const (
-	// Public OpenTimestamps calendar servers
+	// Public OpenTimestamps calendar pool servers. Pools forward each digest
+	// to a member calendar; the returned proof names the calendar that now
+	// holds it, which is the server upgrades go to.
 	calendarURL1 = "https://a.pool.opentimestamps.org"
 	calendarURL2 = "https://b.pool.opentimestamps.org"
-
-	// Calendar API endpoints
-	submitPath   = "/digest"
-	upgradePath  = "/upgrade"
-	proofPath    = "/proof"
 )
 
-// CalendarResponse represents the response from an OTS calendar
-type CalendarResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	OTS     string `json:"ots,omitempty"` // base64 encoded .ots file
-}
-
-// Client submits hashes to OpenTimestamps calendars and retrieves proofs
+// Client submits digests to OpenTimestamps calendars and later upgrades the
+// resulting proofs from "pending at a calendar" to "confirmed in a Bitcoin
+// block". Proofs are stored and returned as complete serialized .ots files.
 type Client struct {
 	httpClient *http.Client
 	calendars  []string
 }
 
-// NewClient creates a new OTS client with default public calendars
+// NewClient creates a new OTS client with the default public calendar pools.
 func NewClient() *Client {
 	return &Client{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 		calendars:  []string{calendarURL1, calendarURL2},
 	}
 }
 
-// Submit submits a hash to OpenTimestamps calendars and returns the initial .ots proof
-// The proof will be incomplete until the calendar commits to Bitcoin (hours to days)
+// NewClientWithCalendars creates an OTS client that submits to the given
+// calendar (or pool) servers instead of the public defaults. Useful for tests
+// and for operators running their own calendars.
+func NewClientWithCalendars(calendars ...string) *Client {
+	return &Client{
+		httpClient: &http.Client{Timeout: 60 * time.Second},
+		calendars:  calendars,
+	}
+}
+
+// Submit commits a 32-byte digest (the SHA-256 of an artifact) to the Open
+// Timestamps calendars and returns a complete serialized .ots proof file. The
+// proof starts life with a pending calendar attestation; it becomes bitcoin-
+// confirmed once the calendar mines it (see Upgrade).
 func (c *Client) Submit(ctx context.Context, hash []byte) ([]byte, error) {
-	hashHex := hex.EncodeToString(hash)
-
-	for _, cal := range c.calendars {
-		otsProof, err := c.submitToCalendar(ctx, cal, hashHex)
-		if err == nil {
-			return otsProof, nil
-		}
-		// Try next calendar on failure
+	if len(hash) != sha256Size {
+		return nil, fmt.Errorf("ots: digest must be 32 bytes, got %d", len(hash))
 	}
 
-	return nil, ErrSubmissionFailed
+	var firstErr error
+	for _, cal := range c.calendars {
+		seq, err := c.submitToCalendar(ctx, cal, hash)
+		if err == nil {
+			file := &otspkg.File{Digest: hash, Sequences: []otspkg.Sequence{seq}}
+			return file.SerializeToFile(), nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr == nil {
+		firstErr = ErrSubmissionFailed
+	}
+	return nil, firstErr
 }
 
-func (c *Client) submitToCalendar(ctx context.Context, calendarURL, hashHex string) ([]byte, error) {
-	url := calendarURL + submitPath
-
-	reqBody := map[string]string{"digest": hashHex}
-	jsonBody, _ := json.Marshal(reqBody)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+func (c *Client) submitToCalendar(ctx context.Context, calendarURL string, hash []byte) (otspkg.Sequence, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, calendarURL+"/digest", bytes.NewReader(hash))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/vnd.opentimestamps.v1")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrSubmissionFailed, err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProofBytes))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrSubmissionFailed, err)
 	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d: %s", ErrSubmissionFailed, resp.StatusCode, string(body))
-	}
-
-	var calResp CalendarResponse
-	if err := json.Unmarshal(body, &calResp); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-	}
-
-	if !calResp.Success || calResp.OTS == "" {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidResponse, calResp.Message)
-	}
-
-	// Decode base64 OTS file
-	otsProof := make([]byte, len(calResp.OTS))
-	_, err = hex.Decode(otsProof, []byte(calResp.OTS))
-	if err != nil {
-		// Try base64 decode
-		otsProof = make([]byte, len(calResp.OTS))
-		n, err := hex.Decode(otsProof, []byte(calResp.OTS))
-		if err != nil {
-			return nil, fmt.Errorf("%w: failed to decode ots: %v", ErrInvalidResponse, err)
-		}
-		otsProof = otsProof[:n]
-	}
-
-	return otsProof, nil
-}
-
-// Upgrade requests an upgraded proof from calendars (after Bitcoin confirmation)
-// Returns the upgraded proof or ErrProofNotReady if not yet confirmed
-func (c *Client) Upgrade(ctx context.Context, otsProof []byte) ([]byte, error) {
-	for _, cal := range c.calendars {
-		upgraded, err := c.upgradeAtCalendar(ctx, cal, otsProof)
-		if err == nil {
-			return upgraded, nil
-		}
-		if errors.Is(err, ErrProofNotReady) {
-			return nil, ErrProofNotReady
-		}
-	}
-	return nil, ErrSubmissionFailed
-}
-
-func (c *Client) upgradeAtCalendar(ctx context.Context, calendarURL string, otsProof []byte) ([]byte, error) {
-	url := calendarURL + upgradePath
-
-	// OTS file is binary, send as-is
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(otsProof))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode == http.StatusAccepted {
-		// Proof not ready yet
-		return nil, ErrProofNotReady
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d: %s", ErrSubmissionFailed, resp.StatusCode, string(body))
-	}
-
-	return body, nil
-}
-
-// GetProof retrieves the current proof for a hash from calendars
-func (c *Client) GetProof(ctx context.Context, hash []byte) ([]byte, error) {
-	hashHex := hex.EncodeToString(hash)
-
-	for _, cal := range c.calendars {
-		proof, err := c.getProofAtCalendar(ctx, cal, hashHex)
-		if err == nil {
-			return proof, nil
-		}
-	}
-	return nil, ErrSubmissionFailed
-}
-
-func (c *Client) getProofAtCalendar(ctx context.Context, calendarURL, hashHex string) ([]byte, error) {
-	url := calendarURL + proofPath + "/" + hashHex
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrProofNotReady
-	}
-
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: status %d", ErrSubmissionFailed, resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	seqs, err := otspkg.ParseTimestamp(varn.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+	if len(seqs) != 1 {
+		return nil, fmt.Errorf("%w: expected 1 sequence, got %d", ErrInvalidResponse, len(seqs))
+	}
+	seq := seqs[0]
+	if att := seq.GetAttestation(); att.CalendarServerURL == "" {
+		return nil, fmt.Errorf("%w: response has no pending calendar attestation", ErrInvalidResponse)
+	}
+	return seq, nil
 }
 
-// VerifyProof verifies an OTS proof against a hash
-// Returns the Bitcoin block height and timestamp if valid
-func VerifyProof(otsProof []byte, hash []byte) (blockHeight int, timestamp time.Time, err error) {
-	// This is a simplified verification - in production you'd use
-	// a proper OTS library like github.com/opentimestamps/opentimestamps-go
-	// For now, we just check the proof commits to our hash
-	
-	// Parse the OTS file (simplified - real implementation would parse the full format)
-	// The proof should contain our hash in a merkle tree leading to a Bitcoin block
-	
-	// TODO: Implement full OTS verification with bitcoin block header validation
-	// For now return a placeholder
-	return 0, time.Time{}, errors.New("ots: full verification not implemented - use opentimestamps-go library")
+// Upgrade asks the calendar that holds a pending proof whether it has been
+// mined into a Bitcoin block yet. When it has, the returned proof is the same
+// .ots file with the pending sequence replaced by the bitcoin-attested one
+// (still serialized as a complete .ots file). While the proof is still
+// pending, ErrProofNotReady is returned.
+func (c *Client) Upgrade(ctx context.Context, otsProof []byte) ([]byte, error) {
+	file, err := parseProofFile(otsProof)
+	if err != nil {
+		return nil, err
+	}
+
+	upgraded := false
+	for i, seq := range file.Sequences {
+		att := seq.GetAttestation()
+		if att.BitcoinBlockHeight > 0 || att.CalendarServerURL == "" {
+			continue // already bitcoin-confirmed, or a sequence we cannot upgrade
+		}
+
+		commitment, _ := seq.Compute(file.Digest)
+		tail, err := c.upgradeAtCalendar(ctx, att.CalendarServerURL, commitment)
+		if err != nil {
+			return nil, err
+		}
+
+		// Splice the calendar's upgraded tail onto the pending sequence,
+		// replacing the pending attestation with the real commitment path.
+		newSeq := make(otspkg.Sequence, 0, len(seq)+len(tail)-1)
+		newSeq = append(newSeq, seq[:len(seq)-1]...)
+		newSeq = append(newSeq, tail...)
+		file.Sequences[i] = newSeq
+		upgraded = true
+	}
+
+	if !upgraded {
+		// Nothing left to confirm — either already fully upgraded or the file
+		// only carries bitcoin attestations. The worker treats this like a
+		// pending proof and will simply skip it next cycle.
+		return nil, ErrProofNotReady
+	}
+	return file.SerializeToFile(), nil
 }
 
-// Hash computes SHA256 of data for OTS submission
-func Hash(data []byte) []byte {
-	sum := sha256.Sum256(data)
-	return sum[:]
+func (c *Client) upgradeAtCalendar(ctx context.Context, calendarURL string, commitment []byte) (otspkg.Sequence, error) {
+	url := calendarURL + "/timestamp/" + hex.EncodeToString(commitment)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.opentimestamps.v1")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSubmissionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// The calendar knows the commitment but has not mined it yet.
+		return nil, ErrProofNotReady
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: status %d", ErrSubmissionFailed, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProofBytes))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSubmissionFailed, err)
+	}
+
+	seqs, err := otspkg.ParseTimestamp(varn.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+	if len(seqs) != 1 {
+		return nil, fmt.Errorf("%w: expected 1 sequence, got %d", ErrInvalidResponse, len(seqs))
+	}
+	return seqs[0], nil
+}
+
+const (
+	sha256Size    = 32
+	maxProofBytes = 1 << 20 // 1 MiB — real proofs are a few KB; cap the public endpoints
+)
+
+// parseProofFile parses a serialized .ots proof file.
+func parseProofFile(otsProof []byte) (*otspkg.File, error) {
+	file, err := otspkg.ParseOTSFile(varn.NewBuffer(otsProof))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidProof, err)
+	}
+	return file, nil
 }
