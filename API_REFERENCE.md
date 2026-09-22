@@ -572,8 +572,10 @@ Get a specific verification.
 
 Every released deal anchors its artifacts as hash-verified entries on the
 freelancer's public **Live CV** (approve → `released` writes a SHA-256 anchor
-per artifact; see the release flow in section 3). Both endpoints are public —
-the slug is a shareable handle, not a secret.
+per artifact; see the release flow in section 3), and submits each entry's
+hash to the public OpenTimestamps calendars for a permanent Bitcoin
+timestamp (`internal/ots`). Both endpoints are public — the slug is a
+shareable handle, not a secret.
 
 ### `GET /cv/:slug`
 
@@ -623,6 +625,16 @@ intact, or detecting that the anchor no longer matches the artifact.
 A slug/entry mismatch returns `404` exactly like a missing entry, so the
 endpoint never confirms an entry's existence under a foreign slug.
 
+When the entry carries a stored OpenTimestamps proof (a `.ots` file anchored
+in `cv_entries`), the response also reports the **blockchain timestamp**:
+`ots_verified` is true when the proof re-parses and its embedded digest commits
+to the entry's hash (the merkle path is replayed against the Bitcoin
+transaction the proof embeds), `ots_block_height` is the attested lowest block
+height, and `ots_confirmed_at` is the block-header time when the proof was
+checked against a live chain (otherwise the time the upgrade worker recorded
+confirmation). Live block-header verification is optional — set
+`OTS_ESPLORA_URL` to enable it; without it the offline proof check still runs.
+
 **Response `200`**
 ```json
 {
@@ -634,7 +646,11 @@ endpoint never confirms an entry's existence under a foreign slug.
     "algorithm": "sha256",
     "matches_current": true,
     "deal_title": "Build a site",
-    "verified_at": "2026-08-26T12:00:00Z"
+    "verified_at": "2026-08-26T12:00:00Z",
+    "ots_verified": true,
+    "ots_proof": "...",
+    "ots_confirmed_at": "2026-08-26T12:00:00Z",
+    "ots_block_height": 891686
   }
 }
 ```

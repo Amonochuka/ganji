@@ -732,6 +732,9 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 | `STORAGE_PATH` | ❌ | ./uploads | Local artifact storage path |
 | `MAX_UPLOAD_BYTES` | ❌ | 10,485,760 | Max artifact size (10MB) |
 | `OPERATOR_EMAILS` | ❌ | [] | Comma-separated operator emails |
+| `OTS_ESPLORA_URL` | ❌ | "" | Esplora API for live OTS block-header verification (empty = offline proof check only) |
+| `OTS_ESPLORA_TIMEOUT_SECONDS` | ❌ | 10 | Per-request esplora timeout |
+| `OTS_UPGRADE_INTERVAL_SECONDS` | ❌ | 21,600 | OTS proof-upgrade worker interval (6 hours) |
 
 ### Migrations
 

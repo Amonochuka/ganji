@@ -492,7 +492,23 @@ Backend:
   (`c***@example.com`) outside approve/dispute contexts, or drop it from list
   views entirely.
 
-- **OpenTimestamps (OTS) integration** (`internal/ots/`, `internal/cv/`): artifact hashes submitted to public OTS calendars on deal release; initial `.ots` proof stored in `cv_entries`. Background worker (`router.go`) upgrades proofs every 6h via `/upgrade` endpoint. `GET /cv/:slug/verify/:entryID` returns `OTSVerified`, `OTSBlockHeight`, `OTSConfirmedAt`. Full Bitcoin block header verification pending `opentimestamps-go` library integration (see §10 Known Issues).
+- **OpenTimestamps (OTS) integration** (`internal/ots/`, `internal/cv/`,
+  `cmd/api/workers.go`): **done.** On deal release each artifact hash is
+  submitted to the public OTS calendar pools (`ots.Client.Submit`, raw
+  32-byte digest over `/digest`) and the pending `.ots` proof is stored in
+  `cv_entries.ots_proof` as a complete serialized detached proof file. A
+  background worker (default 6 h; `OTS_UPGRADE_INTERVAL_SECONDS`) asks the
+  holding calendar `GET <calendar>/timestamp/<commitment>` for each pending
+  proof and, once mined into a Bitcoin block, stores the bitcoin-attested
+  `.ots` and sets `ots_confirmed_at`. `GET /cv/:slug/verify/:entryID` returns
+  `OTSVerified`, `OTSBlockHeight`, `OTSConfirmedAt` via
+  `internal/ots/verify.go`: re-parse the proof, check its embedded digest
+  matches the artifact hash, replay the merkle path against the Bitcoin
+  transaction the proof embeds (offline, always), and — when
+  `OTS_ESPLORA_URL` is configured — validate the attested block's merkle root
+  against the live chain (esplora or bitcoind backend, degrades gracefully
+  when the chain source is unreachable). The whole pipeline is explained in
+  plain English and jargon in [`OTS_ANCHORING.md`](./OTS_ANCHORING.md).
 
 Known bugs and doc-vs-code mismatches are tracked in **§10 Known Issues** below.
 
@@ -691,3 +707,21 @@ these before relying on the docs' claims. (Audited 2026-09-21.)
 17. **Dead code / stale stubs.** `pkg/hash/preimage.go` and `pkg/sanitize`
     are empty (preimage generation is inline in `deals/service.go`);
     `ErrPaymentNotPaid` (`deals/errors.go`) is never used.
+
+18. **The OTS proof pipeline was non-functional end-to-end.**
+    ~~`internal/ots/client.go` spoke the wrong calendar protocol: `POST
+    /digest` sent JSON `{"digest": "<hex>"}` (real calendars want the raw
+    32-byte digest and answer `application/vnd.opentimestamps.v1` with a bare
+    timestamp; the JSON shape is rejected with "digest too long"), the
+    upgrade path hit the long-removed `POST /upgrade` route (calendars now
+    serve `GET <calendar>/timestamp/<commitment-hex>`, 404 = still pending),
+    stored proofs were bare sequences that no longer parse as `.ots` files,
+    and `ots.VerifyProof` was a stub — so `GET /cv/:slug/verify/:entryID`
+    never reported `OTSVerified`.~~ **Fixed 2026-09-22:** the client now speaks
+    the real protocol and persists complete serialized `.ots` files; the
+    upgrade worker (moved to `cmd/api/workers.go`, interval via
+    `OTS_UPGRADE_INTERVAL_SECONDS`) confirms proofs through
+    `/timestamp/`; verification lives in `internal/ots/verify.go` — offline
+    replay always, optional live block-header check via `OTS_ESPLORA_URL` —
+    and is regression-tested against a real confirmed proof
+    (`internal/ots/testdata`, attested at Bitcoin block 891686).

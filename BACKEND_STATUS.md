@@ -194,6 +194,9 @@ Payment-not-successful returns `200` because the webhook was received and unders
 | `STORAGE_PATH` | No | Artifact blob directory (default: `./uploads`) |
 | `MAX_UPLOAD_BYTES` | No | Per-artifact upload cap (default: 10 MB) |
 | `OPERATOR_EMAILS` | No | Comma-separated emails promoted to arbitration operators at boot |
+| `OTS_ESPLORA_URL` | No | Esplora API endpoint for live Bitcoin block-header verification of OTS proofs (empty = offline proof check only) |
+| `OTS_ESPLORA_TIMEOUT_SECONDS` | No | Per-request esplora timeout (default: 10) |
+| `OTS_UPGRADE_INTERVAL_SECONDS` | No | OTS proof-upgrade worker cadence (default: 21600s = 6h) |
 | `PORT` | No | Server port (default: `8080`) |
 
 ---
