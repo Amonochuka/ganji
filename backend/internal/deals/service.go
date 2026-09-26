@@ -192,7 +192,9 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 // returned — the caller's original error is the one the client must see (and
 // the hold-expiry sweep is the backstop for anything left standing).
 func (s *Service) cancelOrphanHold(ctx context.Context, preimageHash string) {
-	if _, err := s.lnbits.CancelHold(ctx, preimageHash); err != nil {
+	cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := s.lnbits.CancelHold(cancelCtx, preimageHash); err != nil {
 		log.Printf("warn: cancelling orphaned hold %s: %v", preimageHash, err)
 	}
 }
