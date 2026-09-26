@@ -116,9 +116,10 @@ func (h *Handler) CreateArtifact(c *gin.Context) {
 
 func (h *Handler) ListArtifactsByDeal(c *gin.Context) {
 	userID := c.GetString("userID")
+	email := c.GetString("email")
 	dealID := c.Param("dealID")
 
-	artifacts, err := h.service.ListArtifactsByDeal(c.Request.Context(), userID, dealID)
+	artifacts, err := h.service.ListArtifactsByDeal(c.Request.Context(), userID, email, dealID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -142,10 +143,11 @@ func (h *Handler) ListArtifactsByDeal(c *gin.Context) {
 
 func (h *Handler) GetArtifactByID(c *gin.Context) {
 	userID := c.GetString("userID")
+	email := c.GetString("email")
 	artifactID := c.Param("artifactID")
 	dealID := c.Param("dealID")
 
-	artifact, err := h.service.GetArtifactByID(c.Request.Context(), userID, dealID, artifactID)
+	artifact, err := h.service.GetArtifactByID(c.Request.Context(), userID, email, dealID, artifactID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):

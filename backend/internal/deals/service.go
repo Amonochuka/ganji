@@ -1194,7 +1194,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 func (s *Service) GetArtifactByID(
-	ctx context.Context, userID, dealID, artifactID string) (*Artifact, error) {
+	ctx context.Context, userID, email, dealID, artifactID string) (*Artifact, error) {
 
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
@@ -1218,14 +1218,14 @@ func (s *Service) GetArtifactByID(
 		return nil, err
 	}
 
-	if deal.FreelancerID != userID {
+	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
 		return nil, ErrForbidden
 	}
 
 	return artifact, nil
 }
 
-func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, dealID string) ([]Artifact, error) {
+func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, email, dealID string) ([]Artifact, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
@@ -1235,7 +1235,7 @@ func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, dealID string
 		return nil, err
 	}
 
-	if deal.FreelancerID != userID {
+	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
 		return nil, ErrForbidden
 	}
 
