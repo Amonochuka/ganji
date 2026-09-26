@@ -930,9 +930,9 @@ func (s *Service) notifyRefunded(deal *Deal) {
 // When a hold invoice expires (or was never funded and is now UNPAID /
 // EXPIRED / CANCELLED), any committed funds have already returned to the
 // client on the Lightning network — so the deal should be recorded as
-// refunded instead of sitting in awaiting_payment/locked forever. Holds that
-// LNbits still reports as held (or settled) are left untouched. Returns the
-// number of deals reconciled to refunded.
+// refunded instead of sitting in awaiting_payment/locked/disputed forever.
+// Holds that LNbits still reports as held (or settled) are left untouched.
+// Returns the number of deals reconciled to refunded.
 func (s *Service) SweepExpiredHolds(ctx context.Context, cutoff time.Time) (int, error) {
 	open, err := s.repo.ListOpenBefore(ctx, cutoff)
 	if err != nil {
@@ -955,7 +955,7 @@ func (s *Service) SweepExpiredHolds(ctx context.Context, cutoff time.Time) (int,
 		switch payment.Details.Status {
 		case "UNPAID", "EXPIRED", "CANCELLED":
 			// Guard against racing an approve/refund: only sweep if the deal is
-			// still in the state this sweep read (awaiting_payment / locked).
+			// still in the state this sweep read (awaiting_payment / locked / disputed).
 			transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, deal.Status, StatusRefunded)
 			if err != nil || !transitioned {
 				// Another caller already moved the deal (e.g. just approved it).
