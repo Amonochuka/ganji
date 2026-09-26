@@ -187,9 +187,10 @@ func dealsView(deals []Deal) []DealView {
 //   - a client who changes their mind after disputing can still approve:
 //     disputed -> released settles the hold and pays the freelancer.
 var ValidTransitions = map[Status][]Status{
-	StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusDisputed, StatusRefunded},
+	StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusRefunded},
 	// refunded stays reachable from awaiting_payment for the hold-expiry
 	// sweep (expired/cancelled/unfunded holds). Clients cannot reach it.
+	// disputed removed: client cannot dispute an unpaid deal.
 	StatusLocked: {StatusWorkSubmitted, StatusDisputed},
 	// work_submitted -> released/disputed is allowed because the client can
 	// approve or dispute immediately on submission; reviewing is an optional
