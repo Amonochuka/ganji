@@ -33,6 +33,7 @@ type CVAnchorer interface {
 // DealNotifier delivers best-effort notifications after a durable state
 // transition. Implementations must never make escrow correctness depend on
 // notification delivery.
+// Both freelancer and client are notified where applicable.
 type DealNotifier interface {
 	PaymentLocked(ctx context.Context, deal *Deal)
 	DealDisputed(ctx context.Context, deal *Deal)

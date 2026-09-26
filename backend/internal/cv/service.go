@@ -2,6 +2,7 @@ package cv
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"hash"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/Amonochuka/ganji-backend/internal/ots"
 	"github.com/Amonochuka/ganji-backend/internal/storage"
-	ghash "github.com/Amonochuka/ganji-backend/pkg/hash"
 )
 
 // Trust-score derivation. Every freelancer starts at the signup default
@@ -55,7 +55,7 @@ func NewService(repo CVRepository, store storage.Storage, otsClient OTSClient, o
 		repo:      repo,
 		store:     store,
 		otsClient: otsClient,
-		hasher:    ghash.NewSHA256,
+		hasher:    sha256.New,
 	}
 	for _, opt := range opts {
 		opt(s)

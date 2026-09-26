@@ -3,8 +3,10 @@ package cv
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,8 +19,12 @@ import (
 
 	"github.com/Amonochuka/ganji-backend/internal/ots"
 	"github.com/Amonochuka/ganji-backend/internal/storage"
-	"github.com/Amonochuka/ganji-backend/pkg/hash"
 )
+
+// testHash returns the hex-encoded SHA256 of data (replaces pkg/testHash)
+func testHash(data []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
 
 // fakeStorage is a minimal in-memory Storage for tests.
 type fakeStorage struct {
@@ -158,7 +164,7 @@ func TestGetProfileAnchorsMissingReleaseWork(t *testing.T) {
 	repo.entries = []Entry{{
 		ID: "e1", DealTitle: "Build a site", AmountSats: 5000,
 		SourcePlatform: "telegram", ArtifactKind: "source_code",
-		Hash:       hash.SumSHA256([]byte("s3://ganji/work/v1")),
+		Hash:       testHash([]byte("s3://ganji/work/v1")),
 		VerifiedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}}
 
@@ -177,7 +183,7 @@ func TestGetProfileAnchorsMissingReleaseWork(t *testing.T) {
 	if len(repo.inserted) != 1 {
 		t.Fatalf("expected 1 anchor written, got %d", len(repo.inserted))
 	}
-	if got := repo.inserted["a1"]; got != hash.SumSHA256([]byte("s3://ganji/work/v1")) {
+	if got := repo.inserted["a1"]; got != testHash([]byte("s3://ganji/work/v1")) {
 		t.Errorf("expected sha256 anchor over file content, got %s", got)
 	}
 	if len(profile.Entries) != 1 {
@@ -233,7 +239,7 @@ func TestAnchorReleasedDealWritesHashes(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if got := repo.inserted["a1"]; got != hash.SumSHA256([]byte("s3://ganji/work/v1")) {
+	if got := repo.inserted["a1"]; got != testHash([]byte("s3://ganji/work/v1")) {
 		t.Errorf("expected sha256 anchor over file content, got %s", got)
 	}
 }
@@ -242,7 +248,7 @@ func TestVerifyEntryMatchesHash(t *testing.T) {
 	repo := newFakeCVRepo()
 	repo.verifyRec = &entryRecord{
 		ID:         "e1",
-		Hash:       hash.SumSHA256([]byte("s3://ganji/work/v1")),
+		Hash:       testHash([]byte("s3://ganji/work/v1")),
 		Algorithm:  "sha256",
 		StorageKey: "s3://ganji/work/v1",
 		DealTitle:  "Build a site",
@@ -270,7 +276,7 @@ func TestVerifyEntryDetectsTamperedAnchor(t *testing.T) {
 	repo := newFakeCVRepo()
 	repo.verifyRec = &entryRecord{
 		ID:         "e1",
-		Hash:       hash.SumSHA256([]byte("s3://ganji/work/v1")),
+		Hash:       testHash([]byte("s3://ganji/work/v1")),
 		Algorithm:  "sha256",
 		StorageKey: "s3://ganji/work/tampered", // file content changed
 		DealTitle:  "Build a site",
@@ -325,7 +331,7 @@ func TestGetProfileHandler(t *testing.T) {
 	repo.entries = []Entry{{
 		ID: "e1", DealTitle: "Build a site", AmountSats: 5000,
 		SourcePlatform: "telegram", ArtifactKind: "source_code",
-		Hash:       hash.SumSHA256([]byte("s3://ganji/work/v1")),
+		Hash:       testHash([]byte("s3://ganji/work/v1")),
 		VerifiedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}}
 
@@ -373,7 +379,7 @@ func TestVerifyEntryHandler(t *testing.T) {
 	repo := newFakeCVRepo()
 	repo.verifyRec = &entryRecord{
 		ID:         "e1",
-		Hash:       hash.SumSHA256([]byte("s3://ganji/work/v1")),
+		Hash:       testHash([]byte("s3://ganji/work/v1")),
 		Algorithm:  "sha256",
 		StorageKey: "s3://ganji/work/v1",
 		DealTitle:  "Build a site",
@@ -424,7 +430,7 @@ func otsFixture(t *testing.T) (proof []byte, artifact []byte, artifactHash strin
 	if err != nil {
 		t.Fatalf("read fixture artifact: %v", err)
 	}
-	return proof, artifact, hash.SumSHA256(artifact)
+	return proof, artifact, testHash(artifact)
 }
 
 func TestVerifyEntryWithOTSProof(t *testing.T) {
@@ -503,7 +509,7 @@ func TestVerifyEntryWithMismatchedOTSProof(t *testing.T) {
 	repo := newFakeCVRepo()
 	repo.verifyRec = &entryRecord{
 		ID:             "e1",
-		Hash:           hash.SumSHA256(content),
+		Hash:           testHash(content),
 		Algorithm:      "sha256",
 		StorageKey:     "s3://ganji/work/v1",
 		DealTitle:      "Build a site",

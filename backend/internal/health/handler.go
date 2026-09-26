@@ -19,7 +19,7 @@ func Handler(dbConn *sql.DB, lnbitsClient *lnbits.Client) gin.HandlerFunc {
 
 		status := gin.H{"status": "ok"}
 
-		if err := dbConn.Ping(); err != nil {
+		if err := dbConn.PingContext(ctx); err != nil {
 			status["status"] = "error"
 			status["db"] = "unreachable"
 		} else {

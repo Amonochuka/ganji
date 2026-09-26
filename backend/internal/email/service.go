@@ -45,44 +45,53 @@ func (s *Service) Enabled() bool {
 // PaymentLocked, DealDisputed, DealReleased and DealRefunded satisfy
 // deals.DealNotifier. They run asynchronously with a bounded lifetime so a
 // slow mail server never delays an escrow state transition.
+// Both freelancer and client are notified.
 func (s *Service) PaymentLocked(_ context.Context, deal *deals.Deal) {
-	s.notify(deal, func(ctx context.Context, to, name string) error {
+	s.notifyBoth(deal, func(ctx context.Context, to, name string) error {
 		return s.SendPaymentReceived(ctx, to, name, deal.Title, deal.AmountSats, deal.ID)
 	})
 }
 
 func (s *Service) DealDisputed(_ context.Context, deal *deals.Deal) {
-	s.notify(deal, func(ctx context.Context, to, name string) error {
+	s.notifyBoth(deal, func(ctx context.Context, to, name string) error {
 		return s.SendDealDisputed(ctx, to, name, deal.Title, deal.DisputeReason, deal.ID)
 	})
 }
 
 func (s *Service) DealReleased(_ context.Context, deal *deals.Deal) {
-	s.notify(deal, func(ctx context.Context, to, name string) error {
+	s.notifyBoth(deal, func(ctx context.Context, to, name string) error {
 		return s.SendDealReleased(ctx, to, name, deal.Title, deal.ID)
 	})
 }
 
 func (s *Service) DealRefunded(_ context.Context, deal *deals.Deal) {
-	s.notify(deal, func(ctx context.Context, to, name string) error {
+	s.notifyBoth(deal, func(ctx context.Context, to, name string) error {
 		return s.SendDealRefunded(ctx, to, name, deal.Title, deal.ID)
 	})
 }
 
-func (s *Service) notify(deal *deals.Deal, send func(context.Context, string, string) error) {
+// notifyBoth sends the notification to both freelancer and client.
+func (s *Service) notifyBoth(deal *deals.Deal, send func(context.Context, string, string) error) {
 	if !s.Enabled() || s.users == nil {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 		defer cancel()
+
+		// Notify freelancer
 		user, err := s.users.FindByID(ctx, deal.FreelancerID)
 		if err != nil || user == nil {
 			log.Printf("email: look up freelancer for deal %s: %v", deal.ID, err)
-			return
-		}
-		if err := send(ctx, user.Email, FirstName(user.DisplayName)); err != nil {
+		} else if err := send(ctx, user.Email, FirstName(user.DisplayName)); err != nil {
 			log.Printf("email: notify freelancer for deal %s: %v", deal.ID, err)
+		}
+
+		// Notify client (client_email is the email on the deal)
+		if deal.ClientEmail != "" {
+			if err := send(ctx, deal.ClientEmail, "Client"); err != nil {
+				log.Printf("email: notify client for deal %s: %v", deal.ID, err)
+			}
 		}
 	}()
 }
