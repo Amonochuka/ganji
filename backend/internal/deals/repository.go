@@ -356,18 +356,19 @@ func (r *Repository) ClearPayoutTracking(ctx context.Context, dealID string) err
 	return nil
 }
 
-// ListOpenBefore returns deals still awaiting payment, locked, or disputed that
-// were created before the cutoff — the candidates for the hold-expiry sweep.
-// Disputed deals are included because if the hold expires while disputed, the
-// network returns funds to the client but the DB stays disputed forever.
+// ListOpenBefore returns deals still awaiting payment, locked, work_submitted,
+// reviewing, or disputed that were created before the cutoff — the candidates
+// for the hold-expiry sweep. Disputed, work_submitted, and reviewing deals are
+// included because if the hold expires while in these states, the network
+// returns funds to the client but the DB stays in the old state forever.
 func (r *Repository) ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error) {
 	query := "SELECT" + dealColumns + `
 		FROM deals
-		WHERE status IN ($1, $2, $3) AND created_at < $4
+		WHERE status IN ($1, $2, $3, $4, $5) AND created_at < $6
 		ORDER BY created_at ASC;
 	`
 
-	rows, err := r.q.QueryContext(ctx, query, StatusAwaitingPayment, StatusLocked, StatusDisputed, cutoff)
+	rows, err := r.q.QueryContext(ctx, query, StatusAwaitingPayment, StatusLocked, StatusWorkSubmitted, StatusReviewing, StatusDisputed, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list open deals before cutoff: %w", err)
 	}
