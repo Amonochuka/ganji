@@ -374,6 +374,7 @@ func (s *Service) releaseEscrow(ctx context.Context, dealID string, opts release
 	if err != nil {
 		return nil, err
 	}
+	originalStatus := deal.Status
 	if err := opts.authorize(deal); err != nil {
 		return nil, err
 	}
@@ -457,6 +458,13 @@ func (s *Service) releaseEscrow(ctx context.Context, dealID string, opts release
 	deal2, err := repo2.GetDealForUpdate(ctx, dealID)
 	if err != nil {
 		return nil, err
+	}
+	// If the deal was NOT disputed in phase 1 but IS disputed now, a client
+	// disputed during the network legs. Abort — the client explicitly froze
+	// the funds; they must approve again from disputed (or operator resolves).
+	// This prevents approve from silently overwriting a dispute.
+	if originalStatus != StatusDisputed && deal2.Status == StatusDisputed {
+		return nil, fmt.Errorf("%w: deal was disputed during release; cannot auto-release", ErrInvalidTransition)
 	}
 	if !CanTransition(deal2.Status, StatusReleased) {
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal2.Status, StatusReleased)
