@@ -11,6 +11,22 @@ Ganji uses **LNbits** as the Lightning wallet backend. You need a wallet with tw
 
 ---
 
+## Prerequisites
+
+### PostgreSQL Database
+```bash
+# Quick Docker PostgreSQL
+docker run -d --name ganji-db \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=ganji \
+  -p 5432:5432 \
+  postgres:16
+```
+
+Or use any PostgreSQL 14+ instance. Update `DATABASE_URL` in `.env` accordingly.
+
+---
+
 ## Option 1: LNbits Demo (Quickest for Testing)
 
 1. Go to https://demo.lnbits.com

@@ -7,7 +7,7 @@ critical ones:
 
 | Variable | Description |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (e.g., `postgres://postgres:postgres@localhost:5432/ganji?sslmode=disable`) |
 | `JWT_SECRET` | Access token signing secret (HS256) |
 | `JWT_REFRESH_SECRET` | Refresh token signing secret (HS256) |
 | `LNBITS_URL` | LNbits instance URL (e.g., `https://lnbits.example.com`) |
@@ -17,6 +17,16 @@ critical ones:
 | `WEBHOOK_URL` | Public URL for LNbits to POST payment notifications (e.g., `https://api.ganji.app/webhooks/lnbits`) |
 | `FRONTEND_URL` | CORS origin (e.g., `http://localhost:3000`) |
 | `OPERATOR_EMAILS` | Comma-separated emails promoted to arbitration operators at boot (`is_operator` claim). Empty by default; no operator means disputes can be raised but not resolved. |
+
+### Quick PostgreSQL (Docker)
+```bash
+docker run -d --name ganji-db \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=ganji \
+  -p 5432:5432 \
+  postgres:16
+```
+Then use `DATABASE_URL=postgres://postgres:postgres@localhost:5432/ganji?sslmode=disable`
 
 ## Backend (Optional / Tuning)
 

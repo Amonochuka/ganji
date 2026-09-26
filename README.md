@@ -13,10 +13,24 @@ The living docs are the source of truth. The original product build document (a 
 | Doc | What's in it |
 |---|---|
 | [`explained.md`](./explained.md) | Architecture walkthrough: money paths, state machine, escrow design, tests |
-| [`API_REFERENCE.md`](./API_REFERENCE.md) | Every endpoint, request/response shapes, error codes |
-| [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) | Build status, what's done, what's not |
-| [`OTS_ANCHORING.md`](./OTS_ANCHORING.md) | The "permanent hash" explained — plain English + jargon breakdown of the OpenTimestamps anchor/verify pipeline |
+| [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) | Every endpoint, request/response shapes, error codes |
+| [`docs/BACKEND_STATUS.md`](./docs/BACKEND_STATUS.md) | Build status, what's done, what's not |
+| [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) | The "permanent hash" explained — plain English + jargon breakdown of the OpenTimestamps anchor/verify pipeline |
 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Team ownership, build order, git conventions |
+
+### Detailed Guides (`docs/`)
+
+| Guide | What's in it |
+|---|---|
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Module layout, layering, key files table |
+| [`docs/DEAL_LIFECYCLE.md`](./docs/DEAL_LIFECYCLE.md) | State machine, transitions, money-move rules |
+| [`docs/MONEY_FLOW.md`](./docs/MONEY_FLOW.md) | Hold invoices, LNbits endpoints, webhook/poll/approve/dispute/arbitration/sweep |
+| [`docs/SHARE_LINK.md`](./docs/SHARE_LINK.md) | Share token design, rotation, public endpoint |
+| [`docs/IDENTITY_AUTH.md`](./docs/IDENTITY_AUTH.md) | Freelancer vs client vs operator, email matching, endpoint access matrix |
+| [`docs/TESTING.md`](./docs/TESTING.md) | Test commands, what each test file covers |
+| [`docs/ENVIRONMENT.md`](./docs/ENVIRONMENT.md) | All environment variables with defaults |
+| [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) | Fixed + remaining bugs, not-built items |
+| [`docs/LNBITS_SETUP.md`](./docs/LNBITS_SETUP.md) | Complete LNbits setup (Demo, regtest, own instance), webhook config, curl flow |
 
 ---
 
@@ -26,7 +40,8 @@ The living docs are the source of truth. The original product build document (a 
 ganji/
 ├── backend/      # Go API (Gin + PostgreSQL + LNbits)
 ├── frontend/     # Next.js app
-└── *.md          # docs live at the repo root
+├── docs/         # detailed documentation
+└── *.md          # root docs (README, CONTRIBUTING, explained)
 ```
 
 Each package's purpose is documented in [`explained.md`](./explained.md).
