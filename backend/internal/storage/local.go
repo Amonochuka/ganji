@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -57,16 +59,56 @@ func (l *Local) Save(ctx context.Context, key string, r io.Reader) error {
 		return fmt.Errorf("storage: creating directories: %w", err)
 	}
 
-	f, err := os.Create(path)
+	// Atomic write: write to temp file, fsync, rename, fsync dir.
+	// This prevents partial blobs on crash.
+	tmpPath := path + ".tmp." + randomSuffix()
+
+	f, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("storage: creating %s: %w", key, err)
+		return fmt.Errorf("storage: creating temp file: %w", err)
 	}
-	defer f.Close()
 
 	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("storage: writing %s: %w", key, err)
 	}
+
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("storage: syncing temp file: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("storage: closing temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("storage: renaming temp to final: %w", err)
+	}
+
+	// fsync the directory to make the rename durable
+	dir := filepath.Dir(path)
+	df, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("storage: opening dir for fsync: %w", err)
+	}
+	defer df.Close()
+	if err := df.Sync(); err != nil {
+		return fmt.Errorf("storage: syncing directory: %w", err)
+	}
+
 	return nil
+}
+
+// randomSuffix generates a random hex suffix for temp files.
+func randomSuffix() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func (l *Local) Open(ctx context.Context, key string) (io.ReadCloser, error) {
