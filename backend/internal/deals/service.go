@@ -1068,7 +1068,8 @@ func (s *Service) UploadArtifact(ctx context.Context, userID, dealID string, kin
 	case StatusWorkSubmitted,
 		StatusReviewing,
 		StatusReleased,
-		StatusDisputed:
+		StatusDisputed,
+		StatusRefunded:
 		return nil, fmt.Errorf("%w: uploads are no longer allowed", ErrInvalidInput)
 	}
 
