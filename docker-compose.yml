@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ganji
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ganji"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/ganji?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      - LNBITS_URL=${LNBITS_URL}
+      - LNBITS_API_KEY=${LNBITS_API_KEY}
+      - LNBITS_ADMIN_KEY=${LNBITS_ADMIN_KEY}
+      - LNBITS_WEBHOOK_SECRET=${LNBITS_WEBHOOK_SECRET}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - LNBITS_HOLD_INVOICE_EXPIRY_SECONDS=${LNBITS_HOLD_INVOICE_EXPIRY_SECONDS:-2592000}
+      - LNBITS_HOLD_SWEEP_INTERVAL_SECONDS=${LNBITS_HOLD_SWEEP_INTERVAL_SECONDS:-21600}
+      - STORAGE_PATH=/uploads
+      - MAX_UPLOAD_BYTES=10485760
+      - FRONTEND_URL=http://localhost:3000
+      - OPERATOR_EMAILS=${OPERATOR_EMAILS}
+      - OTS_ESPLORA_URL=${OTS_ESPLORA_URL:-https://blockstream.info/api}
+      - OTS_ESPLORA_TIMEOUT_SECONDS=${OTS_ESPLORA_TIMEOUT_SECONDS:-10}
+      - OTS_UPGRADE_INTERVAL_SECONDS=${OTS_UPGRADE_INTERVAL_SECONDS:-21600}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM:-noreply@ganji.local}
+      - SMTP_ENCRYPTION=${SMTP_ENCRYPTION:-starttls}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/uploads
+    env_file:
+      - ./backend/.env
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+    depends_on:
+      - api
+    env_file:
+      - ./frontend/.env.local
+
+volumes:
+  pgdata:
+  uploads:

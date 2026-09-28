@@ -1,0 +1,13 @@
+# Frontend .dockerignore
+.git
+.gitignore
+.env
+.env.*
+*.md
+node_modules/
+.next/
+out/
+build/
+*.log
+npm-debug.log*
+.DS_Store
