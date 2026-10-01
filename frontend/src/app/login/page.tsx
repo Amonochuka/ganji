@@ -7,7 +7,7 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
 import { FormBanner } from "@/components/ui/form-banner";
 import { Input } from "@/components/ui/input";
-import { ApiError } from "@/lib/api-client";
+import { ApiError } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 
 export default function LoginPage() {
@@ -41,7 +41,7 @@ export default function LoginPage() {
       footer={
         <>
           Don&apos;t have an account?{" "}
-          <Link href="/signup" className="font-medium text-sats-500 hover:text-sats-600">
+          <Link href="/signup" className="font-medium text-gold-500 hover:text-gold-400 underline underline-offset-2">
             Create one
           </Link>
         </>
@@ -67,7 +67,7 @@ export default function LoginPage() {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
-        <Button type="submit" isLoading={isSubmitting}>
+        <Button type="submit" isLoading={isSubmitting} size="lg">
           Log in
         </Button>
       </form>

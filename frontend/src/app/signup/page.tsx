@@ -7,7 +7,7 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
 import { FormBanner } from "@/components/ui/form-banner";
 import { Input } from "@/components/ui/input";
-import { ApiError } from "@/lib/api-client";
+import { ApiError } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 
 type FieldErrors = {
@@ -29,8 +29,6 @@ export default function SignupPage() {
 
   function validate(): boolean {
     const errors: FieldErrors = {};
-    // Mirrors backend/internal/auth/service.go's Register validation, so
-    // the person sees the rule before the round-trip fails.
     if (password.length < 8) errors.password = "Must be at least 8 characters.";
     if (confirmPassword !== password) errors.confirmPassword = "Passwords don't match.";
     setFieldErrors(errors);
@@ -61,7 +59,7 @@ export default function SignupPage() {
       footer={
         <>
           Already have an account?{" "}
-          <Link href="/login" className="font-medium text-sats-500 hover:text-sats-600">
+          <Link href="/login" className="font-medium text-gold-500 hover:text-gold-400 underline underline-offset-2">
             Log in
           </Link>
         </>
@@ -107,7 +105,7 @@ export default function SignupPage() {
           error={fieldErrors.confirmPassword}
           onChange={(event) => setConfirmPassword(event.target.value)}
         />
-        <Button type="submit" isLoading={isSubmitting}>
+        <Button type="submit" isLoading={isSubmitting} size="lg">
           Create account
         </Button>
       </form>

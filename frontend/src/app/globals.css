@@ -1,25 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  /* Vault surfaces — near-black, slightly cool, never pure #000 */
-  --color-vault-bg: #0b0d10;
-  --color-vault-surface: #14171c;
-  --color-vault-raised: #1b1f26;
-  --color-vault-border: #262b33;
+  /* Vault surfaces — near-black matte, slightly cool, never pure #000 */
+  --color-vault-bg: #0a0c0e;
+  --color-vault-surface: #111316;
+  --color-vault-raised: #181b1f;
+  --color-vault-border: #22262b;
 
   /* Text */
-  --color-ink-100: #f5f3ef;
-  --color-ink-300: #c7c9cd;
-  --color-ink-500: #8a8f98;
-  --color-ink-700: #565b64;
+  --color-ink-100: #faf9f6;
+  --color-ink-300: #c8c6c0;
+  --color-ink-500: #8a877f;
+  --color-ink-700: #5a5852;
 
-  /* Bitcoin orange — the one accent, spent deliberately */
-  --color-sats-500: #f7931a;
-  --color-sats-600: #d97b0c;
-  --color-sats-900: #3a2308;
+  /* Gold — matte, sophisticated, not shiny */
+  --color-gold-400: #d4a843;
+  --color-gold-500: #c49632;
+  --color-gold-600: #a87d28;
+  --color-gold-700: #8c6520;
+  --color-gold-900: #3d2e0f;
 
-  /* Status */
-  --color-status-locked: #f7931a;
+  /* Status colors — muted, blended with gold palette */
+  --color-status-locked: #c49632;
   --color-status-waiting: #5b8cff;
   --color-status-review: #b98cff;
   --color-status-released: #3ddc84;
@@ -28,6 +30,7 @@
   --font-display: "Space Grotesk", "Segoe UI", sans-serif;
   --font-body: "Inter", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-digital: "Orbitron", "Share Tech Mono", ui-monospace, monospace;
 }
 
 html {
@@ -39,19 +42,20 @@ body {
   color: var(--color-ink-100);
   font-family: var(--font-body);
   background-image:
-    radial-gradient(circle at 15% 0%, rgba(247, 147, 26, 0.07), transparent 40%),
-    radial-gradient(circle at 85% 100%, rgba(91, 140, 255, 0.05), transparent 45%);
+    radial-gradient(ellipse at 20% 0%, rgba(196, 150, 50, 0.06), transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(196, 150, 50, 0.04), transparent 50%),
+    linear-gradient(180deg, transparent 60%, rgba(196, 150, 50, 0.02) 100%);
   background-attachment: fixed;
 }
 
 ::selection {
-  background: var(--color-sats-500);
+  background: var(--color-gold-500);
   color: var(--color-vault-bg);
 }
 
 /* Focus rings — always visible, never suppressed */
 :focus-visible {
-  outline: 2px solid var(--color-sats-500);
+  outline: 2px solid var(--color-gold-500);
   outline-offset: 2px;
 }
 
@@ -111,4 +115,74 @@ body {
 
 .animate-count-in {
   animation: count-in 0.4s ease-out;
+}
+
+/* Subtle gold accent line utility */
+.gold-accent {
+  position: relative;
+}
+.gold-accent::after {
+  content: "";
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 48px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-gold-500), transparent);
+  border-radius: 1px;
+}
+
+/* Digital/Stopwatch font utility */
+.font-digital {
+  font-family: var(--font-digital);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.15em;
+}
+
+/* GNJ Logo - stopwatch style */
+.logo-gnj {
+  @apply font-digital text-4xl md:text-5xl lg:text-6xl font-bold tracking-widest text-gold-500;
+  text-shadow: 0 0 30px rgba(196, 150, 50, 0.4), 0 0 60px rgba(196, 150, 50, 0.2);
+}
+
+.logo-gnj-sm {
+  @apply font-digital text-xl md:text-2xl font-bold tracking-wider text-gold-500;
+  text-shadow: 0 0 20px rgba(196, 150, 50, 0.3);
+}
+
+/* Hero gradient text */
+.hero-gradient {
+  background: linear-gradient(135deg, var(--color-ink-100) 0%, var(--color-gold-400) 50%, var(--color-ink-300) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Gold glow pulse */
+@keyframes gold-pulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(196, 150, 50, 0.3), 0 0 40px rgba(196, 150, 50, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(196, 150, 50, 0.5), 0 0 60px rgba(196, 150, 50, 0.2);
+  }
+}
+
+.gold-glow {
+  animation: gold-pulse 3s ease-in-out infinite;
+}
+
+/* Card hover effect */
+.vault-card {
+  @apply rounded-xl border border-vault-border bg-vault-surface transition-all duration-200;
+}
+.vault-card:hover {
+  @apply border-gold-500/30 shadow-[0_0_0_1px_rgba(196,150,50,0.15)];
+}
+
+/* Input focus gold glow */
+input:focus,
+textarea:focus,
+select:focus {
+  box-shadow: 0 0 0 2px rgba(196, 150, 50, 0.3);
 }

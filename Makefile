@@ -32,39 +32,31 @@ $(ENV_FILE): $(ENV_EXAMPLE)
 
 .PHONY: check-env
 check-env: ## Verify required env vars are set
-	@source $(ENV_FILE) 2>/dev/null || true; \
-	for var in DATABASE_URL JWT_SECRET JWT_REFRESH_SECRET LNBITS_URL LNBITS_API_KEY LNBITS_ADMIN_KEY WEBHOOK_URL; do \
-		val=$$var; \
-		if [ -z "$${!val}" ] || [ "$${!val}" = "change-me-*" ]; then \
-			echo "✗ Missing or default: $$var"; exit 1; \
-		else \
-			echo "✓ $$var is set"; \
-		fi; \
-	done
+	@bash -c 'set -a; . backend/.env 2>/dev/null || true; set +a; for var in DATABASE_URL JWT_SECRET JWT_REFRESH_SECRET LNBITS_URL LNBITS_API_KEY LNBITS_ADMIN_KEY WEBHOOK_URL; do val=$${!var}; if [ -z "$$val" ] || [ "$$val" = "change-me-*" ]; then echo "✗ Missing or default: $$var"; exit 1; else echo "✓ $$var is set"; fi; done'
 
-# ─── Database (docker-compose) ──────────────────────────────────────────────
+# ─── Database (docker compose) ──────────────────────────────────────────────
 
 .PHONY: db-up
-db-up: ## Start PostgreSQL via docker-compose
-	docker-compose up -d db
+db-up: ## Start PostgreSQL via docker compose
+	docker compose up -d db
 	@echo "Waiting for PostgreSQL..."
-	@until docker-compose exec -T db pg_isready -U postgres -d ganji >/dev/null 2>&1; do sleep 1; done
+	@until docker compose exec -T db pg_isready -U postgres -d ganji >/dev/null 2>&1; do sleep 1; done
 	@echo "✓ PostgreSQL ready at localhost:5432"
 
 .PHONY: db-down
 db-down: ## Stop and remove PostgreSQL container
-	docker-compose down
+	docker compose down
 
 .PHONY: db-reset
 db-reset: ## Reset database (destroy data)
-	docker-compose down -v
-	docker-compose up -d db
-	@until docker-compose exec -T db pg_isready -U postgres -d ganji >/dev/null 2>&1; do sleep 1; done
+	docker compose down -v
+	docker compose up -d db
+	@until docker compose exec -T db pg_isready -U postgres -d ganji >/dev/null 2>&1; do sleep 1; done
 	@echo "Database reset complete"
 
 .PHONY: db-shell
 db-shell: ## Open psql shell
-	docker-compose exec db psql -U postgres -d ganji
+	docker compose exec db psql -U postgres -d ganji
 
 # ─── Backend ────────────────────────────────────────────────────────────────
 
@@ -237,27 +229,27 @@ frontend-build: frontend-deps ## Build frontend
 frontend-dev: frontend-deps ## Run frontend dev server
 	cd $(FRONTEND_DIR) && npm run dev
 
-# ─── Full Stack (docker-compose) ────────────────────────────────────────────
+# ─── Full Stack (docker compose) ────────────────────────────────────────────
 
 .PHONY: up
-up: ## Start full stack (db + api + frontend) via docker-compose
-	docker-compose up -d --build
+up: ## Start full stack (db + api + frontend) via docker compose
+	docker compose up -d --build
 
 .PHONY: up-logs
 up-logs: ## Start full stack and follow logs
-	docker-compose up --build
+	docker compose up --build
 
 .PHONY: down
 down: ## Stop full stack
-	docker-compose down
+	docker compose down
 
 .PHONY: logs
 logs: ## Follow all service logs
-	docker-compose logs -f
+	docker compose logs -f
 
 .PHONY: logs-api
 logs-api: ## Follow API logs
-	docker-compose logs -f api
+	docker compose logs -f api
 
 .PHONY: dev
 dev: db-up ## Start dev stack (db only), run backend/frontend locally
@@ -269,7 +261,7 @@ clean: ## Clean build artifacts
 	rm -rf $(BACKEND_DIR)/bin
 	rm -rf $(FRONTEND_DIR)/.next
 	rm -rf $(FRONTEND_DIR)/node_modules
-	docker-compose down -v --remove-orphans 2>/dev/null || true
+	docker compose down -v --remove-orphans 2>/dev/null || true
 
 # ─── Help ───────────────────────────────────────────────────────────────────
 
