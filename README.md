@@ -17,6 +17,7 @@ The living docs are the source of truth. The original product build document (a 
 | [`docs/BACKEND_STATUS.md`](./docs/BACKEND_STATUS.md) | Build status, what's done, what's not |
 | [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) | The "permanent hash" explained — plain English + jargon breakdown of the OpenTimestamps anchor/verify pipeline |
 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Team ownership, build order, git conventions |
+| [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md) | Frontend implementation status, pages, components, API client, remaining work |
 
 ### Detailed Guides (`docs/`)
 
@@ -39,12 +40,32 @@ The living docs are the source of truth. The original product build document (a 
 ```
 ganji/
 ├── backend/      # Go API (Gin + PostgreSQL + LNbits)
-├── frontend/     # Next.js app
+├── frontend/     # Next.js app (App Router, TypeScript, Tailwind v4)
 ├── docs/         # detailed documentation
-└── *.md          # root docs (README, CONTRIBUTING, explained)
+└── *.md          # root docs (README, CONTRIBUTING, explained, FRONTEND_REPORT)
 ```
 
 Each package's purpose is documented in [`explained.md`](./explained.md).
+
+---
+
+## Frontend Pages (Implemented)
+
+| Route | Page | Description |
+|---|---|---|
+| `/` | Home | Marketing landing with GNJ stopwatch-logo, hero, feature cards |
+| `/login` | Login | Email/password auth, JWT tokens in localStorage |
+| `/signup` | Signup | Registration with validation |
+| `/dashboard` | Dashboard | Authenticated deal list with status cards, empty state, create CTA |
+| `/deals/new` | Create Deal | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc) |
+| `/deals/[id]` | Deal Detail | Full view, timeline, actions (submit/dispute/rotate/approve), share link, verification |
+| `/public/deals/[shareToken]` | Public Deal | Client-facing: invoice to pay, approve flow (requires backend fix) |
+
+**Core Components:** `Button` (4 variants, 3 sizes), `Input`, `FormBanner`, `AuthShell`, `DealCard`, `format` utils
+
+**API Client:** `lib/api/api-client.ts` — full TypeScript coverage for auth + all deal endpoints
+
+**Design System:** Vault (near-black matte) + Gold accents, Orbitron/Share Tech Mono for GNJ logo, CSS variables for all colors/fonts
 
 ---
 
@@ -93,4 +114,4 @@ Never edit a migration already applied to a shared environment — write a new o
 
 ## Status
 
-🚧 Pre-launch. See [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) for what's built and [`CONTRIBUTING.md`](./CONTRIBUTING.md) for workflow and team ownership.
+🚧 Pre-launch. See [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) for what's built and [`CONTRIBUTING.md`](./CONTRIBUTING.md) for workflow and team ownership. See [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md) for frontend implementation status.

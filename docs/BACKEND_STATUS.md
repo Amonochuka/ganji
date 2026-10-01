@@ -1,6 +1,6 @@
 # Ganji Backend — Status Report
 
-**Date:** 2026-08-26 (updated 2026-09-17)
+**Date:** 2026-08-26 (updated 2026-10-01)
 **Author:** opencode
 
 ---
@@ -45,17 +45,17 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   `internal/lnbits/client_test.go`,
   `internal/storage/local_test.go`, and the artifact upload/download handler
   and service tests; `go test ./...` passes.
+- **Frontend compiles and has 7 pages implemented** — see [`FRONTEND_REPORT.md`](../FRONTEND_REPORT.md).
 - Still stubbed (unchanged): `internal/websocket`,
   `internal/middleware/ratelimit.go`, `pkg/sanitize`.
-  Frontend still does not compile.
 
 ---
 
 ## Summary
 
-The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, artifact/verification management, and LNbits payment integration all working. The webhook handler was added today. Frontend is blocked on missing component modules.
+The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, artifact/verification management, and LNbits payment integration all working. The webhook handler was added. Frontend now compiles with 7 pages.
 
-**Overall completion: ~45%**
+**Overall completion: ~65%**
 
 ---
 
@@ -91,7 +91,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 | LNbits invoice creation | ✅ Done | `internal/lnbits/client.go` |
 | LNbits payment status polling | ✅ Done | `internal/lnbits/client.go` |
 | Payment check endpoint | ✅ Done | `internal/deals/handler.go` |
-| **Webhook handler (NEW)** | ✅ Done | `internal/webhook/` |
+| **Webhook handler** | ✅ Done | `internal/webhook/` |
 | HMAC signature verification | ✅ Done | `internal/webhook/service.go` |
 | Auto-transition on payment | ✅ Done | `internal/webhook/service.go` |
 
@@ -137,7 +137,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 
 ---
 
-## Webhook Handler — What Was Built Today
+## Webhook Handler — What Was Built
 
 **New package:** `internal/webhook/`
 
@@ -203,7 +203,9 @@ Payment-not-successful returns `200` because the webhook was received and unders
 
 ## Recommendations
 
-1. **Create the missing frontend modules** — the frontend cannot compile without `Button`, `Input`, `FormBanner`, `AuthShell`, `AuthProvider`, and `ApiClient`. This is the single biggest blocker.
+1. **Add missing backend endpoints for frontend:**
+   - `GET /auth/me` — current user profile (needed for Settings page)
+   - `POST /public/deals/:shareToken/approve` — public approve without auth (needed for client approval from public link)
 2. **Build the WebSocket server** — needed before any real-time deal UI works.
 3. ~~**Build the Live CV package**~~ — *(done: released deals anchor hashed CV entries; public profile + verify endpoints are live).*
 4. **Add tests** — start with auth and deal state machine. The repository interfaces make mocking straightforward.
