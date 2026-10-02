@@ -45,7 +45,7 @@ export default function Home() {
       <section className="flex-1 flex flex-col items-center justify-center gap-12 px-6 py-20 md:py-32">
         <div className="mx-auto max-w-4xl text-center">
           <div className="mb-8 flex items-center justify-center gap-3">
-            <span className="logo-gnj gold-glow">GNJ</span>
+            <span className="logo-gnj">GNJ</span>
           </div>
 
           <h1 className="mb-6 font-display text-4xl md:text-5xl lg:text-6xl font-semibold hero-gradient leading-tight">

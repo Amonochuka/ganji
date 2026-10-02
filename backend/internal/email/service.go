@@ -96,14 +96,21 @@ func (s *Service) notifyBoth(deal *deals.Deal, send func(context.Context, string
 	}()
 }
 
+func (s *Service) frontendURL() string {
+	if len(s.cfg.FrontendURLs) > 0 {
+		return s.cfg.FrontendURLs[0]
+	}
+	return ""
+}
+
 func (s *Service) SendPaymentReceived(ctx context.Context, freelancerEmail, freelancerName, dealTitle string, amountSats int64, dealID string) error {
 	if !s.Enabled() {
 		return nil // silently skip if not configured
 	}
 
 	subject := fmt.Sprintf("💰 Payment Received — \"%s\" Deal Locked", dealTitle)
-	htmlBody := paymentReceivedHTML(freelancerName, dealTitle, amountSats, dealID, s.cfg.FrontendURL)
-	textBody := paymentReceivedText(freelancerName, dealTitle, amountSats, dealID, s.cfg.FrontendURL)
+	htmlBody := paymentReceivedHTML(freelancerName, dealTitle, amountSats, dealID, s.frontendURL())
+	textBody := paymentReceivedText(freelancerName, dealTitle, amountSats, dealID, s.frontendURL())
 
 	return s.send(ctx, freelancerEmail, subject, textBody, htmlBody)
 }
@@ -114,8 +121,8 @@ func (s *Service) SendDealDisputed(ctx context.Context, freelancerEmail, freelan
 	}
 
 	subject := fmt.Sprintf("⚠️ Dispute Raised — \"%s\"", dealTitle)
-	htmlBody := dealDisputedHTML(freelancerName, dealTitle, reason, dealID, s.cfg.FrontendURL)
-	textBody := dealDisputedText(freelancerName, dealTitle, reason, dealID, s.cfg.FrontendURL)
+	htmlBody := dealDisputedHTML(freelancerName, dealTitle, reason, dealID, s.frontendURL())
+	textBody := dealDisputedText(freelancerName, dealTitle, reason, dealID, s.frontendURL())
 
 	return s.send(ctx, freelancerEmail, subject, textBody, htmlBody)
 }
@@ -126,8 +133,8 @@ func (s *Service) SendDealReleased(ctx context.Context, freelancerEmail, freelan
 	}
 
 	subject := fmt.Sprintf("✅ Deal Released — \"%s\"", dealTitle)
-	htmlBody := dealReleasedHTML(freelancerName, dealTitle, dealID, s.cfg.FrontendURL)
-	textBody := dealReleasedText(freelancerName, dealTitle, dealID, s.cfg.FrontendURL)
+	htmlBody := dealReleasedHTML(freelancerName, dealTitle, dealID, s.frontendURL())
+	textBody := dealReleasedText(freelancerName, dealTitle, dealID, s.frontendURL())
 
 	return s.send(ctx, freelancerEmail, subject, textBody, htmlBody)
 }
@@ -138,8 +145,8 @@ func (s *Service) SendDealRefunded(ctx context.Context, freelancerEmail, freelan
 	}
 
 	subject := fmt.Sprintf("❌ Deal Refunded — \"%s\"", dealTitle)
-	htmlBody := dealRefundedHTML(freelancerName, dealTitle, dealID, s.cfg.FrontendURL)
-	textBody := dealRefundedText(freelancerName, dealTitle, dealID, s.cfg.FrontendURL)
+	htmlBody := dealRefundedHTML(freelancerName, dealTitle, dealID, s.frontendURL())
+	textBody := dealRefundedText(freelancerName, dealTitle, dealID, s.frontendURL())
 
 	return s.send(ctx, freelancerEmail, subject, textBody, htmlBody)
 }

@@ -33,7 +33,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	router := gin.Default()
 
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{cfg.FrontendURL},
+		AllowOrigins:     cfg.FrontendURLs,
 		AllowMethods:     []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,

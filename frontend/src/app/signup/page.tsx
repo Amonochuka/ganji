@@ -43,7 +43,7 @@ export default function SignupPage() {
     setIsSubmitting(true);
     try {
       await signup({ email, password, display_name: displayName });
-      router.push("/");
+      router.push("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {

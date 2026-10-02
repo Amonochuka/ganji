@@ -225,8 +225,18 @@ frontend-deps: ## Install frontend dependencies
 frontend-build: frontend-deps ## Build frontend
 	cd $(FRONTEND_DIR) && npm run build
 
+.PHONY: frontend-rebuild
+frontend-rebuild: ## Clean rebuild frontend (fixes stale Turbopack cache)
+	rm -rf $(FRONTEND_DIR)/.next
+	cd $(FRONTEND_DIR) && npm run build
+
+.PHONY: frontend-start
+frontend-start: frontend-build ## Run frontend production server
+	cd $(FRONTEND_DIR) && npm run start
+
 .PHONY: frontend-dev
-frontend-dev: frontend-deps ## Run frontend dev server
+frontend-dev: frontend-deps ## Run frontend dev server (clean cache first)
+	rm -rf $(FRONTEND_DIR)/.next
 	cd $(FRONTEND_DIR) && npm run dev
 
 # ─── Full Stack (docker compose) ────────────────────────────────────────────
