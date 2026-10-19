@@ -243,3 +243,12 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	}
 	return nil
 }
+
+// GetMe returns the current user's profile by ID. Used for the Settings page.
+func (s *Service) GetMe(ctx context.Context, userID string) (*User, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("%w: user id is required", ErrInvalidInput)
+	}
+
+	return s.repo.FindByID(ctx, userID)
+}

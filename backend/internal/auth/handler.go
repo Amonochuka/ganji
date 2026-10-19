@@ -133,10 +133,33 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 	c.JSON(http.StatusOK, authResponse)
 }
 
+func (h *Handler) GetMe(c *gin.Context) {
+	userID := c.GetString("userID")
+
+	user, err := h.service.GetMe(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
 func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group := router.Group("/auth")
 	group.POST("/signup", h.Signup)
 	group.POST("/login", h.Login)
 	group.POST("/logout", h.Logout)
 	group.POST("/refresh-token", h.RefreshToken)
+}
+
+// RegisterProtectedRoutes mounts auth routes that require a valid access token.
+// Callers must attach middleware.AuthRequired to the router first.
+func RegisterProtectedRoutes(router gin.IRouter, h *Handler) {
+	group := router.Group("/auth")
+	group.GET("/me", h.GetMe)
 }

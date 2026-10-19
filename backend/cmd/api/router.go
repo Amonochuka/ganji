@@ -92,6 +92,8 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	protected := router.Group("/")
 	protected.Use(middleware.AuthRequired(tokenManager))
 
+	auth.RegisterProtectedRoutes(protected, authHandler)
+
 	deals.RegisterRoutes(protected, dealHandler)
 	deals.RegisterPublicRoutes(router, dealHandler)
 	deals.RegisterArtifactRoutes(protected, dealHandler)
