@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -55,18 +57,35 @@ func (tm *TokenManager) GenerateAccessToken(userID, email string, isOperator boo
 }
 
 // GenerateRefreshToken creates a long-lived token used only to obtain new
-// access tokens.
+// access tokens. Each token carries a random JWT ID (jti) so two tokens
+// issued within the same second are still unique — iat has second
+// granularity, and the DB enforces UNIQUE on the stored token hash.
 func (tm *TokenManager) GenerateRefreshToken(userID, email string) (string, error) {
+	tokenID, err := randomTokenID()
+	if err != nil {
+		return "", err
+	}
+
 	claims := Claims{
 		UserID: userID,
 		Email:  email,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(RefreshTokenTTL())),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        tokenID,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(tm.refreshSecret)
+}
+
+// randomTokenID returns a 128-bit hex token identifier for jti claims.
+func randomTokenID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // VerifyAccessToken parses and validates an access token, returning its
