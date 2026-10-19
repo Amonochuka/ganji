@@ -1394,6 +1394,42 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	}, nil
 }
 
+// PublicApproveDeal allows a client to approve a deal from the public share link
+// without authentication. The share token proves they have the link.
+func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*Deal, error) {
+	if shareToken == "" {
+		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// Refresh payment status in case webhook was delayed
+	if deal.CheckingID != "" && deal.Status == StatusAwaitingPayment {
+		_ = s.refreshPaymentStatus(ctx, deal)
+	}
+
+	// Client can only approve if deal is locked (payment held) or work_submitted
+	if deal.Status != StatusLocked && deal.Status != StatusWorkSubmitted {
+		return nil, fmt.Errorf("%w: deal cannot be approved from status %s", ErrInvalidTransition, deal.Status)
+	}
+
+	return s.releaseEscrow(ctx, deal.ID, releaseEscrowOptions{
+		authorize: func(deal *Deal) error {
+			// No email check needed - share token proves access
+			if !CanTransition(deal.Status, StatusReleased) {
+				return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
+			}
+			return nil
+		},
+		finalize: func(repo DealRepository, id string) error {
+			return repo.UpdateStatus(ctx, id, StatusReleased)
+		},
+	})
+}
+
 // RotateShareLink mints a fresh share token for a deal, immediately killing
 // any previously shared link (the old token no longer resolves). Freelancer
 // only, and frozen once the deal is released/refunded — after the money has

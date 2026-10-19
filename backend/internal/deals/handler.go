@@ -135,6 +135,7 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 // These are mounted on the root router, not the protected group.
 func RegisterPublicRoutes(router gin.IRouter, h *Handler) {
 	router.GET("/public/deals/:shareToken", h.GetPublicDeal)
+	router.POST("/public/deals/:shareToken/approve", h.PublicApproveDeal)
 }
 
 func (h *Handler) UpdateDealStatus(c *gin.Context) {
@@ -463,6 +464,33 @@ func (h *Handler) GetPublicDeal(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"deal": deal,
+	})
+}
+
+func (h *Handler) PublicApproveDeal(c *gin.Context) {
+	shareToken := c.Param("shareToken")
+
+	deal, err := h.service.PublicApproveDeal(c.Request.Context(), shareToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "deal approved and escrow released",
+		"deal":    deal.View(),
 	})
 }
 
