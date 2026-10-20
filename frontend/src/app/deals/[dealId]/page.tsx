@@ -112,9 +112,17 @@ export default function DealDetailPage() {
   }
 
   const isFreelancer = user?.id === deal.freelancer_id;
+  const isClient = !!user && user.email.toLowerCase() === deal.client_email.toLowerCase();
   const canSubmit = isFreelancer && (deal.status === "locked" || deal.status === "awaiting_payment");
   const canDispute = isFreelancer && (deal.status === "locked" || deal.status === "work_submitted" || deal.status === "reviewing");
   const canRotateLink = isFreelancer;
+  // Backend authz for these is email-matched (ApproveDeal/DisputeDeal), so
+  // the client — who can already open this page via the same email match —
+  // gets the real buttons instead of a dead end. Approve mirrors the backend
+  // CanTransition set (work_submitted/reviewing/disputed -> released);
+  // dispute is unavailable from awaiting_payment and from disputed.
+  const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(deal.status);
+  const clientCanDispute = ["locked", "work_submitted", "reviewing"].includes(deal.status);
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
@@ -236,21 +244,50 @@ export default function DealDetailPage() {
                 </div>
               )}
 
-              {!isFreelancer && deal.status === "work_submitted" && (
-                <div className="vault-card p-6 vault-seam border-gold-500/30 bg-gold-500/5">
-                  <h2 className="font-display text-lg font-semibold text-gold-400 mb-2">Client Action Required</h2>
-                  <p className="text-ink-300 mb-4">Review the delivered work and approve to release funds.</p>
-                  <Button
-                    onClick={() => handleAction("approve", async () => {
-                      const res = await api.approveDeal(dealId, tokens!.access_token);
-                      setDeal(res.deal);
-                    })}
-                    disabled={actionLoading === "approve"}
-                    isLoading={actionLoading === "approve"}
-                    size="lg"
-                  >
-                    Approve & Release
-                  </Button>
+              {!isFreelancer && isClient && (
+                <div className="vault-card p-6 vault-seam">
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Your Actions</h2>
+                  {clientCanApprove && (
+                    <div className="mb-4 p-4 rounded-lg bg-gold-500/5 border border-gold-500/30">
+                      <p className="font-medium text-gold-400 mb-1">Review the delivered work</p>
+                      <p className="text-sm text-ink-300">Approving releases the escrowed {formatCurrency(deal.amount_sats)} to the freelancer.</p>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-3">
+                    {clientCanApprove && (
+                      <Button
+                        onClick={() => handleAction("approve", async () => {
+                          const res = await api.approveDeal(dealId, tokens!.access_token);
+                          setDeal(res.deal);
+                        })}
+                        disabled={actionLoading === "approve"}
+                        isLoading={actionLoading === "approve"}
+                        size="lg"
+                      >
+                        Approve & Release
+                      </Button>
+                    )}
+                    {clientCanDispute && (
+                      <Button
+                        variant="outline"
+                        onClick={handleDispute}
+                        disabled={actionLoading === "dispute"}
+                        isLoading={actionLoading === "dispute"}
+                      >
+                        Raise Dispute
+                      </Button>
+                    )}
+                    {deal.status === "released" && (
+                      <span className="flex items-center px-3 py-2 text-sm text-green-400 bg-green-600/10 rounded-lg border border-green-600/30">
+                        ✅ Payment released to the freelancer
+                      </span>
+                    )}
+                    {deal.status === "refunded" && (
+                      <span className="flex items-center px-3 py-2 text-sm text-gray-400 bg-gray-600/10 rounded-lg border border-gray-600/30">
+                        ↩️ Escrow refunded
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

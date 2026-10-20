@@ -51,7 +51,7 @@ func Load() *Config {
 		LNBitsAdminKey:            getEnv("LNBITS_ADMIN_KEY", ""),
 		LNBitsWebhookSecret:       getEnv("LNBITS_WEBHOOK_SECRET", ""),
 		WebhookURL:                getEnv("WEBHOOK_URL", ""),
-		FrontendURLs:             getEnvList("FRONTEND_URLS"),
+		FrontendURLs:              getEnvListFallback("FRONTEND_URLS", "FRONTEND_URL"),
 		HoldInvoiceExpirySeconds:  getEnvInt("LNBITS_HOLD_INVOICE_EXPIRY_SECONDS", 2_592_000),
 		HoldSweepIntervalSeconds:  getEnvInt("LNBITS_HOLD_SWEEP_INTERVAL_SECONDS", 21_600),
 		StoragePath:               getEnv("STORAGE_PATH", "./uploads"),
@@ -81,6 +81,18 @@ func getEnvList(key string) []string {
 		}
 	}
 	return out
+}
+
+// getEnvListFallback parses key as a comma-separated list; if key is unset
+// or empty, falls back to alt. Older setup files set the singular
+// FRONTEND_URL — accepting both avoids a silently-empty CORS allowlist
+// (which breaks every browser fetch from the frontend with an opaque
+// "failed to fetch" that the UI can only show as a generic error).
+func getEnvListFallback(key, alt string) []string {
+	if vals := getEnvList(key); len(vals) > 0 {
+		return vals
+	}
+	return getEnvList(alt)
 }
 
 func getEnvInt(key string, fallback int64) int64 {

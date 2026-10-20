@@ -113,7 +113,7 @@ export const api = {
   },
 
   publicApproveDeal(shareToken: string) {
-    return this.post<ApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
+    return this.post<PublicApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
   },
 };
 
@@ -198,6 +198,11 @@ export type SubmitWorkResponse = {
 export type ApproveDealResponse = {
   message: string;
   deal: DealView;
+};
+
+export type PublicApproveDealResponse = {
+  message: string;
+  deal: PublicDeal;
 };
 
 export type DisputeDealResponse = {

@@ -173,14 +173,14 @@ _test-cycle-steps:
 	echo $$DEAL_RESP | jq .; \
 	DEAL_ID=$$(echo $$DEAL_RESP | jq -r '.deal.id'); \
 	SHARE_TOKEN=$$(echo $$DEAL_RESP | jq -r '.deal.share_token'); \
-	BOLT11=$$(echo $$DEAL_RESP | jq -r '.deal.bolt11'); \
+	BOLT11=$$(echo $$DEAL_RESP | jq -r '.deal.invoice'); \
 	[ "$$DEAL_ID" != "null" ] || (echo "✗ Deal creation failed"; exit 1); \
 	echo "✓ Deal created: $$DEAL_ID"; \
 	echo "✓ Share token: $$SHARE_TOKEN"; \
 	echo "✓ Hold invoice (bolt11): $$BOLT11"; \
 	echo ""; \
 	echo "▶ Step 4: Public deal link"; \
-	echo "   Open: $$BASE/public/deals/$$SHARE_TOKEN"; \
+	echo "   Open: http://localhost:3000/public/deals/$$SHARE_TOKEN"; \
 	echo ""; \
 	echo "▶ Step 5: Pay the hold invoice"; \
 	echo "   Scan this bolt11 with your Lightning wallet and PAY:"; \

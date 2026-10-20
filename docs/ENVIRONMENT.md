@@ -15,7 +15,7 @@ critical ones:
 | `LNBITS_ADMIN_KEY` | LNbits **admin key** — required for settle/cancel/payout (money moves) |
 | `LNBITS_WEBHOOK_SECRET` | Wallet webhook secret for `LNbits-Signature` verification |
 | `WEBHOOK_URL` | Public URL for LNbits to POST payment notifications (e.g., `https://api.ganji.app/webhooks/lnbits`) |
-| `FRONTEND_URL` | CORS origin (e.g., `http://localhost:3000`) |
+| `FRONTEND_URLS` | CORS origins, comma-separated (e.g., `http://localhost:3000`). Singular `FRONTEND_URL` still accepted as a fallback. |
 | `OPERATOR_EMAILS` | Comma-separated emails promoted to arbitration operators at boot (`is_operator` claim). Empty by default; no operator means disputes can be raised but not resolved. |
 
 ### Quick PostgreSQL (Docker)

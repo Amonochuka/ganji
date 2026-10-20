@@ -57,7 +57,7 @@ export function DealCard({ deal, onClick }: DealCardProps) {
             className="text-xs text-gold-500 hover:text-gold-400 font-medium underline underline-offset-1"
             onClick={(e) => {
               e.stopPropagation();
-              navigator.clipboard.writeText(deal.share_token);
+              navigator.clipboard.writeText(`${window.location.origin}/public/deals/${deal.share_token}`);
             }}
           >
             Copy share link

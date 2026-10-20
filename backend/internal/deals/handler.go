@@ -2,6 +2,7 @@ package deals
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -55,8 +56,14 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 		case errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "internal server error",
+			// The only non-validation failure on this path is upstream: the
+			// LNbits hold invoice (or, rarely, preimage/token generation or
+			// the DB). Log the real cause — a swallowed error here made the
+			// original "demo.lnbits.com: hold invoices not supported" bug
+			// indistinguishable from an internal crash.
+			log.Printf("create deal failed: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "payment provider error: could not create the escrow hold invoice. Your LNbits wallet must support hold (HODL) invoices — see backend/.env LNBITS_URL.",
 			})
 		}
 		return
@@ -481,6 +488,7 @@ func (h *Handler) PublicApproveDeal(c *gin.Context) {
 		case errors.Is(err, ErrDealNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		default:
+			log.Printf("public approve failed: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
 			})
@@ -488,9 +496,12 @@ func (h *Handler) PublicApproveDeal(c *gin.Context) {
 		return
 	}
 
+	// PublicDeal, not deal.View(): the GET endpoint is meticulously redacted
+	// and the approve response must not leak client_email / freelancer_id /
+	// deal id / share_token to a link holder.
 	c.JSON(http.StatusOK, gin.H{
 		"message": "deal approved and escrow released",
-		"deal":    deal.View(),
+		"deal":    deal.PublicView(),
 	})
 }
 

@@ -21,15 +21,34 @@ export default function PublicDealPage() {
     fetchDeal();
   }, [shareToken]);
 
-  async function fetchDeal() {
+  // Poll while the deal is live: each GET makes the backend re-check the
+  // hold with LNbits, so paying in an external wallet flips the status to
+  // `locked` (and reveals the Approve button) without a manual reload.
+  useEffect(() => {
+    if (!deal) return;
+    if (deal.status === "released" || deal.status === "refunded" || deal.status === "disputed") {
+      return;
+    }
+    const interval = setInterval(() => {
+      fetchDeal(true);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [deal?.status, shareToken]);
+
+  async function fetchDeal(silent = false) {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const res = await api.getPublicDeal(shareToken);
       setDeal(res.deal);
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load deal");
+      // Silent (polling) failures keep the last known state — a transient
+      // network blip must not blank the page out from under the payer.
+      if (!silent) {
+        setError(err instanceof Error ? err.message : "Failed to load deal");
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }
 
@@ -42,6 +61,10 @@ export default function PublicDealPage() {
       setDeal(res.deal);
     } catch (err) {
       setApproveError(err instanceof Error ? err.message : "Failed to approve");
+      // Re-fetch: a failed approve usually means the status changed
+      // underneath us (someone disputed/approved first) — the button must
+      // not keep offering an action against a stale status.
+      fetchDeal(true);
     } finally {
       setIsApproving(false);
     }
@@ -72,9 +95,14 @@ export default function PublicDealPage() {
             <div className="text-4xl mb-4">🔍</div>
             <h1 className="font-display text-2xl font-semibold text-ink-100 mb-2">Deal Not Found</h1>
             <p className="text-ink-500 mb-6">{error || "This deal link is invalid or has expired."}</p>
-            <Link href="/">
-              <Button variant="ghost">Go to Ganji</Button>
-            </Link>
+            <div className="flex items-center justify-center gap-3">
+              <Button variant="ghost" onClick={() => { setError(null); fetchDeal(); }}>
+                Try Again
+              </Button>
+              <Link href="/">
+                <Button variant="ghost">Go to Ganji</Button>
+              </Link>
+            </div>
           </div>
         </div>
       </main>
@@ -182,6 +210,23 @@ export default function PublicDealPage() {
                       <p className="text-sm text-red-400 text-center">{approveError}</p>
                     )}
                   </>
+                )}
+
+                {!isPaid && !isRefunded && !isDisputed && (
+                  <p className="text-xs text-ink-700 text-center">
+                    Having a problem with the work?{" "}
+                    <Link href="/login" className="text-gold-500 hover:text-gold-400 underline underline-offset-1">
+                      Sign in
+                    </Link>{" "}
+                    with your email to dispute this deal from your dashboard.
+                  </p>
+                )}
+
+                {isDisputed && (
+                  <p className="text-xs text-ink-700 text-center">
+                    This deal is under dispute. An operator will resolve it; you can
+                    sign in with your email to approve if you accept the work.
+                  </p>
                 )}
               </div>
             )}

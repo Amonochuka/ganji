@@ -199,7 +199,7 @@ Payment-not-successful returns `200` because the webhook was received and unders
 | `LNBITS_ADMIN_KEY` | Yes | Router admin key — required for settle/cancel/payout money moves |
 | `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | No | Hold invoice lifetime (default: 30 days) |
 | `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | No | Hold-expiry sweep cadence (default: 21600s = 6h) |
-| `FRONTEND_URL` | No | CORS origin (default: `http://localhost:3000`) |
+| `FRONTEND_URLS` | No | CORS origins, comma-separated (default: `http://localhost:3000`) |
 | `STORAGE_PATH` | No | Artifact blob directory (default: `./uploads`) |
 | `MAX_UPLOAD_BYTES` | No | Per-artifact upload cap (default: 10 MB) |
 | `OPERATOR_EMAILS` | No | Comma-separated emails promoted to arbitration operators at boot |

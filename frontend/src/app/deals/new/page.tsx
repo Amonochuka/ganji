@@ -36,16 +36,37 @@ export default function CreateDealPage() {
     event.preventDefault();
     setError(null);
 
-    const amount = parseInt(amountSats, 10);
-    if (isNaN(amount) || amount <= 0) {
-      setError("Amount must be a positive number of satoshis");
+    // The form uses noValidate, so required attributes never fire — every
+    // check lives here (the backend binding rejects these with a generic
+    // 400 anyway, so fail early with field-level messages instead).
+    if (!title.trim()) {
+      setError("Deal title is required");
       return;
     }
 
-    if (!payeeInvoice.startsWith("lnbc")) {
+    // /^\d+$/ rejects decimals and scientific notation, which parseInt
+    // would silently truncate ("1e6" -> 1 sat, "1000.9" -> 1000).
+    if (!/^\d+$/.test(amountSats.trim()) || parseInt(amountSats, 10) <= 0) {
+      setError("Amount must be a positive whole number of satoshis");
+      return;
+    }
+
+    if (!sourcePlatform) {
+      setError("Select the source platform");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())) {
+      setError("Enter a valid client email");
+      return;
+    }
+
+    if (!payeeInvoice.trim().startsWith("lnbc")) {
       setError("Payee invoice must be a valid Lightning invoice (starts with lnbc)");
       return;
     }
+
+    const amount = parseInt(amountSats, 10);
 
     setIsSubmitting(true);
     try {

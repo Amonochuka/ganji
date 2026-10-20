@@ -117,23 +117,36 @@ type PublicDeal struct {
 // Everything else is surfaced to both the freelancer and the client (the
 // client is authorized by email match). See explained.md §10 #1.
 type DealView struct {
-	ID             string       `json:"id"`
-	FreelancerID   string       `json:"freelancer_id"`
-	ClientEmail    string       `json:"client_email"`
-	Title          string       `json:"title"`
-	AmountSats     int64        `json:"amount_sats"`
-	SourcePlatform string       `json:"source_platform"`
-	PreimageHash   string       `json:"preimage_hash"`
-	Invoice        string       `json:"invoice"`
-	CheckingID     string       `json:"checking_id"`
-	ShareToken     string       `json:"share_token"`
-	Status         Status       `json:"status"`
-	DisputeReason  string       `json:"dispute_reason"`
-	DisputedAt     sql.NullTime `json:"disputed_at"`
-	ResolvedAt     sql.NullTime `json:"resolved_at"`
-	ResolvedBy     string       `json:"resolved_by,omitempty"`
-	CreatedAt      time.Time    `json:"created_at"`
-	VerifiedAt     sql.NullTime `json:"verified_at"`
+	ID             string     `json:"id"`
+	FreelancerID   string     `json:"freelancer_id"`
+	ClientEmail    string     `json:"client_email"`
+	Title          string     `json:"title"`
+	AmountSats     int64      `json:"amount_sats"`
+	SourcePlatform string     `json:"source_platform"`
+	PreimageHash   string     `json:"preimage_hash"`
+	Invoice        string     `json:"invoice"`
+	CheckingID     string     `json:"checking_id"`
+	ShareToken     string     `json:"share_token"`
+	Status         Status     `json:"status"`
+	DisputeReason  string     `json:"dispute_reason"`
+	DisputedAt     *time.Time `json:"disputed_at"`
+	ResolvedAt     *time.Time `json:"resolved_at"`
+	ResolvedBy     string     `json:"resolved_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	VerifiedAt     *time.Time `json:"verified_at"`
+}
+
+// nullTime converts a sql.NullTime to a JSON-friendly *time.Time. The
+// frontend types declare these fields as `string | null`; serializing
+// sql.NullTime directly emits {"Time":"0001-01-01T00:00:00Z","Valid":false}
+// — a truthy object that made every deal look "verified" with an Invalid
+// Date on the client.
+func nullTime(nt sql.NullTime) *time.Time {
+	if !nt.Valid {
+		return nil
+	}
+	t := nt.Time
+	return &t
 }
 
 // View redacts a deal for API responses (see DealView).
@@ -151,11 +164,27 @@ func (d *Deal) View() DealView {
 		ShareToken:     d.ShareToken,
 		Status:         d.Status,
 		DisputeReason:  d.DisputeReason,
-		DisputedAt:     d.DisputedAt,
-		ResolvedAt:     d.ResolvedAt,
+		DisputedAt:     nullTime(d.DisputedAt),
+		ResolvedAt:     nullTime(d.ResolvedAt),
 		ResolvedBy:     d.ResolvedBy,
 		CreatedAt:      d.CreatedAt,
-		VerifiedAt:     d.VerifiedAt,
+		VerifiedAt:     nullTime(d.VerifiedAt),
+	}
+}
+
+// PublicView redacts a deal to the public share-link shape (see PublicDeal).
+// Used by the public approve response so a link holder never sees the deal
+// UUID, client email, freelancer id, preimage hash, checking id or the
+// share token itself.
+func (d *Deal) PublicView() PublicDeal {
+	return PublicDeal{
+		Title:          d.Title,
+		AmountSats:     d.AmountSats,
+		SourcePlatform: d.SourcePlatform,
+		Invoice:        d.Invoice,
+		Status:         d.Status,
+		DisputeReason:  d.DisputeReason,
+		CreatedAt:      d.CreatedAt,
 	}
 }
 

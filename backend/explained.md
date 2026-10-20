@@ -732,7 +732,7 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 | `LNBITS_WEBHOOK_SECRET` | ⚠️ | "" | Wallet webhook secret (empty = dev mode) |
 | `WEBHOOK_URL` | ⚠️ | "" | Public URL for LNbits webhooks (e.g., `https://api.ganji.com/webhooks/lnbits`) |
 | `PORT` | ❌ | 8080 | HTTP listen port |
-| `FRONTEND_URL` | ❌ | localhost:3000 | CORS origin |
+| `FRONTEND_URLS` | ❌ | localhost:3000 | CORS origins, comma-separated (singular `FRONTEND_URL` accepted as fallback) |
 | `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | ❌ | 2,592,000 | Hold invoice expiry (30 days) |
 | `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | ❌ | 21,600 | Sweep interval (6 hours) |
 | `STORAGE_PATH` | ❌ | ./uploads | Local artifact storage path |
@@ -797,7 +797,7 @@ runCancel() // stops sweep ticker
 | **Authentication** | JWT (RS256), short-lived access (15m), rotating refresh (7d) |
 | **Authorization** | Role-based (`is_operator`), ownership checks on every endpoint |
 | **Rate Limiting** | `middleware.RateLimit` (configurable per-route) |
-| **CORS** | Restricted to `FRONTEND_URL`, credentials allowed |
+| **CORS** | Restricted to `FRONTEND_URLS`, credentials allowed |
 | **Input Validation** | Server-side on all handlers (email, UUID, amounts, file types) |
 | **File Upload** | Size limit, extension sanitization, random storage keys, no direct serving |
 | **Secrets** | Env vars only, never in code/logs, `webhook_secret` for HMAC |
@@ -851,7 +851,7 @@ approvals, disputes, arbitration, and expiry sweeps consistent.
    from blocking an escrow transition.
 2. **Best effort** — delivery failures never affect payment processing.
 3. **HTML + Text** — multipart/alternative with a random MIME boundary.
-4. **Frontend URL** — links point to `FRONTEND_URL/deals/{dealID}`.
+4. **Frontend URL** — links point to `FRONTEND_URLS` (or `FRONTEND_URL`) `/public/deals/{shareToken}`.
 5. **First name** — extracted from `display_name` for personalization.
 
 ### SMTP Details
