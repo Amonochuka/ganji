@@ -8,10 +8,12 @@
 
 - **Client** = just an email address. `deals.client_email` (lowercased) is
   captured at deal creation; the client needs **no account** to receive the
-  link and pay. When they're ready to review, they sign up with that same
-  email; the JWT carries `email` (set by `middleware/auth.go`), and
-  `strings.EqualFold(deal.ClientEmail, email)` authorizes approve/dispute and
-  deal viewing.
+  link, pay, and even approve delivery straight from it
+  (`POST /public/deals/:shareToken/approve` — the share token is the
+  authorization). Disputing still requires an account: they sign up with that
+  same email; the JWT carries `email` (set by `middleware/auth.go`), and
+  `strings.EqualFold(deal.ClientEmail, email)` authorizes dispute, authed
+  approve, and deal viewing.
 
 - **Operator** = promoted from `OPERATOR_EMAILS` env var at boot. Role rides
   in the access token as `is_operator` claim. Routes sit behind
@@ -31,7 +33,9 @@
 | `POST /deals/:id/dispute` | ✗ | ✓ | ✗ |
 | `PATCH /deals/:id/payee-invoice` | ✓ | ✗ | ✗ |
 | `POST /deals/:id/share-link` | ✓ | ✗ | ✗ |
-| `GET /public/deals/:shareToken` | ✓ | ✓ (no auth) | ✓ |
+| `GET /auth/me` | ✓ (self) | ✓ (self) | ✓ (self) |
+| `GET /public/deals/:shareToken` | public (share token) | public (share token) | public (share token) |
+| `POST /public/deals/:shareToken/approve` | public (share token) | public (share token) | public (share token) |
 | `GET /deals/:id/artifacts` | ✓ | ✓ | ✓ |
 | `GET /deals/:id/artifacts/:artifactID` | ✓ | ✓ | ✓ |
 | `GET /deals/:id/artifacts/:artifactID/download` | ✓ | ✓ | ✓ |
@@ -53,6 +57,7 @@
 ## Money-State Endpoints
 
 - **Client-scoped**: approve, dispute (must match `client_email`)
+- **Link-bearer-scoped**: public approve (`POST /public/deals/:shareToken/approve`) — share token authorizes the same settle+payout as authed approve; dispute is deliberately excluded
 - **Freelancer-scoped**: submit, payee-invoice, share-link (must be deal owner)
 - **Generic status PATCH**: freelancer-only but **blocked** from money states
   (`locked`, `released`, `disputed`, `refunded`)

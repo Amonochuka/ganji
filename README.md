@@ -59,7 +59,7 @@ Each package's purpose is documented in [`explained.md`](./explained.md).
 | `/dashboard` | Dashboard | Authenticated deal list with status cards, empty state, create CTA |
 | `/deals/new` | Create Deal | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc) |
 | `/deals/[id]` | Deal Detail | Full view, timeline, actions (submit/dispute/rotate/approve), share link, verification |
-| `/public/deals/[shareToken]` | Public Deal | Client-facing: invoice to pay, approve flow (requires backend fix) |
+| `/public/deals/[shareToken]` | Public Deal | Client-facing: invoice to pay, approve flow (no account needed) |
 
 **Core Components:** `Button` (4 variants, 3 sizes), `Input`, `FormBanner`, `AuthShell`, `DealCard`, `format` utils
 

@@ -126,11 +126,31 @@ Public. Revoke a refresh token.
 }
 ```
 
+### `GET /auth/me`
+
+Requires auth. Returns the authenticated user's profile (same `User` shape as signup/login, without tokens).
+
+**Response `200`**
+```json
+{
+  "user": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "display_name": "Alice",
+    "slug": "alice",
+    "trust_score": 100,
+    "created_at": "2026-08-26T12:00:00Z"
+  }
+}
+```
+
+**Response `404`** — `{"error": "user not found"}` if the token's user no longer exists.
+
 ---
 
 ## 3. Deals
 
-All deal endpoints require `Authorization: Bearer <access_token>` **except the public shareable link endpoint** (`GET /public/deals/:shareToken`), which is intentionally unauthenticated so the freelancer can share a link the client can open without an account.
+All deal endpoints require `Authorization: Bearer <access_token>` **except the two public share-link endpoints** (`GET /public/deals/:shareToken` and `POST /public/deals/:shareToken/approve`), which are intentionally unauthenticated so the freelancer can share a link the client can open without an account — to check payment status, pay, and approve delivery.
 
 Every deal carries a unique **`share_token`** — a high-entropy random value, separate from the deal's UUID. It is the only thing that identifies a deal on the public endpoint, so:
 
@@ -164,6 +184,34 @@ The endpoint **refreshes the hold status with LNbits before answering**: if the 
   "error": "deal not found"
 }
 ```
+
+### `POST /public/deals/:shareToken/approve`
+
+Public. The client approves straight from the share link — no account and no JWT required; possession of the share token is the authorization. Money moves exactly like the authed `POST /deals/:dealID/approve`: settle the hold (preimage revealed, funds land in the Ganji wallet), then pay the freelancer's `payee_invoice`; on success the deal is `released` and the Live CV entry is anchored.
+
+Legal only from `locked` or `work_submitted` — the hold status is refreshed from LNbits first, so a just-paid deal locks on the spot. Approving from `disputed` still requires the authenticated, email-matched endpoint (arbitration stays gated). Anything else is `400`. Idempotent like the authed path: re-approving an already-settled deal pays out without double-settling.
+
+> **Note:** anyone holding the link can release the freelancer's payment. Rotate the link (`POST /deals/:dealID/share-link`) to revoke a leaked one.
+
+**Response `200`**
+```json
+{
+  "message": "deal approved and escrow released",
+  "deal": {
+    "id": "uuid",
+    "status": "released",
+    ...
+  }
+}
+```
+
+**Responses:**
+
+| Status | Condition |
+|---|---|
+| `400` | Blank token, or deal not in `locked`/`work_submitted` |
+| `404` | No deal for the share token |
+| `500` | Network leg failed (deal state unchanged by the DB's rules) |
 
 ### `POST /deals/:dealID/share-link`
 

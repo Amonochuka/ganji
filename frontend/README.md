@@ -63,6 +63,7 @@ api.disputeDeal(id, reason, token)
 api.updatePayeeInvoice(id, data, token)
 api.rotateShareLink(id, token)
 api.getPublicDeal(shareToken)
+api.publicApproveDeal(shareToken)
 ```
 
 Full TypeScript interfaces for all requests/responses: `DealView`, `DealStatus`, `PublicDeal`, `CreateDealRequest`, etc.
@@ -93,8 +94,7 @@ npm run build   # production build (Turbopack)
 
 ## Known Issues
 
-- **Public approve requires auth** — `POST /deals/:id/approve` is behind auth middleware. Need backend `POST /public/deals/:shareToken/approve` for client approval from public link.
-- **No `GET /auth/me`** — Settings page needs this backend endpoint.
+- **`GET /auth/me` not in api client** — backend endpoint is live (2026-10-20); needed for the Settings page.
 - **CV types missing** — Live CV pages need `Profile`, `CVEntry` types + API methods in client.
 
 ## File Structure

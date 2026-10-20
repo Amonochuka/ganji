@@ -512,6 +512,12 @@ func (s *Service) RotateShareLink(ctx, userID, dealID) {
 - **Never exposes:** preimage, payee_invoice, client_email, checking_id, internal UUID
 - Refreshes payment status from LNbits before responding (handles missed webhooks)
 
+**Public Approve (`POST /public/deals/:shareToken/approve`):**
+- No auth required — the share token is the authorization
+- Only legal from `locked` / `work_submitted` (hold refreshed from LNbits first)
+- Runs the same `releaseEscrow` settle + payout legs as the authed approve; idempotent
+- `disputed → released` stays authed-only (email-matched arbitration gate)
+
 ---
 
 ## 14. CV Anchoring
@@ -893,6 +899,10 @@ SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_ENCRYPTION=starttls SMTP_USER=you@gm
 - Fixed `scanDeal` to read nullable deal columns (`preimage`, `payee_invoice`,
   `checking_id`, `payout_checking_id`, `resolved_by`) via `sql.NullString` so
   fresh deals — which start with those cells NULL — no longer crash reads.
+- Refresh tokens now carry a random 128-bit `jti`; previously two tokens minted
+  in the same second were byte-identical (`iat` has second granularity) and
+  tripped the `UNIQUE token_hash` constraint, turning concurrent logins into
+  500s.
 
 ---
 

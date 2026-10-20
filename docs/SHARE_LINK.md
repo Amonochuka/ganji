@@ -2,12 +2,15 @@
 
 This is how the payment-confirmation loop closes for the client. The goal:
 the freelancer sends a link, the client opens it **without logging in**, sees
-the invoice (and message at-a-glance), pays in their wallet, and the page
-reflects the money landing on the network.
+the invoice (and message at-a-glance), pays in their wallet, the page reflects
+the money landing on the network — and they can approve delivery from the same
+link, no account needed.
 
 ## Design — Why a Separate Token, Not the Deal UUID
 
-`GET /public/deals/:shareToken` is the only unauthenticated deal endpoint.
+The public share-link endpoints (`GET /public/deals/:shareToken` and
+`POST /public/deals/:shareToken/approve`) are the only unauthenticated deal
+endpoints.
 The share token is a **deliberately separate secret from the deal's DB UUID**:
 
 - **Revocable.** `POST /deals/:dealID/share-link` (freelancer) mints a fresh
@@ -44,7 +47,14 @@ The share token is a **deliberately separate secret from the deal's DB UUID**:
 - **Rotation**: `Service.RotateShareLink` (freelancer owner only) generates a
   new token and persists it via `repo.UpdateShareToken`. Mirrors the payee-
   invoice rule: frozen after `released`/`refunded` (nothing left to share).
-- **Route wiring**: `GET /public/deals/:shareToken` is mounted on the **root
+- **Public approve**: `Service.PublicApproveDeal` resolves the token, refreshes
+  the hold (same as the view), and — only from `locked`/`work_submitted` —
+  runs the same `releaseEscrow` two-leg settle + payout as the authed approve.
+  The token itself is the authorization, so no email match happens on this
+  path; `disputed → released` deliberately stays authed-only (arbitration is
+  email-gated).
+- **Route wiring**: `GET /public/deals/:shareToken` and
+  `POST /public/deals/:shareToken/approve` are mounted on the **root
   router** (unauthenticated), while `POST /deals/:dealID/share-link` lives in
   the protected `/deals` group.
 
@@ -53,16 +63,20 @@ The share token is a **deliberately separate secret from the deal's DB UUID**:
 | Method | Path | Auth | Effect |
 |---|---|---|---|
 | `GET` | `/public/deals/:shareToken` | none | safe public deal view; refreshes hold status (locks if paid) |
+| `POST` | `/public/deals/:shareToken/approve` | none (share token) | settle hold + pay freelancer — releases funds |
 | `POST` | `/deals/:dealID/share-link` | freelancer | rotate token → revoke old link, return new one |
 
 ## Threat Model / Trade-offs
 
-- Link is bearer: whoever has it can see the deal and pay the invoice. That is
-  the feature, and the token is unguessable. It is **not**
-  sensitive-credential-grade — treat it like a "magic link".
-- Payment-gating is unchanged: even with the link, a stranger can't approve or
-  dispute (both are locked to `client_email` matching) and can't see the
-  preimage, payee invoice, or the freelancer's payout details.
+- Link is bearer: whoever has it can see the deal, pay the invoice, **and
+  approve it — releasing the freelancer's payment**. Paying and approving are
+  both the point, and the token is unguessable. It is effectively a bearer
+  payment authorization — treat it like one, and rotate to revoke a leaked
+  link before it's abused.
+- Dispute stays payment-gated: even with the link, a stranger can't dispute
+  (locked to `client_email` matching) and can't see the preimage, payee
+  invoice, or the freelancer's payout details. Authed approve also remains
+  available (including from `disputed`, which public approve rejects).
 - After `released`/`refunded` the public page still renders the (terminal)
   status but the invoice is spent; rotation is disabled because there is
   nothing to re-share.

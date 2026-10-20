@@ -22,6 +22,8 @@ Fix these before relying on the docs' claims. (Audited 2026-09-26.)
 | 13 | Webhook body read unbounded on public endpoint | 2026-09-19 (1 MiB cap) |
 | 14 | `Local.Save` non-atomic | 2026-09-26 (temp file + rename + fsync) |
 | 18 | OTS proof pipeline non-functional end-to-end | 2026-09-22 (fixed protocol) |
+| 19 | `GET /me` missing — profile only at signup/login | 2026-10-20 (commit 6ca4dc1) |
+| 20 | Refresh tokens issued in the same second were identical (`iat` has second granularity) → UNIQUE `token_hash` violation → 500 on concurrent login | 2026-10-20 (commit 57409bf, random `jti` per issuance) |
 
 ## Remaining Issues
 
@@ -65,8 +67,6 @@ never used.
   artifact, or a verification — artifacts in particular accumulate forever.
 - **Refresh-token GC.** `refresh_tokens` rows are never cleaned up after
   expiry, so the table grows without bound.
-- **`GET /me`.** Your own profile is only returned at signup/login; there is no
-  authenticated endpoint to fetch the current user.
 - **Structured logging.** Everything is `log.Printf`; no `slog` / leveled
   loggers / request correlation IDs.
 - **Hardening (future): `client_email` masking.** Already excluded from the
@@ -78,4 +78,7 @@ never used.
 
 ### Frontend (out of scope this session)
 
-`frontend/` exists but the shared deal/public-link UI is not implemented.
+See [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md) for the full picture. The
+public-link page is wired to `POST /public/deals/:shareToken/approve` (client
+can pay and approve with no account). Settings (`/settings`, on `GET /auth/me`)
+and Live CV pages are not built.

@@ -45,6 +45,15 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   `internal/lnbits/client_test.go`,
   `internal/storage/local_test.go`, and the artifact upload/download handler
   and service tests; `go test ./...` passes.
+- **Share-link approval + current-user profile shipped (2026-10-20).**
+  `POST /public/deals/:shareToken/approve` lets the client settle + release
+  straight from the share link with no account (the token is the
+  authorization; `disputed → released` stays authed/email-gated), and
+  `GET /auth/me` returns the caller's profile. Refresh tokens now carry a
+  random `jti` so two issuals in the same second can't collide on the UNIQUE
+  `token_hash` constraint. The frontend public page is wired to the approve
+  endpoint; `GET /auth/me` still awaits a Settings page — see
+  [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md).
 - **Frontend compiles and has 7 pages implemented** — see [`FRONTEND_REPORT.md`](../FRONTEND_REPORT.md).
 - Still stubbed (unchanged): `internal/websocket`,
   `internal/middleware/ratelimit.go`, `pkg/sanitize`.
@@ -203,9 +212,7 @@ Payment-not-successful returns `200` because the webhook was received and unders
 
 ## Recommendations
 
-1. **Add missing backend endpoints for frontend:**
-   - `GET /auth/me` — current user profile (needed for Settings page)
-   - `POST /public/deals/:shareToken/approve` — public approve without auth (needed for client approval from public link)
+1. ~~**Add missing backend endpoints for frontend:** `GET /auth/me`, `POST /public/deals/:shareToken/approve`~~ — *(done 2026-10-20; frontend wiring still pending — see [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md)).*
 2. **Build the WebSocket server** — needed before any real-time deal UI works.
 3. ~~**Build the Live CV package**~~ — *(done: released deals anchor hashed CV entries; public profile + verify endpoints are live).*
 4. **Add tests** — start with auth and deal state machine. The repository interfaces make mocking straightforward.

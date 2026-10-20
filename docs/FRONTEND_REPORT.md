@@ -1,8 +1,8 @@
 # Ganji Frontend — Implementation Report
 
-**Last updated:** 2026-10-01  
+**Last updated:** 2026-10-20  
 **Branch:** main  
-**Commit:** 6095ff6
+**Commit:** cb4bee9
 
 ---
 
@@ -16,7 +16,7 @@
 | **Dashboard** | `/dashboard` | Authenticated deal list with status cards, empty state, create CTA | `GET /deals` |
 | **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc) | `POST /deals` |
 | **Deal Detail** | `/deals/[id]` | Full deal view, timeline, actions (submit/dispute/rotate), share link, verification status | `GET /deals/:id`, `POST /submit`, `POST /dispute`, `POST /share-link`, `POST /approve` |
-| **Public Deal** | `/public/deals/[shareToken]` | Client-facing view: invoice to pay, approve button (requires auth fix), dispute status | `GET /public/deals/:shareToken` |
+| **Public Deal** | `/public/deals/[shareToken]` | Client-facing view: invoice to pay, approve button wired to the public approve endpoint, dispute status | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/approve` |
 
 ---
 
@@ -50,6 +50,7 @@
 - `updatePayeeInvoice(id, data, token)` → `PATCH /deals/:id/payee-invoice`
 - `rotateShareLink(id, token)` → `POST /deals/:id/share-link`
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
+- `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
 
 **Types:** Full TypeScript interfaces for all requests/responses (DealView, DealStatus, PublicDeal, etc.)
 
@@ -82,8 +83,7 @@
 
 | Issue | Impact | Fix Needed |
 |-------|--------|------------|
-| **Public approve requires auth** | Client cannot approve from public link without login | Add `POST /public/deals/:shareToken/approve` (no auth, uses share token) or magic-link email flow |
-| **No `GET /auth/me`** | Settings page cannot fetch current user profile | Add backend endpoint returning User + default payee invoice |
+| **`GET /auth/me` not in api client** | Settings page can't fetch the current user | Backend endpoint live (2026-10-20): add the client method, then build Settings |
 | **No CV types in API client** | Live CV pages can't be typed | Add `Profile`, `CVEntry`, `VerificationResult` types + API methods |
 | **Payee invoice update not in Deal Detail** | Freelancer can't change payout destination after create | Add inline edit in Deal Detail (endpoint exists: `PATCH /deals/:id/payee-invoice`) |
 
@@ -95,7 +95,7 @@
 |----------|------|-------|------------------|-------|
 | **High** | Live CV (Public Profile) | `/cv/[slug]` | `GET /cv/:slug` | Core differentiator — hash-verified reputation |
 | **High** | Verify Entry | `/cv/[slug]/verify/[entryId]` | `GET /cv/:slug/verify/:entryID` | Cryptographic proof viewer |
-| **Medium** | Settings / Profile | `/settings` | `GET /auth/me` (needs backend) | Update display name, default payee invoice, password |
+| **Medium** | Settings / Profile | `/settings` | `GET /auth/me` (backend live) | Update display name, default payee invoice, password |
 | **Low** | Operator Dispute Queue | `/operator/disputes` | `GET /disputes`, `POST /disputes/:id/resolve` | Admin only |
 | **Low** | Operator Reconcile | `/operator/deals/[id]/reconcile` | `POST /deals/:id/reconcile` | Admin only |
 
@@ -117,7 +117,7 @@ cd frontend && npm run dev
 2. **Create Deal** — form validation (sats > 0, lnbc invoice), redirects to detail
 3. **Deal Detail (freelancer)** — Submit Work, Dispute, Rotate Link buttons work
 4. **Public Deal** — loads via share token, shows invoice, status updates after payment
-5. **Approve flow** — currently blocked (see issue above)
+5. **Approve flow** — authed approve and public-link approve both wired
 
 ---
 
@@ -169,8 +169,8 @@ frontend/
 
 ## 🚀 Next Steps (Suggested Order)
 
-1. **Fix public approve** — Add backend `POST /public/deals/:shareToken/approve` (no auth)
-2. **Add `GET /auth/me`** — Enable Settings page
+1. ~~**Fix public approve**~~ — backend `POST /public/deals/:shareToken/approve` shipped 2026-10-20; frontend wired same day (`publicApproveDeal` + public page button)
+2. ~~**Add `GET /auth/me`**~~ — backend shipped 2026-10-20; add the api-client method and build the Settings page on it
 3. **Build Live CV** — `/cv/[slug]` + `/cv/[slug]/verify/[entryId]`
 4. **Settings page** — Profile, default payee invoice, password change
 5. **Operator pages** — Dispute queue, reconcile (if needed for MVP)
