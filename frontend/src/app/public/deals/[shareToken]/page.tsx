@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { api, type PublicDeal, type DealStatus, type ApproveDealResponse } from "@/lib/api/api-client";
+import { api, type PublicDeal, type DealStatus } from "@/lib/api/api-client";
 import { formatCurrency } from "@/lib/utils/format";
 
 export default function PublicDealPage() {
@@ -15,6 +15,7 @@ export default function PublicDealPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isApproving, setIsApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDeal();
@@ -35,27 +36,12 @@ export default function PublicDealPage() {
   async function handleApprove() {
     if (!deal) return;
     setIsApproving(true);
+    setApproveError(null);
     try {
-      // The approve endpoint requires the deal ID, not share token
-      // But the public deal doesn't expose the internal ID
-      // We need to check - the backend approve endpoint is POST /deals/:dealID/approve
-      // and it uses email from auth context. For public access, we might need a different flow.
-      // Let me check the backend - the ApproveDeal handler uses email from context
-      // For public access, we need to handle this differently.
-      // Actually, looking at the backend: ApproveDeal gets email from c.GetString("email")
-      // which comes from the auth middleware. So public approval would need auth.
-      // But the public deal page should allow the client to approve without login.
-      // This might need a backend change or a different approach.
-      // For now, let's assume there's a public approve endpoint or we need to handle this.
-      
-      // Actually, looking at the router.go, the approve route is in the protected group
-      // So it requires auth. But the client might not have an account.
-      // We might need to add a public approve endpoint that takes the share token.
-      // For now, I'll show a message that they need to log in or we'll need to add a public endpoint.
-      
-      setError("Approval requires authentication. Please contact the freelancer for a direct payment link.");
+      const res = await api.publicApproveDeal(shareToken);
+      setDeal(res.deal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to approve");
+      setApproveError(err instanceof Error ? err.message : "Failed to approve");
     } finally {
       setIsApproving(false);
     }
@@ -183,14 +169,19 @@ export default function PublicDealPage() {
                 </div>
 
                 {canApprove && (
-                  <Button
-                    size="lg"
-                    className="w-full py-3.5"
-                    onClick={handleApprove}
-                    isLoading={isApproving}
-                  >
-                    Approve & Release Payment
-                  </Button>
+                  <>
+                    <Button
+                      size="lg"
+                      className="w-full py-3.5"
+                      onClick={handleApprove}
+                      isLoading={isApproving}
+                    >
+                      Approve & Release Payment
+                    </Button>
+                    {approveError && (
+                      <p className="text-sm text-red-400 text-center">{approveError}</p>
+                    )}
+                  </>
                 )}
               </div>
             )}

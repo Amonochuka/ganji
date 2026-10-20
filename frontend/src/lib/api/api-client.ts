@@ -111,6 +111,10 @@ export const api = {
   getPublicDeal(shareToken: string) {
     return this.get<{ deal: PublicDeal }>(`/public/deals/${shareToken}`);
   },
+
+  publicApproveDeal(shareToken: string) {
+    return this.post<ApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
+  },
 };
 
 export type AuthTokens = {
