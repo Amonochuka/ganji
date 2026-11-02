@@ -90,6 +90,14 @@ func Load() *Config {
 		}
 		log.Printf("WARNING: LNBITS_WEBHOOK_SECRET not set - webhook signature verification disabled (dev mode)")
 	}
+	if cfg.LNBitsURL != "" {
+		if cfg.LNBitsAPIKey == "" {
+			log.Printf("WARNING: LNBITS_URL set but LNBITS_API_KEY is empty")
+		}
+		if cfg.LNBitsAdminKey == "" {
+			log.Printf("WARNING: LNBITS_URL set but LNBITS_ADMIN_KEY is empty (money moves disabled)")
+		}
+	}
 
 	return cfg
 }
