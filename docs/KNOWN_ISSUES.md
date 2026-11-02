@@ -41,9 +41,7 @@ The health handler already used `PingContext`.
 Goroutines bounded by a semaphore (capacity 10).
 
 **17. Dead code / stale stubs.**
-`pkg/hash/preimage.go` and `pkg/sanitize` are empty (preimage generation is
-inline in `deals/service.go`); `ErrPaymentNotPaid` (`deals/errors.go`) is
-never used.
+`pkg/hash` and `pkg/sanitize` removed; `ErrPaymentNotPaid` removed.
 
 ### Minor / Hardening (continued)
 
