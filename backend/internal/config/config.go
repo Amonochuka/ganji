@@ -77,6 +77,12 @@ func Load() *Config {
 	if len(cfg.FrontendURLs) == 0 {
 		log.Printf("WARNING: no frontend URLs configured, CORS may block requests")
 	}
+	if cfg.LNBitsWebhookSecret == "" {
+		if os.Getenv("GIN_MODE") == "release" || os.Getenv("ENV") == "production" {
+			log.Fatalf("LNBITS_WEBHOOK_SECRET is required in production")
+		}
+		log.Printf("WARNING: LNBITS_WEBHOOK_SECRET not set - webhook signature verification disabled (dev mode)")
+	}
 
 	return cfg
 }
