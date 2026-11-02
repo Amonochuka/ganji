@@ -31,10 +31,11 @@ type UserFinder interface {
 type Service struct {
 	cfg   *config.Config
 	users UserFinder
+	sem   chan struct{}
 }
 
 func NewService(cfg *config.Config, users UserFinder) *Service {
-	return &Service{cfg: cfg, users: users}
+	return &Service{cfg: cfg, users: users, sem: make(chan struct{}, 10)}
 }
 
 func (s *Service) Enabled() bool {
@@ -75,7 +76,14 @@ func (s *Service) notifyBoth(deal *deals.Deal, send func(context.Context, string
 	if !s.Enabled() || s.users == nil {
 		return
 	}
+	select {
+	case s.sem <- struct{}{}:
+	default:
+		log.Printf("email: notification queue full, skipping deal %s", deal.ID)
+		return
+	}
 	go func() {
+		defer func() { <-s.sem }()
 		ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 		defer cancel()
 
