@@ -37,11 +37,8 @@ Fix these before relying on the docs' claims. (Audited 2026-09-26.)
 Fixed in `db.Open`'s `pingWithRetry` (now uses `PingContext` with a 3s timeout).
 The health handler already used `PingContext`.
 
-**16. Notifications are freelancer-only, un-refunded to clients, and untracked.**
-`DealNotifier` emails go only to the freelancer, and each send spawns an
-un-bounded goroutine with no waitgroup/rate limit. Notably, on `DealRefunded`,
-the email is dispatched to the freelancer; the client—whose money was
-actually returned—receives no notification whatsoever.
+**16. Notifications.** Now sent to both freelancer and client via `notifyBoth`.
+Remaining: sends are fire-and-forget goroutines (no waitgroup/rate limit).
 
 **17. Dead code / stale stubs.**
 `pkg/hash/preimage.go` and `pkg/sanitize` are empty (preimage generation is
@@ -59,10 +56,6 @@ never used.
   automated resolution for `awaiting_payment` disputes where nothing was ever
   funded (the sweep already covers stale open deals).
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
-- **Client-facing notifications.** Emails today go only to the freelancer
-  (payment locked, disputed, released, refunded); the client — who is the one
-  that paid and is waiting — hears nothing (e.g. no "work submitted — come
-  review"). The notifier interface only has freelancer-scoped events.
 - **Deletion endpoints.** There is no user-facing way to delete a deal, an
   artifact, or a verification — artifacts in particular accumulate forever.
 - **Refresh-token GC.** Hourly cleanup worker now removes expired/revoked rows;
