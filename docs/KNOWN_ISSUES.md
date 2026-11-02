@@ -46,8 +46,8 @@ Goroutines bounded by a semaphore (capacity 10).
 ### Minor / Hardening (continued)
 
 **18. Orphaned files in storage.**
-Artifacts and verifications have no deletion endpoints; uploaded blobs accumulate
-forever (disk exhaustion risk). No cleanup strategy exists.
+Artifacts can now be deleted via `DELETE /deals/:dealID/artifacts/:artifactID`
+(blob removed too). Verifications/deals still lack deletion endpoints.
 
 **19. Preimage storage security.**
 Fixed: optional AES-GCM encryption at rest via `PREIMAGE_ENCRYPTION_KEY`
