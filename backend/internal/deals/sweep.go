@@ -34,7 +34,7 @@ func RunHoldSweep(ctx context.Context, service *Service, interval, holdLifetime 
 }
 
 func sweep(ctx context.Context, service *Service, holdLifetime time.Duration) {
-	cutoff := time.Now().Add(-holdLifetime)
+	cutoff := time.Now().UTC().Add(-holdLifetime)
 
 	swept, err := service.SweepExpiredHolds(ctx, cutoff)
 	if err != nil {

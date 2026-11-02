@@ -624,7 +624,7 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID, reason string)
 
 	deal.Status = StatusDisputed
 	deal.DisputeReason = reason
-	deal.DisputedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	deal.DisputedAt = sql.NullTime{Time: time.Now().UTC(), Valid: true}
 	s.notifyDisputed(deal)
 	return deal, nil
 }
@@ -678,7 +678,7 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 		if err != nil {
 			return nil, err
 		}
-		deal.ResolvedAt = sql.NullTime{Time: time.Now(), Valid: true}
+		deal.ResolvedAt = sql.NullTime{Time: time.Now().UTC(), Valid: true}
 		deal.ResolvedBy = operatorEmail
 		return deal, nil
 	case DisputeResolutionRefund:
@@ -719,7 +719,7 @@ func (s *Service) refundDispute(ctx context.Context, operatorEmail, dealID strin
 	}
 
 	deal.Status = StatusRefunded
-	deal.ResolvedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	deal.ResolvedAt = sql.NullTime{Time: time.Now().UTC(), Valid: true}
 	deal.ResolvedBy = operatorEmail
 	s.notifyRefunded(deal)
 	return deal, nil
