@@ -56,8 +56,8 @@ forever (disk exhaustion risk). No cleanup strategy exists.
 A DB compromise could let an attacker settle holds. Consider encryption at rest.
 
 **20. Slug generation collision handling.**
-`generateUniqueSlug` retries up to 100 times on collisions; could be slow under
-heavy collisions. Consider UUID suffix.
+Fixed: base slug checked first, then random 6-hex suffix (5 attempts) instead of
+100 sequential retries.
 
 **21. Unbounded notification goroutines.**
 `email.Service.notifyBoth` spawns fire-and-forget goroutines per event with no
