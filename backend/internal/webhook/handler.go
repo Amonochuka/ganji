@@ -40,9 +40,13 @@ func (h *Handler) HandleLNbitsWebhook(c *gin.Context) {
 		return
 	}
 
-	if h.secret != "" && !VerifyLNbitsSignature(rawBody, c.GetHeader("LNbits-Signature"), h.secret) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
-		return
+	if h.secret != "" {
+		if !VerifyLNbitsSignature(rawBody, c.GetHeader("LNbits-Signature"), h.secret) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+			return
+		}
+	} else {
+		log.Printf("WARNING: LNBITS_WEBHOOK_SECRET not set - webhook signature verification disabled")
 	}
 
 	var notification PaymentNotification
