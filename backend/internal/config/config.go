@@ -68,6 +68,16 @@ func Load() *Config {
 		SMTPEncryption:            getEnv("SMTP_ENCRYPTION", "starttls"),
 	}
 
+	if len(cfg.JWTSecret) < 32 {
+		log.Fatalf("JWT_SECRET must be at least 32 characters")
+	}
+	if len(cfg.JWTRefreshSecret) < 32 {
+		log.Fatalf("JWT_REFRESH_SECRET must be at least 32 characters")
+	}
+	if len(cfg.FrontendURLs) == 0 {
+		log.Printf("WARNING: no frontend URLs configured, CORS may block requests")
+	}
+
 	return cfg
 }
 
