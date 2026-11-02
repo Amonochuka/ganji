@@ -77,6 +77,11 @@ func Load() *Config {
 	if len(cfg.FrontendURLs) == 0 {
 		log.Printf("WARNING: no frontend URLs configured, CORS may block requests")
 	}
+	for _, origin := range cfg.FrontendURLs {
+		if origin == "*" || origin == "null" {
+			log.Fatalf("CORS origin %q is not allowed (wildcard/null origins forbidden with credentials)", origin)
+		}
+	}
 	if cfg.LNBitsWebhookSecret == "" {
 		if os.Getenv("GIN_MODE") == "release" || os.Getenv("ENV") == "production" {
 			log.Fatalf("LNBITS_WEBHOOK_SECRET is required in production")
