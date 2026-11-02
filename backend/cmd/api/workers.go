@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/Amonochuka/ganji-backend/internal/auth"
 	"github.com/Amonochuka/ganji-backend/internal/config"
 	"github.com/Amonochuka/ganji-backend/internal/cv"
 	"github.com/Amonochuka/ganji-backend/internal/deals"
@@ -13,7 +14,7 @@ import (
 // runWorkers starts the background jobs that reconcile escrow state with
 // LNbits and upgrade OpenTimestamps proofs. It blocks until ctx is cancelled;
 // call it as a goroutine.
-func runWorkers(ctx context.Context, cfg *config.Config, dealService *deals.Service, cvService *cv.Service) {
+func runWorkers(ctx context.Context, cfg *config.Config, dealService *deals.Service, cvService *cv.Service, authService *auth.Service) {
 	lifetime := time.Duration(cfg.HoldInvoiceExpirySeconds) * time.Second
 	interval := time.Duration(cfg.HoldSweepIntervalSeconds) * time.Second
 
@@ -21,6 +22,8 @@ func runWorkers(ctx context.Context, cfg *config.Config, dealService *deals.Serv
 
 	otsInterval := time.Duration(cfg.OTSUpgradeIntervalSeconds) * time.Second
 	runOTSUpgradeLoop(ctx, cvService, otsInterval)
+
+	go auth.RunRefreshTokenCleanup(ctx, authService, time.Hour)
 }
 
 // runOTSUpgradeLoop periodically asks the OpenTimestamps calendars whether

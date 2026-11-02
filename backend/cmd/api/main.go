@@ -30,14 +30,14 @@ func main() {
 	}
 	defer uploadStore.Close()
 
-	router, dealService, cvService := setupRouter(cfg, dbConn, uploadStore)
+	router, dealService, cvService, authService := setupRouter(cfg, dbConn, uploadStore)
 
 	// Hold-expiry sweep: periodically reconcile stale open deals with LNbits
 	// so expired/cancelled/unfunded holds don't stay awaiting_payment forever.
 	// OpenTimestamps proof upgrades run from the same worker loop.
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
-	go runWorkers(runCtx, cfg, dealService, cvService)
+	go runWorkers(runCtx, cfg, dealService, cvService, authService)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

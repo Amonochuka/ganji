@@ -29,7 +29,7 @@ import (
 // route logic directly, only wiring. The *deals.Service is returned so main
 // can run background workers (e.g. the hold-expiry sweep) against it.
 // uploadStore is the artifact blob backend, owned (and closed) by main.
-func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage) (*gin.Engine, *deals.Service, *cv.Service) {
+func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage) (*gin.Engine, *deals.Service, *cv.Service, *auth.Service) {
 	router := gin.Default()
 
 	router.Use(cors.New(cors.Config{
@@ -122,5 +122,5 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 
 	cv.RegisterRoutes(router, cv.NewHandler(cvService))
 
-	return router, dealService, cvService
+	return router, dealService, cvService, authService
 }

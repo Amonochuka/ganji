@@ -26,6 +26,7 @@ Fix these before relying on the docs' claims. (Audited 2026-09-26.)
 | 20 | Refresh tokens issued in the same second were identical (`iat` has second granularity) → UNIQUE `token_hash` violation → 500 on concurrent login | 2026-10-20 (commit 57409bf, random `jti` per issuance) |
 | 21 | Rate limiting middleware was an empty stub (public/auth/webhook endpoints unthrottled) | 2026-11-02 (in-memory per-IP limiter; auth 5/min, public 60/min, webhooks 100/min) |
 | 22 | JWT secrets had no minimum length validation | 2026-11-02 (config.Load fails fast below 32 chars) |
+| 23 | Refresh-token GC never scheduled | 2026-11-02 (hourly cleanup worker via auth.RunRefreshTokenCleanup) |
 
 ## Remaining Issues
 
@@ -66,9 +67,8 @@ never used.
   review"). The notifier interface only has freelancer-scoped events.
 - **Deletion endpoints.** There is no user-facing way to delete a deal, an
   artifact, or a verification — artifacts in particular accumulate forever.
-- **Refresh-token GC.** `refresh_tokens` rows are never cleaned up on a schedule; a
-  `CleanupExpiredRefreshTokens` method now exists but no cron/worker invokes it yet,
-  so the table can still grow without bound.
+- **Refresh-token GC.** Hourly cleanup worker now removes expired/revoked rows;
+  table no longer grows unbounded.
 - **Structured logging.** Everything is `log.Printf`; no `slog` / leveled
   loggers / request correlation IDs.
 - **Hardening (future): `client_email` masking.** Already excluded from the
