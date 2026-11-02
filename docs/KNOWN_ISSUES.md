@@ -38,7 +38,7 @@ Fixed in `db.Open`'s `pingWithRetry` (now uses `PingContext` with a 3s timeout).
 The health handler already used `PingContext`.
 
 **16. Notifications.** Now sent to both freelancer and client via `notifyBoth`.
-Remaining: sends are fire-and-forget goroutines (no waitgroup/rate limit).
+Goroutines bounded by a semaphore (capacity 10).
 
 **17. Dead code / stale stubs.**
 `pkg/hash/preimage.go` and `pkg/sanitize` are empty (preimage generation is
@@ -60,8 +60,7 @@ Fixed: base slug checked first, then random 6-hex suffix (5 attempts) instead of
 100 sequential retries.
 
 **21. Unbounded notification goroutines.**
-`email.Service.notifyBoth` spawns fire-and-forget goroutines per event with no
-waitgroup or rate limit.
+Fixed: bounded by semaphore (capacity 10).
 
 ## Not Built / Next
 
