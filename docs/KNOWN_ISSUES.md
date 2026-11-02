@@ -45,6 +45,24 @@ Remaining: sends are fire-and-forget goroutines (no waitgroup/rate limit).
 inline in `deals/service.go`); `ErrPaymentNotPaid` (`deals/errors.go`) is
 never used.
 
+### Minor / Hardening (continued)
+
+**18. Orphaned files in storage.**
+Artifacts and verifications have no deletion endpoints; uploaded blobs accumulate
+forever (disk exhaustion risk). No cleanup strategy exists.
+
+**19. Preimage storage security.**
+`Deal.Preimage` (escrow settle secret) is stored in plaintext in Postgres.
+A DB compromise could let an attacker settle holds. Consider encryption at rest.
+
+**20. Slug generation collision handling.**
+`generateUniqueSlug` retries up to 100 times on collisions; could be slow under
+heavy collisions. Consider UUID suffix.
+
+**21. Unbounded notification goroutines.**
+`email.Service.notifyBoth` spawns fire-and-forget goroutines per event with no
+waitgroup or rate limit.
+
 ## Not Built / Next
 
 ### Backend
