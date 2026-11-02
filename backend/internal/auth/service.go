@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -35,6 +36,18 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 	}
 	if len(password) < 8 {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, ErrPasswordTooShort)
+	}
+	hasLetter, hasDigit := false, false
+	for _, r := range password {
+		if unicode.IsLetter(r) {
+			hasLetter = true
+		}
+		if unicode.IsDigit(r) {
+			hasDigit = true
+		}
+	}
+	if !hasLetter || !hasDigit {
+		return nil, fmt.Errorf("%w: password must contain a letter and a digit", ErrInvalidInput)
 	}
 	if strings.TrimSpace(displayName) == "" {
 		return nil, fmt.Errorf("%w: display name is required", ErrInvalidInput)
