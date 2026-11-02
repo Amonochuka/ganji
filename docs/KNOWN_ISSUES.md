@@ -24,6 +24,8 @@ Fix these before relying on the docs' claims. (Audited 2026-09-26.)
 | 18 | OTS proof pipeline non-functional end-to-end | 2026-09-22 (fixed protocol) |
 | 19 | `GET /me` missing — profile only at signup/login | 2026-10-20 (commit 6ca4dc1) |
 | 20 | Refresh tokens issued in the same second were identical (`iat` has second granularity) → UNIQUE `token_hash` violation → 500 on concurrent login | 2026-10-20 (commit 57409bf, random `jti` per issuance) |
+| 21 | Rate limiting middleware was an empty stub (public/auth/webhook endpoints unthrottled) | 2026-11-02 (in-memory per-IP limiter; auth 5/min, public 60/min, webhooks 100/min) |
+| 22 | JWT secrets had no minimum length validation | 2026-11-02 (config.Load fails fast below 32 chars) |
 
 ## Remaining Issues
 
@@ -58,15 +60,15 @@ never used.
   automated resolution for `awaiting_payment` disputes where nothing was ever
   funded (the sweep already covers stale open deals).
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
-- **Rate limiting** middleware: empty stub (public endpoints are unthrottled).
 - **Client-facing notifications.** Emails today go only to the freelancer
   (payment locked, disputed, released, refunded); the client — who is the one
   that paid and is waiting — hears nothing (e.g. no "work submitted — come
   review"). The notifier interface only has freelancer-scoped events.
 - **Deletion endpoints.** There is no user-facing way to delete a deal, an
   artifact, or a verification — artifacts in particular accumulate forever.
-- **Refresh-token GC.** `refresh_tokens` rows are never cleaned up after
-  expiry, so the table grows without bound.
+- **Refresh-token GC.** `refresh_tokens` rows are never cleaned up on a schedule; a
+  `CleanupExpiredRefreshTokens` method now exists but no cron/worker invokes it yet,
+  so the table can still grow without bound.
 - **Structured logging.** Everything is `log.Printf`; no `slog` / leveled
   loggers / request correlation IDs.
 - **Hardening (future): `client_email` masking.** Already excluded from the

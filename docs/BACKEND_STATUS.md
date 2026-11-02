@@ -55,8 +55,8 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   endpoint; `GET /auth/me` still awaits a Settings page — see
   [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md).
 - **Frontend compiles and has 7 pages implemented** — see [`FRONTEND_REPORT.md`](../FRONTEND_REPORT.md).
-- Still stubbed (unchanged): `internal/websocket`,
-  `internal/middleware/ratelimit.go`, `pkg/sanitize`.
+- Still stubbed (unchanged): `internal/websocket`, `pkg/sanitize`.
+  Rate limiting now implemented (in-memory) in `internal/middleware/ratelimit.go`.
 
 ---
 
@@ -120,7 +120,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 |---|---|---|
 | Sanitize package | ❌ Empty stub | `pkg/sanitize/` |
 | Hash/preimage package | ❌ Empty stub | `pkg/hash/` |
-| Rate limiting middleware | ❌ Empty stub | `internal/middleware/ratelimit.go` |
+| Rate limiting middleware | ✅ Done (in-memory) | `internal/middleware/ratelimit.go` |
 | CORS middleware | ❌ Empty stub | `internal/middleware/cors.go` |
 | Input sanitization hardening | ❌ Not done | — |
 | ~~Tests~~ *(tests now exist — see deals/webhook/lnbits `_test.go`)* | ✅ Done | `backend/internal/*/*_test.go` |
@@ -136,7 +136,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 ### Important (Phase 5)
 4. **Sanitize package** — needed for output encoding, XSS prevention.
 5. **Hash/preimage package** — preimage logic is currently inline in `deals/service.go`, should be extracted.
-6. **Rate limiting middleware** — currently empty stub.
+6. **Rate limiting middleware** — implemented (in-memory, per-IP; auth 5/min, public 60/min, webhooks 100/min).
 7. **CORS middleware** — currently inline in `router.go` via `gin-contrib/cors`.
 
 ### Nice to Have

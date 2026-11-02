@@ -31,7 +31,7 @@ backend/
     health/           GET /health
     lnbits/           LNbits HTTP client (hold invoices, check/settle/cancel,
                       pay out, webhook-url attachment)
-    middleware/       auth (done); cors via gin-contrib; ratelimit is a stub
+    middleware/       auth (done); cors via gin-contrib; ratelimit implemented (in-memory)
     storage/          artifact blob backend (Storage iface + Local disk impl,
                       traversal-safe keys, S3-ready)
     webhook/          LNbits payment webhook + HMAC signature verification

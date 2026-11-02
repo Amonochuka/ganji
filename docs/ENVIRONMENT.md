@@ -8,8 +8,8 @@ critical ones:
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string (e.g., `postgres://postgres:postgres@localhost:5432/ganji?sslmode=disable`) |
-| `JWT_SECRET` | Access token signing secret (HS256) |
-| `JWT_REFRESH_SECRET` | Refresh token signing secret (HS256) |
+| `JWT_SECRET` | Access token signing secret (HS256); must be at least 32 characters |
+| `JWT_REFRESH_SECRET` | Refresh token signing secret (HS256); must be at least 32 characters |
 | `LNBITS_URL` | LNbits instance URL (e.g., `https://lnbits.example.com`) |
 | `LNBITS_API_KEY` | LNbits **invoice key** (read/create invoices) |
 | `LNBITS_ADMIN_KEY` | LNbits **admin key** — required for settle/cancel/payout (money moves) |
