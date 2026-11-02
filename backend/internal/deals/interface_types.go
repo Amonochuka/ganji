@@ -34,6 +34,7 @@ type DealRepository interface {
 	CreateArtifact(ctx context.Context, artifact *Artifact) error
 	GetArtifactByID(ctx context.Context, id string) (*Artifact, error)
 	ListArtifactsByDeal(ctx context.Context, dealID string) ([]Artifact, error)
+	DeleteArtifact(ctx context.Context, id string) error
 
 	// Verifications
 	CreateVerification(ctx context.Context, verification *Verification) error

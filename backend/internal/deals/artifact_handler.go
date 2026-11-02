@@ -217,6 +217,27 @@ func contentTypeFor(key string) string {
 	return "application/octet-stream"
 }
 
+func (h *Handler) DeleteArtifact(c *gin.Context) {
+	userID := c.GetString("userID")
+	dealID := c.Param("dealID")
+	artifactID := c.Param("artifactID")
+
+	if err := h.service.DeleteArtifact(c.Request.Context(), userID, dealID, artifactID); err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrArtifactNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func RegisterArtifactRoutes(router gin.IRouter, h *Handler) {
 	group := router.Group("/deals/:dealID/artifacts")
 
@@ -224,4 +245,5 @@ func RegisterArtifactRoutes(router gin.IRouter, h *Handler) {
 	group.GET("", h.ListArtifactsByDeal)
 	group.GET("/:artifactID", h.GetArtifactByID)
 	group.GET("/:artifactID/download", h.DownloadArtifact)
+	group.DELETE("/:artifactID", h.DeleteArtifact)
 }

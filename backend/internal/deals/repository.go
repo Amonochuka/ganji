@@ -541,6 +541,21 @@ func (r *Repository) CreateArtifact(ctx context.Context, artifact *Artifact) err
 	return nil
 }
 
+func (r *Repository) DeleteArtifact(ctx context.Context, id string) error {
+	res, err := r.q.ExecContext(ctx, `DELETE FROM artifacts WHERE id = $1;`, id)
+	if err != nil {
+		return fmt.Errorf("repository: delete artifact: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: delete artifact: %w", err)
+	}
+	if n == 0 {
+		return ErrArtifactNotFound
+	}
+	return nil
+}
+
 func (r *Repository) GetArtifactByID(ctx context.Context, id string) (*Artifact, error) {
 	query := `SELECT id, deal_id, kind, storage_key, uploaded_at FROM artifacts WHERE id = $1;`
 	artifact := Artifact{}

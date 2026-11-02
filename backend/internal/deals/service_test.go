@@ -281,6 +281,18 @@ func (f *fakeDealRepo) ListArtifactsByDeal(ctx context.Context, dealID string) (
 	return out, nil
 }
 
+func (f *fakeDealRepo) DeleteArtifact(ctx context.Context, id string) error {
+	for dealID, artifacts := range f.artifacts {
+		for i, a := range artifacts {
+			if a.ID == id {
+				f.artifacts[dealID] = append(artifacts[:i], artifacts[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return ErrArtifactNotFound
+}
+
 func (f *fakeDealRepo) CreateVerification(ctx context.Context, verification *Verification) error {
 	return nil
 }

@@ -1107,6 +1107,42 @@ func (s *Service) UploadArtifact(ctx context.Context, userID, dealID string, kin
 	return artifact, nil
 }
 
+// DeleteArtifact removes an artifact and its stored blob. Only the freelancer who
+// owns the deal may delete it. Storage deletion is best-effort after the DB row
+// is removed so a storage failure cannot leave a dangling DB reference.
+func (s *Service) DeleteArtifact(ctx context.Context, userID, dealID, artifactID string) error {
+	if dealID == "" {
+		return fmt.Errorf("%w: deal id is required", ErrInvalidInput)
+	}
+	if artifactID == "" {
+		return fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return err
+	}
+	if deal.FreelancerID != userID {
+		return ErrForbidden
+	}
+
+	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)
+	if err != nil {
+		return err
+	}
+	if artifact.DealID != dealID {
+		return ErrArtifactNotFound
+	}
+
+	if err := s.repo.DeleteArtifact(ctx, artifactID); err != nil {
+		return err
+	}
+	if s.storage != nil {
+		_ = s.storage.Delete(ctx, artifact.StorageKey)
+	}
+	return nil
+}
+
 // DownloadArtifact opens a deal artifact's stored content for streaming to the
 // caller. Both the freelancer and the client (matched by the recorded
 // client_email) may download — the client is precisely who has to review the
