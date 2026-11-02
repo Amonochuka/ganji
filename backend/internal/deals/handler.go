@@ -141,8 +141,9 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 // RegisterPublicRoutes registers the public (unauthenticated) deal routes.
 // These are mounted on the root router, not the protected group.
 func RegisterPublicRoutes(router gin.IRouter, h *Handler) {
-	router.GET("/public/deals/:shareToken", h.GetPublicDeal)
-	router.POST("/public/deals/:shareToken/approve", h.PublicApproveDeal)
+	public := router.Group("/public")
+	public.GET("/deals/:shareToken", h.GetPublicDeal)
+	public.POST("/deals/:shareToken/approve", h.PublicApproveDeal)
 }
 
 func (h *Handler) UpdateDealStatus(c *gin.Context) {

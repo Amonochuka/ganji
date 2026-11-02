@@ -43,14 +43,21 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 
 	authRepo := auth.NewRepository(dbConn)
 	authService := auth.NewService(authRepo, tokenManager)
-	authHandler := auth.NewHandler(authService)
-	auth.RegisterRoutes(router, authHandler)
 
 	// Promote the configured operator emails (OPERATOR_EMAILS) so their next
 	// login mints access tokens with is_operator=true. Safe on every boot.
 	if err := authService.ApplyOperatorRole(context.Background(), cfg.OperatorEmails); err != nil {
 		log.Fatalf("promoting operators: %v", err)
 	}
+
+	// Apply rate limiting to auth routes
+	authGroup := router.Group("/auth")
+	authGroup.Use(middleware.RateLimitAuth())
+	authHandler := auth.NewHandler(authService)
+	authGroup.POST("/signup", authHandler.Signup)
+	authGroup.POST("/login", authHandler.Login)
+	authGroup.POST("/logout", authHandler.Logout)
+	authGroup.POST("/refresh-token", authHandler.RefreshToken)
 
 	dealRepo := deals.NewRepository(dbConn)
 
@@ -95,7 +102,10 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	auth.RegisterProtectedRoutes(protected, authHandler)
 
 	deals.RegisterRoutes(protected, dealHandler)
-	deals.RegisterPublicRoutes(router, dealHandler)
+	publicDeals := router.Group("/public")
+	publicDeals.Use(middleware.RateLimitByIP(60, time.Minute))
+	publicDeals.GET("/deals/:shareToken", dealHandler.GetPublicDeal)
+	publicDeals.POST("/deals/:shareToken/approve", dealHandler.PublicApproveDeal)
 	deals.RegisterArtifactRoutes(protected, dealHandler)
 	deals.RegisterVerificationRoutes(protected, dealHandler)
 
@@ -106,7 +116,9 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 
 	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient, emailSvc)
 	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret)
-	webhook.RegisterRoutes(router, webhookHandler)
+	webhookGroup := router.Group("/webhooks")
+	webhookGroup.Use(middleware.RateLimitByIP(100, time.Minute))
+	webhookGroup.POST("/lnbits", webhookHandler.HandleLNbitsWebhook)
 
 	cv.RegisterRoutes(router, cv.NewHandler(cvService))
 
