@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -108,9 +109,21 @@ func (s *Service) Authenticate(ctx context.Context, email, password string) (*Au
 // appends a numeric suffix if it's already taken (e.g. "juma-codes-2").
 func (s *Service) generateUniqueSlug(ctx context.Context, displayName string) (string, error) {
 	base := slugify(displayName)
-	slug := base
 
-	for i := 1; i < 100; i++ {
+	taken, err := s.repo.SlugExists(ctx, base)
+	if err != nil {
+		return "", fmt.Errorf("checking slug availability: %w", err)
+	}
+	if !taken {
+		return base, nil
+	}
+
+	for i := 0; i < 5; i++ {
+		buf := make([]byte, 3)
+		if _, err := rand.Read(buf); err != nil {
+			return "", fmt.Errorf("generating slug suffix: %w", err)
+		}
+		slug := base + "-" + hex.EncodeToString(buf)
 		taken, err := s.repo.SlugExists(ctx, slug)
 		if err != nil {
 			return "", fmt.Errorf("checking slug availability: %w", err)
@@ -118,10 +131,9 @@ func (s *Service) generateUniqueSlug(ctx context.Context, displayName string) (s
 		if !taken {
 			return slug, nil
 		}
-		slug = fmt.Sprintf("%s-%d", base, i+1)
 	}
 
-	return "", fmt.Errorf("%w: could not generate a unique slug after 100 attempts", ErrInvalidInput)
+	return "", fmt.Errorf("%w: could not generate a unique slug", ErrInvalidInput)
 }
 
 // slugify lowercases, replaces spaces with hyphens, and strips anything
