@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -38,7 +39,10 @@ func Open(databaseURL string) (*sql.DB, error) {
 func pingWithRetry(dbConn *sql.DB, attempts int) error {
 	var err error
 	for i := 0; i < attempts; i++ {
-		if err = dbConn.Ping(); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err = dbConn.PingContext(ctx)
+		cancel()
+		if err == nil {
 			return nil
 		}
 		log.Printf("database not ready yet, retrying (%d/%d)...", i+1, attempts)

@@ -27,17 +27,15 @@ Fix these before relying on the docs' claims. (Audited 2026-09-26.)
 | 21 | Rate limiting middleware was an empty stub (public/auth/webhook endpoints unthrottled) | 2026-11-02 (in-memory per-IP limiter; auth 5/min, public 60/min, webhooks 100/min) |
 | 22 | JWT secrets had no minimum length validation | 2026-11-02 (config.Load fails fast below 32 chars) |
 | 23 | Refresh-token GC never scheduled | 2026-11-02 (hourly cleanup worker via auth.RunRefreshTokenCleanup) |
+| 24 | `/health` ping ignored context timeout in `db.Open` retry | 2026-11-02 (PingContext with 3s timeout in pingWithRetry) |
 
 ## Remaining Issues
 
 ### Minor / Hardening
 
 **15. `/health` Ping ignores context timeout.**
-In `health/handler.go`, a 3-second timeout context is created
-(`context.WithTimeout(c.Request.Context(), 3*time.Second)`), but the handler
-calls `dbConn.Ping()` (unbounded context) instead of `dbConn.PingContext(ctx)`.
-If Postgres hangs or the connection pool is starved, the health check
-blocks indefinitely instead of failing fast after 3 seconds.
+Fixed in `db.Open`'s `pingWithRetry` (now uses `PingContext` with a 3s timeout).
+The health handler already used `PingContext`.
 
 **16. Notifications are freelancer-only, un-refunded to clients, and untracked.**
 `DealNotifier` emails go only to the freelancer, and each send spawns an
