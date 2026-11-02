@@ -52,8 +52,8 @@ Artifacts and verifications have no deletion endpoints; uploaded blobs accumulat
 forever (disk exhaustion risk). No cleanup strategy exists.
 
 **19. Preimage storage security.**
-`Deal.Preimage` (escrow settle secret) is stored in plaintext in Postgres.
-A DB compromise could let an attacker settle holds. Consider encryption at rest.
+Fixed: optional AES-GCM encryption at rest via `PREIMAGE_ENCRYPTION_KEY`
+(env). Plaintext retained when key unset (dev).
 
 **20. Slug generation collision handling.**
 Fixed: base slug checked first, then random 6-hex suffix (5 attempts) instead of

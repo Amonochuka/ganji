@@ -18,6 +18,7 @@ type Config struct {
 	LNBitsAPIKey              string
 	LNBitsAdminKey            string
 	LNBitsWebhookSecret       string
+	PreimageEncryptionKey     string
 	WebhookURL                string
 	FrontendURLs              []string
 	HoldInvoiceExpirySeconds  int64
@@ -50,6 +51,7 @@ func Load() *Config {
 		LNBitsAPIKey:              getEnv("LNBITS_API_KEY", ""),
 		LNBitsAdminKey:            getEnv("LNBITS_ADMIN_KEY", ""),
 		LNBitsWebhookSecret:       getEnv("LNBITS_WEBHOOK_SECRET", ""),
+		PreimageEncryptionKey:     getEnv("PREIMAGE_ENCRYPTION_KEY", ""),
 		WebhookURL:                getEnv("WEBHOOK_URL", ""),
 		FrontendURLs:              getEnvListFallback("FRONTEND_URLS", "FRONTEND_URL"),
 		HoldInvoiceExpirySeconds:  getEnvInt("LNBITS_HOLD_INVOICE_EXPIRY_SECONDS", 2_592_000),

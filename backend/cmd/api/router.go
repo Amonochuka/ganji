@@ -59,7 +59,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	authGroup.POST("/logout", authHandler.Logout)
 	authGroup.POST("/refresh-token", authHandler.RefreshToken)
 
-	dealRepo := deals.NewRepository(dbConn)
+	dealRepo := deals.NewRepository(dbConn, cfg.PreimageEncryptionKey)
 
 	// OpenTimestamps client for blockchain anchoring
 	otsClient := ots.NewClient()

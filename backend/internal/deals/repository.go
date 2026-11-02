@@ -15,14 +15,16 @@ type DBTX interface {
 }
 
 type Repository struct {
-	db *sql.DB
-	q  DBTX
+	db           *sql.DB
+	q            DBTX
+	preimageKey []byte
 }
 
-func NewRepository(db *sql.DB) *Repository {
+func NewRepository(db *sql.DB, preimageSecret string) *Repository {
 	return &Repository{
-		db: db,
-		q:  db,
+		db:           db,
+		q:            db,
+		preimageKey: preimageKey(preimageSecret),
 	}
 }
 
@@ -58,7 +60,7 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		deal.AmountSats,
 		deal.SourcePlatform,
 		deal.PreimageHash,
-		nullString(deal.Preimage),
+		nullString(func() string { v, _ := encryptPreimage(r.preimageKey, deal.Preimage); return v }()),
 		nullString(deal.PayeeInvoice),
 		deal.Invoice,
 		deal.CheckingID,
@@ -100,7 +102,7 @@ const dealColumns = `
 		verified_at
 	`
 
-func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
+func (r *Repository) scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 	var (
 		preimage     sql.NullString
 		payeeInvoice sql.NullString
@@ -134,7 +136,11 @@ func scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 	); err != nil {
 		return nil, err
 	}
-	deal.Preimage = preimage.String
+	decrypted, err := decryptPreimage(r.preimageKey, preimage.String)
+	if err != nil {
+		return nil, err
+	}
+	deal.Preimage = decrypted
 	deal.PayeeInvoice = payeeInvoice.String
 	deal.CheckingID = checkingID.String
 	deal.PayoutCheckingID = payoutID.String
@@ -151,7 +157,7 @@ func nullString(s string) any {
 
 func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) {
 	query := "SELECT" + dealColumns + "FROM deals WHERE id = $1;"
-	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, id))
+	deal, err := r.scanDeal(r.q.QueryRowContext(ctx, query, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrDealNotFound
@@ -163,7 +169,7 @@ func (r *Repository) GetDealByID(ctx context.Context, id string) (*Deal, error) 
 
 func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string) (*Deal, error) {
 	query := "SELECT" + dealColumns + "FROM deals WHERE checking_id = $1;"
-	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, checkingID))
+	deal, err := r.scanDeal(r.q.QueryRowContext(ctx, query, checkingID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrDealNotFound
@@ -179,7 +185,7 @@ func (r *Repository) GetDealByCheckingID(ctx context.Context, checkingID string)
 // old link without ever exposing the internal UUID.
 func (r *Repository) GetDealByShareToken(ctx context.Context, shareToken string) (*Deal, error) {
 	query := "SELECT" + dealColumns + "FROM deals WHERE share_token = $1;"
-	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, shareToken))
+	deal, err := r.scanDeal(r.q.QueryRowContext(ctx, query, shareToken))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrDealNotFound
@@ -203,7 +209,7 @@ func (r *Repository) ListByFreelancer(ctx context.Context, freelancerID string) 
 	defer rows.Close()
 	var deals []Deal
 	for rows.Next() {
-		deal, err := scanDeal(rows)
+		deal, err := r.scanDeal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("repository: scan deal: %w", err)
 		}
@@ -232,7 +238,7 @@ func (r *Repository) ListForUser(ctx context.Context, userID, email string) ([]D
 	defer rows.Close()
 	var deals []Deal
 	for rows.Next() {
-		deal, err := scanDeal(rows)
+		deal, err := r.scanDeal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("repository: scan deal: %w", err)
 		}
@@ -376,7 +382,7 @@ func (r *Repository) ListOpenBefore(ctx context.Context, cutoff time.Time) ([]De
 
 	var deals []Deal
 	for rows.Next() {
-		deal, err := scanDeal(rows)
+		deal, err := r.scanDeal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("repository: scan deal: %w", err)
 		}
@@ -470,7 +476,7 @@ func (r *Repository) ListDisputed(ctx context.Context) ([]Deal, error) {
 
 	var deals []Deal
 	for rows.Next() {
-		deal, err := scanDeal(rows)
+		deal, err := r.scanDeal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("repository: scan deal: %w", err)
 		}
@@ -515,7 +521,7 @@ func (r *Repository) UpdateDisputeResolution(ctx context.Context, dealID string,
 // concurrent ResolveDispute calls serialize on the same deal.
 func (r *Repository) GetDealForUpdate(ctx context.Context, dealID string) (*Deal, error) {
 	query := "SELECT" + dealColumns + "FROM deals WHERE id = $1 FOR UPDATE;"
-	deal, err := scanDeal(r.q.QueryRowContext(ctx, query, dealID))
+	deal, err := r.scanDeal(r.q.QueryRowContext(ctx, query, dealID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrDealNotFound

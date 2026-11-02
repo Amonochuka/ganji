@@ -39,6 +39,7 @@ Then use `DATABASE_URL=postgres://postgres:postgres@localhost:5432/ganji?sslmode
 | `OTS_UPGRADE_INTERVAL_SECONDS` | `21600` (6 hours) | OTS proof upgrade worker cadence |
 | `STORAGE_PATH` | `./uploads` | Where artifact blobs live on disk |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Per-artifact size cap |
+| `PREIMAGE_ENCRYPTION_KEY` | (empty) | Optional secret used to AES-GCM encrypt escrow preimages at rest; unset disables encryption (dev) |
 
 ## Frontend (Required)
 
