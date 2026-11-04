@@ -17,7 +17,7 @@ separate file in [`docs/`](./docs/) for easier navigation.
 | [`TESTING.md`](./docs/TESTING.md) | Test commands, what each test file covers |
 | [`ENVIRONMENT.md`](./docs/ENVIRONMENT.md) | All environment variables with defaults |
 | [`KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) | Fixed + remaining bugs, not-built items |
-| [`OTS_ANCHORING.md`](./OTS_ANCHORING.md) | OpenTimestamps anchor/verify pipeline (plain English + jargon) |
+| [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) | OpenTimestamps anchor/verify pipeline (plain English + jargon) |
 
 ---
 
@@ -80,7 +80,7 @@ Frontend runs on `http://localhost:3000`.
 ## Status
 
 🚧 Pre-launch. See [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) for what's built
-and [`CONTRIBUTING.md`](./CONTRIBUTING.md) for workflow and team ownership.
+and [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) for workflow and team ownership.
 
 ---
 
@@ -90,6 +90,6 @@ and [`CONTRIBUTING.md`](./CONTRIBUTING.md) for workflow and team ownership.
 |---|---|
 | [`API_REFERENCE.md`](./API_REFERENCE.md) | Every endpoint, request/response shapes, error codes |
 | [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) | Build status, what's done, what's not |
-| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Team ownership, build order, git conventions |
-| [`OTS_ANCHORING.md`](./OTS_ANCHORING.md) | OpenTimestamps pipeline breakdown |
+| [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) | Team ownership, build order, git conventions |
+| [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) | OpenTimestamps pipeline breakdown |
 | [`README.md`](./README.md) | Repo overview and quick start |
