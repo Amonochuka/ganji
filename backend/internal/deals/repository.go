@@ -671,8 +671,9 @@ func (r *Repository) ListVerificationsByArtifact(ctx context.Context, artifactID
 
 func (r *Repository) WithTx(tx *sql.Tx) DealRepository {
 	return &Repository{
-		db: r.db,
-		q:  tx,
+		db:           r.db,
+		q:            tx,
+		preimageKey:  r.preimageKey,
 	}
 }
 

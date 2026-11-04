@@ -217,7 +217,7 @@ func (r *Repository) RevokeRefreshToken(ctx context.Context, tokenHash string) e
 
 // CleanupExpiredRefreshTokens removes expired and revoked refresh tokens
 func (r *Repository) CleanupExpiredRefreshTokens(ctx context.Context) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE expires_at < $1 OR revoked = true`, time.Now())
+	result, err := r.db.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE expires_at < $1`, time.Now())
 	if err != nil {
 		return 0, err
 	}

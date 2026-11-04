@@ -18,11 +18,10 @@ func runWorkers(ctx context.Context, cfg *config.Config, dealService *deals.Serv
 	lifetime := time.Duration(cfg.HoldInvoiceExpirySeconds) * time.Second
 	interval := time.Duration(cfg.HoldSweepIntervalSeconds) * time.Second
 
-	deals.RunHoldSweep(ctx, dealService, interval, lifetime)
-
 	otsInterval := time.Duration(cfg.OTSUpgradeIntervalSeconds) * time.Second
-	runOTSUpgradeLoop(ctx, cvService, otsInterval)
 
+	go deals.RunHoldSweep(ctx, dealService, interval, lifetime)
+	go runOTSUpgradeLoop(ctx, cvService, otsInterval)
 	go auth.RunRefreshTokenCleanup(ctx, authService, time.Hour)
 }
 

@@ -61,7 +61,11 @@ func (rl *rateLimiter) allow(key string) bool {
 
 	// Refill tokens based on elapsed time
 	elapsed := now.Sub(v.lastRefill)
-	tokensToAdd := int(elapsed / (rl.window / time.Duration(rl.rate)))
+	perToken := rl.window / time.Duration(rl.rate)
+	if perToken <= 0 {
+		perToken = time.Nanosecond
+	}
+	tokensToAdd := int(elapsed / perToken)
 	if tokensToAdd > 0 {
 		v.tokens += tokensToAdd
 		if v.tokens > rl.rate {

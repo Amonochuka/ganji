@@ -28,6 +28,10 @@ Fix these before relying on the docs' claims. (Audited 2026-09-26.)
 | 22 | JWT secrets had no minimum length validation | 2026-11-02 (config.Load fails fast below 32 chars) |
 | 23 | Refresh-token GC never scheduled | 2026-11-02 (hourly cleanup worker via auth.RunRefreshTokenCleanup) |
 | 24 | `/health` ping ignored context timeout in `db.Open` retry | 2026-11-02 (PingContext with 3s timeout in pingWithRetry) |
+| 25 | Background workers serialized: `runWorkers` called `RunHoldSweep` (blocking) before OTS upgrade and refresh-token cleanup, so those never started | 2026-11-04 (launched each worker in its own goroutine) |
+| 26 | Refresh-token cleanup query referenced nonexistent `revoked` column → hourly cleanup failed | 2026-11-04 (query now filters only `expires_at < now()`) |
+| 27 | `Repository.WithTx` dropped `preimageKey`, disabling AES-GCM preimage encryption on the create-deal path | 2026-11-04 (key propagated through `WithTx`) |
+| 28 | Rate limiter could divide by zero when `window/rate` underflowed | 2026-11-04 (guard `perToken <= 0`) |
 
 ## Remaining Issues
 
