@@ -38,6 +38,11 @@ Next.js 16 (App Router) + TypeScript + Tailwind v4 frontend for the Ganji Lightn
 | `/deals/new` | `app/deals/new/page.tsx` | Create deal form |
 | `/deals/[id]` | `app/deals/[dealId]/page.tsx` | Deal detail + actions |
 | `/public/deals/[shareToken]` | `app/public/deals/[shareToken]/page.tsx` | Client-facing view |
+| `/settings` | `app/settings/page.tsx` | Profile, default payee invoice, password |
+| `/cv/[slug]` | `app/cv/[slug]/page.tsx` | Live CV profile with verified entries |
+| `/cv/[slug]/verify/[entryId]` | `app/cv/[slug]/verify/[entryId]/page.tsx` | Entry verification with OTS proof |
+| `/operator/disputes` | `app/operator/disputes/page.tsx` | Admin dispute arbitration queue |
+| `/operator/deals/[id]/reconcile` | `app/operator/deals/[dealId]/reconcile/page.tsx` | Reconcile deal payout |
 
 ## Components
 
@@ -94,14 +99,14 @@ npm run build   # production build (Turbopack)
 
 ## Known Issues
 
-- **`GET /auth/me` not in api client** — backend endpoint is live (2026-10-20); needed for the Settings page.
-- **CV types missing** — Live CV pages need `Profile`, `CVEntry` types + API methods in client.
+- **Operator WebSocket** — Real-time deal state updates not yet wired (see `docs/ARCHITECTURE.md` §9).
+- **E2E test suite** — Full flow test (signup → create deal → pay → submit → approve → verify on CV) not yet written.
 
 ## File Structure
 
 ```
 frontend/
-├── src/
+├ src/
 │   ├── app/
 │   │   ├── page.tsx                    # Home
 │   │   ├── layout.tsx                  # Fonts, AuthProvider
@@ -112,7 +117,15 @@ frontend/
 │   │   ├── deals/
 │   │   │   ├── new/page.tsx
 │   │   │   └── [dealId]/page.tsx
-│   │   └── public/deals/[shareToken]/page.tsx
+│   │   ├── public/deals/[shareToken]/page.tsx
+│   │   ├── settings/page.tsx
+│   │   ├── cv/
+│   │   │   ├── [slug]/page.tsx
+│   │   │   └── [slug]/verify/[entryId]/page.tsx
+│   │   └── operator/
+│   │       ├── disputes/page.tsx
+│   │       └── deals/
+│   │           └── [dealId]/reconcile/page.tsx
 │   ├── components/
 │   │   ├── ui/                         # Button, Input, FormBanner
 │   │   ├── auth/                       # AuthShell

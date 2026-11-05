@@ -115,6 +115,33 @@ export const api = {
   publicApproveDeal(shareToken: string) {
     return this.post<PublicApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
   },
+
+  // Auth
+  getMe(token: string) {
+    return this.get<{ user: User }>("/auth/me", token);
+  },
+
+  // Live CV (public)
+  getCVProfile(slug: string) {
+    return this.get<{ profile: CVProfile }>(`/cv/${slug}`);
+  },
+
+  verifyEntry(slug: string, entryId: string) {
+    return this.get<{ verification: VerifyResult }>(`/cv/${slug}/verify/${entryId}`);
+  },
+
+  // Operator (authed, operator-only)
+  listDisputes(token: string) {
+    return this.get<{ disputes: DealView[] }>("/disputes", token);
+  },
+
+  resolveDispute(dealId: string, resolution: "release" | "refund", token: string) {
+    return this.post<{ message: string; deal: DealView }>(`/disputes/${dealId}/resolve`, { resolution }, token);
+  },
+
+  reconcileDeal(dealId: string, action: "confirm_payout" | "reset_payout", payoutCheckingId: string | undefined, token: string) {
+    return this.post<{ deal: DealView }>(`/deals/${dealId}/reconcile`, { action, payout_checking_id: payoutCheckingId }, token);
+  },
 };
 
 export type AuthTokens = {
@@ -127,7 +154,11 @@ export type User = {
   email: string;
   display_name: string;
   slug: string;
+  bitcoin_address: string;
+  trust_score: number;
+  is_operator: boolean;
   created_at: string;
+  default_payee_invoice?: string;
 };
 
 export type RegisterRequest = {
@@ -232,4 +263,41 @@ export type PublicDeal = {
   status: DealStatus;
   dispute_reason: string;
   created_at: string;
+};
+
+export type CVEntry = {
+  id: string;
+  deal_title: string;
+  amount_sats: number;
+  source_platform: string;
+  artifact_kind: string;
+  hash: string;
+  algorithm: string;
+  verified_at: string;
+  created_at: string;
+  ots_proof?: string;
+  ots_submitted_at?: string | null;
+  ots_confirmed_at?: string | null;
+};
+
+export type CVProfile = {
+  display_name: string;
+  slug: string;
+  trust_score: number;
+  entries: CVEntry[];
+};
+
+export type VerifyResult = {
+  valid: boolean;
+  entry_id: string;
+  slug: string;
+  hash: string;
+  algorithm: string;
+  matches_current: boolean;
+  deal_title: string;
+  verified_at: string;
+  ots_verified: boolean;
+  ots_proof?: string;
+  ots_confirmed_at?: string | null;
+  ots_block_height?: number;
 };
