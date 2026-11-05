@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 
 export default function Dashboard() {
   const router = useRouter();
-  const { user, tokens, isLoading: authLoading } = useAuth();
+  const { user, tokens, isLoading: authLoading, logout } = useAuth();
   const [deals, setDeals] = useState<DealView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export default function Dashboard() {
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
-      <DashboardHeader user={user} onLogout={() => router.push("/")} />
+      <DashboardHeader user={user} onLogout={() => { logout(); router.push("/"); }} />
 
       <div className="flex-1 px-6 py-8 md:py-12">
         <div className="mx-auto max-w-6xl">
@@ -107,7 +107,7 @@ export default function Dashboard() {
   );
 }
 
-function DashboardHeader({ user, onLogout }: { user: { display_name: string } | null; onLogout?: () => void }) {
+function DashboardHeader({ user, onLogout }: { user: { display_name: string; slug?: string; is_operator?: boolean } | null; onLogout?: () => void }) {
   return (
     <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -115,6 +115,19 @@ function DashboardHeader({ user, onLogout }: { user: { display_name: string } | 
           GNJ
         </Link>
         <nav className="flex items-center gap-4">
+          {user?.slug && (
+            <Link href={`/cv/${user.slug}`} className="text-sm text-ink-300 hover:text-gold-400 hidden sm:block">
+              My CV
+            </Link>
+          )}
+          <Link href="/settings" className="text-sm text-ink-300 hover:text-gold-400 hidden sm:block">
+            Settings
+          </Link>
+          {user?.is_operator && (
+            <Link href="/operator/disputes" className="text-sm text-ink-300 hover:text-gold-400 hidden sm:block">
+              Disputes
+            </Link>
+          )}
           <span className="text-sm text-ink-300 hidden sm:block">
             {user?.display_name}
           </span>

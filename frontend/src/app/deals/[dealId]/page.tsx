@@ -12,7 +12,7 @@ import { formatCurrency } from "@/lib/utils/format";
 export default function DealDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { tokens, user } = useAuth();
+  const { tokens, user, logout } = useAuth();
   const dealId = params.dealId as string;
 
   const [deal, setDeal] = useState<DealView | null>(null);
@@ -353,7 +353,7 @@ function DealHeader({ user }: { user: { display_name: string; id: string } | nul
         </Link>
         <nav className="flex items-center gap-4">
           <span className="text-sm text-ink-300 hidden sm:block">{user?.display_name}</span>
-          <Button variant="ghost" className="h-10 px-4" onClick={() => window.location.href = "/"}>
+          <Button variant="ghost" className="h-10 px-4" onClick={() => { logout(); window.location.href = "/"; }}>
             Log out
           </Button>
         </nav>
