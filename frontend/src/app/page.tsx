@@ -71,6 +71,11 @@ export default function Home() {
             anchors a cryptographic proof to Bitcoin — your reputation, verifiable by anyone.
           </p>
 
+          <div className="mt-6 mb-8 flex flex-col items-center justify-center gap-2">
+            <div className="w-full max-w-32 h-1 bg-vault-border border-t border-vault-border rounded-t-lg rounded-b-lg" />
+            <span className="text-xs text-ink-500 uppercase tracking-widest">Powered by Bitcoin Lightning</span>
+          </div>
+
           <div className="flex flex-col items-center justify-center gap-4">
             <Link href="/signup">
               <Button size="lg" className="w-full py-3.5 px-8 text-base">
@@ -125,12 +130,14 @@ function FeatureCard({
   title,
   description,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   description: string;
 }) {
   return (
-    <div className="vault-card p-6 text-center">
+    <div
+      className={`vault-card p-6 text-center cursor-pointer transition-all hover:border-gold-500/30 hover:shadow-[0_0_0_1px_rgba(196,150,50,0.15)]`}
+    >
       <div className="mb-4 text-4xl">{icon}</div>
       <h3 className="mb-2 font-display text-lg font-semibold text-ink-100">{title}</h3>
       <p className="text-sm text-ink-500 leading-relaxed">{description}</p>
