@@ -16,31 +16,29 @@ export default function Home() {
           <Link href="/" className="logo-gnj-sm" aria-label="Ganji Home">
             GNJ
           </Link>
-          <nav className="flex items-center gap-2">
-            {isLoading ? (
-              <div className="h-10 w-24 animate-pulse rounded-lg bg-vault-raised" />
-            ) : user ? (
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-ink-300">
-                  {user.display_name}
-                </span>
-                <Button variant="ghost" className="h-10 px-4" onClick={() => logout()}>
-                  Log out
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Link href="/login">
-                  <Button variant="ghost" className="h-10 px-4">
-                    Log in
+<nav className="flex items-center gap-2">
+              {user ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-ink-300">
+                    {user.display_name}
+                  </span>
+                  <Button variant="ghost" className="h-10 px-4" onClick={() => logout()}>
+                    Log out
                   </Button>
-                </Link>
-                <Link href="/signup">
-                  <Button className="h-10 px-6">Get Started</Button>
-                </Link>
-              </div>
-            )}
-          </nav>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Link href="/login">
+                    <Button variant="ghost" className="h-10 px-4">
+                      Log in
+                    </Button>
+                  </Link>
+                  <Link href="/signup">
+                    <Button className="h-10 px-6">Get Started</Button>
+                  </Link>
+                </div>
+              )}
+            </nav>
           <button
             className="md:hidden flex items-center gap-2 p-2 rounded-lg bg-vault-raised text-ink-300 hover:bg-vault-border"
             onClick={() => router.push("/")}
