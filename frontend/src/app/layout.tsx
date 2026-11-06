@@ -33,7 +33,7 @@ const shareTechMono = Share_Tech_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ganji — Lightning escrow for freelancers",
+  title: "ganji",
   description:
     "Bitcoin Lightning escrow with a cryptographically anchored freelancer reputation layer. No platform lock-in, no bank account required.",
 };
