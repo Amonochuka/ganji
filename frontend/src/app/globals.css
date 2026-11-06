@@ -150,6 +150,15 @@ body {
   text-shadow: 0 0 20px rgba(196, 150, 50, 0.3);
 }
 
+.logo-gnj-svg {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  stroke: rgb(196, 150, 50);
+  stroke-width: 3;
+  fill: rgb(196, 150, 50);
+}
+
 /* Hero gradient text */
 .hero-gradient {
   background: linear-gradient(135deg, var(--color-ink-100) 0%, var(--color-gold-400) 50%, var(--color-ink-300) 100%);
