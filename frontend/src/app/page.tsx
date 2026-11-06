@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
   const { user, isLoading, logout } = useAuth();
+  const router = useRouter();
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
@@ -14,12 +16,12 @@ export default function Home() {
           <Link href="/" className="logo-gnj-sm" aria-label="Ganji Home">
             GNJ
           </Link>
-          <nav className="flex items-center gap-4">
+          <nav className="flex items-center gap-2">
             {isLoading ? (
               <div className="h-10 w-24 animate-pulse rounded-lg bg-vault-raised" />
             ) : user ? (
               <div className="flex items-center gap-3">
-                <span className="text-sm text-ink-300 hidden sm:block">
+                <span className="text-sm text-ink-300">
                   {user.display_name}
                 </span>
                 <Button variant="ghost" className="h-10 px-4" onClick={() => logout()}>
@@ -27,7 +29,7 @@ export default function Home() {
                 </Button>
               </div>
             ) : (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <Link href="/login">
                   <Button variant="ghost" className="h-10 px-4">
                     Log in
@@ -39,6 +41,17 @@ export default function Home() {
               </div>
             )}
           </nav>
+          <button
+            className="md:hidden flex items-center gap-2 p-2 rounded-lg bg-vault-raised text-ink-300 hover:bg-vault-border"
+            onClick={() => router.push("/")}
+            aria-label="Menu"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -58,14 +71,14 @@ export default function Home() {
             anchors a cryptographic proof to Bitcoin — your reputation, verifiable by anyone.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+          <div className="flex flex-col items-center justify-center gap-4">
             <Link href="/signup">
-              <Button size="lg" className="w-full sm:w-auto min-w-[200px] py-3.5 px-8 text-base">
+              <Button size="lg" className="w-full py-3.5 px-8 text-base">
                 Start Escrowing
               </Button>
             </Link>
             <Link href="/login">
-              <Button variant="outline" size="lg" className="w-full sm:w-auto min-w-[200px] py-3.5 px-8 text-base">
+              <Button variant="outline" size="lg" className="w-full py-3.5 px-8 text-base">
                 Log In
               </Button>
             </Link>

@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  bitcoind:
+    image: ruimarinho/bitcoin-core:latest
+    container_name: ganji-bitcoind
+    ports:
+      - "18443:18443"
+      - "18444:18444"
+    volumes:
+      - bitcoind-data:/bitcoin
+    command: >
+      -regtest -fallbackfee=0.0001 -server
+      -rpcuser=user -rpcpassword=pass
+      -rpcallowip=0.0.0.0/0
+      -zmqpubrawblock=tcp://0.0.0.0:28332
+      -zmqpubrawtx=tcp://0.0.0.0:28333
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=user -rpcpassword=pass getblockchaininfo"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  lnd:
+    image: lightninglabs/lnd:v0.18.0-beta
+    container_name: ganji-lnd
+    ports:
+      - "10009:10009"
+      - "8080:8080"
+    volumes:
+      - lnd-data:/lnd
+      - ./lnd.conf:/etc/lnd/lnd.conf
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      - LND_BITCOIND_RPCHOST=bitcoind:18443
+      - LND_BITCOIND_RPCUSER=user
+      - LND_BITCOIND_RPCPASS=pass
+      - LND_BITCOIND_ZMQPUBRAWBLOCK=tcp://bitcoind:28332
+      - LND_BITCOIND_ZMQPUBRAWTX=tcp://bitcoind:28333
+
+  lnbits:
+    image: lnbits/lnbits:latest
+    container_name: ganji-lnbits
+    ports:
+      - "5000:5000"
+    environment:
+      - LNBITS_NETWORK=regtest
+      - LNBITS_BACKEND_WALLET_CLASS=LndRestWallet
+      - LND_REST_ENDPOINT=http://lnd:8080
+      - LND_REST_CERT=/lnd/tls.cert
+      - LND_REST_MACAROON=/lnd/admin.macaroon
+      - LNBITS_ADMIN_UI=true
+    volumes:
+      - lnbits-data:/data
+      - lnd-data:/lnd:ro
+    depends_on:
+      - lnd
+
+volumes:
+  bitcoind-data:
+  lnd-data:
+  lnbits-data:

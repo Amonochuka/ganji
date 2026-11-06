@@ -110,25 +110,25 @@ export default function Dashboard() {
 function DashboardHeader({ user, onLogout }: { user: { display_name: string; slug?: string; is_operator?: boolean } | null; onLogout?: () => void }) {
   return (
     <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
         <Link href="/dashboard" className="logo-gnj-sm" aria-label="Ganji Dashboard">
           GNJ
         </Link>
-        <nav className="flex items-center gap-4">
+        <nav className="flex items-center gap-2">
           {user?.slug && (
-            <Link href={`/cv/${user.slug}`} className="text-sm text-ink-300 hover:text-gold-400 hidden sm:block">
+            <Link href={`/cv/${user.slug}`} className="text-sm text-ink-300 hover:text-gold-400">
               My CV
             </Link>
           )}
-          <Link href="/settings" className="text-sm text-ink-300 hover:text-gold-400 hidden sm:block">
+          <Link href="/settings" className="text-sm text-ink-300 hover:text-gold-400">
             Settings
           </Link>
           {user?.is_operator && (
-            <Link href="/operator/disputes" className="text-sm text-ink-300 hover:text-gold-400 hidden sm:block">
+            <Link href="/operator/disputes" className="text-sm text-ink-300 hover:text-gold-400">
               Disputes
             </Link>
           )}
-          <span className="text-sm text-ink-300 hidden sm:block">
+          <span className="text-sm text-ink-300">
             {user?.display_name}
           </span>
           {onLogout && (
@@ -137,6 +137,17 @@ function DashboardHeader({ user, onLogout }: { user: { display_name: string; slu
             </Button>
           )}
         </nav>
+        <button
+          className="md:hidden flex items-center gap-2 p-2 rounded-lg bg-vault-raised text-ink-300 hover:bg-vault-border"
+          onClick={() => window.alert("Menu clicked")}
+          aria-label="Menu"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
       </div>
     </header>
   );
