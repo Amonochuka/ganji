@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.7'
 
 services:
   bitcoind:
@@ -32,7 +32,7 @@ services:
       - ./lnd.conf:/etc/lnd/lnd.conf
     depends_on:
       bitcoind:
-        condition: service_healthy
+        condition: service_started
     environment:
       - LND_BITCOIND_RPCHOST=bitcoind:18443
       - LND_BITCOIND_RPCUSER=user
