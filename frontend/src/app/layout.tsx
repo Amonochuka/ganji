@@ -38,6 +38,9 @@ export const metadata: Metadata = {
     "Bitcoin Lightning escrow with a cryptographically anchored freelancer reputation layer. No platform lock-in, no bank account required.",
   links: [
     { rel: "icon", type: "image/svg+xml", href: "/gnj-logo.svg" },
+    { rel: "icon", href: "/gnj-logo.svg" },
+    { rel: "shortcut icon", href: "/gnj-logo.svg" },
+    { rel: "apple-touch-icon", href: "/gnj-logo.svg" },
   ],
 };
 
