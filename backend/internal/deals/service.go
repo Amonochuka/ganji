@@ -1915,24 +1915,17 @@ func (s *Service) refreshMilestonePayment(ctx context.Context, m *Milestone) err
 
 // ReleaseMilestone settles the milestone's hold and pays the freelancer, then marks released.
 
-// releaseMilestoneViaCanonicalPath releases an escrow-backed milestone ONLY through
-// ReleaseMilestone (settle+pay). For state-only milestones with no escrow leg, it
-// marks completed (NOT released/paid) so money semantics remain honest.
+// releaseMilestoneViaCanonicalPath enforces escrow: releasing a milestone must go
+// through ReleaseMilestone (settle+pay -> MilestoneReleased=paid). A milestone with
+// no escrow leg cannot be released/paid or advanced as paid — caller must fund it first.
 func (s *Service) releaseMilestoneViaCanonicalPath(ctx context.Context, deal *Deal, m *Milestone) (*Milestone, error) {
 	if m.Status == MilestoneReleased {
 		return m, nil
 	}
-	if m.PreimageHash != "" || m.CheckingID != "" {
-		return s.ReleaseMilestone(ctx, deal, m.ID)
+	if m.PreimageHash == "" && m.CheckingID == "" {
+		return nil, fmt.Errorf("%w: milestone %d has no escrow hold (fund it first)", ErrInvalidInput, m.Order)
 	}
-	// No escrow hold ever attached (legacy/state-only). Never mark released/paid.
-	now := time.Now().UTC()
-	if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneCompleted, &now); err != nil {
-		return nil, err
-	}
-	m.Status = MilestoneCompleted
-	m.CompletedAt = sql.NullTime{Time: now, Valid: true}
-	return m, nil
+	return s.ReleaseMilestone(ctx, deal, m.ID)
 }
 
 // ReleaseMilestone is the ONLY path that moves a milestone escrow to released/paid:
