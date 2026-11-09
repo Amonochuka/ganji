@@ -473,10 +473,11 @@ function getMilestoneStatusLabel(status: string): string {
     funded: "Funded",
     in_progress: "In Progress",
     work_submitted: "Submitted",
-    completed: "Completed",
-    released: "Released",
+    completed: "Approved (payout pending)",
+    released: "Released (paid)",
     exited: "Exited",
-    rejected: "Rejected",
+    rejected: "Rejected (under review)",
+    disputed: "Under independent review",
     refunded: "Refunded",
   };
   return labels[status] || status;
@@ -489,10 +490,11 @@ function getMilestoneStatusClass(status: string): string {
     funded: "bg-blue-600/20 text-blue-400 border-blue-600/30",
     in_progress: "bg-blue-600/20 text-blue-400 border-blue-600/30",
     work_submitted: "bg-gold-500/20 text-gold-400 border-gold-500/30",
-    completed: "bg-green-600/20 text-green-400 border-green-600/30",
+    completed: "bg-blue-600/20 text-blue-400 border-blue-600/30",
     released: "bg-green-600/20 text-green-400 border-green-600/30",
     exited: "bg-red-600/20 text-red-400 border-red-600/30",
-    rejected: "bg-gray-600/20 text-gray-400 border-gray-600/30",
+    rejected: "bg-orange-600/20 text-orange-400 border-orange-600/30",
+    disputed: "bg-red-600/20 text-red-400 border-red-600/30",
     refunded: "bg-gray-600/20 text-gray-400 border-gray-600/30",
   };
   return classes[status] || "bg-gray-600/20 text-gray-400 border-gray-600/30";

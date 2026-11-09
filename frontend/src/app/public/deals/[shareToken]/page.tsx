@@ -263,7 +263,7 @@ function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onRejec
       {actionable && !needsFunding && (
         <div className="mt-3 flex flex-wrap gap-2">
           <Button size="sm" onClick={onAcceptNext} isLoading={actionLoading === `accept-${ms.id}`} disabled={!!actionLoading}>
-            {ms.status === "released" || ms.status === "completed" ? (isLast ? "Completed" : "Start Next") : "Approve / Release Milestone"}
+{ms.status === "released" ? (isLast ? "Released (paid)" : "Released — Start Next") : ms.status === "completed" ? (isLast ? "Finalize payout" : "Release & Start Next") : "Approve / Release Milestone"}
           </Button>
           {ms.status !== "exited" && ms.status !== "rejected" && ms.status !== "released" && (
             <Button size="sm" variant="outline" onClick={onReject} isLoading={actionLoading === `reject-${ms.id}`} disabled={!!actionLoading}>
@@ -272,16 +272,16 @@ function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onRejec
           )}
         </div>
       )}
-      {isLast && ms.status === "released" && <p className="mt-2 text-xs text-green-400">Final milestone released.</p>}
+{isLast && ms.status === "released" && <p className="mt-2 text-xs text-green-400">Final milestone released (paid).</p>}{ms.status === "completed" && <p className="mt-2 text-xs text-blue-400">Approved — payout pending (not paid until released).</p>}{(ms.status === "disputed" || ms.status === "rejected") && <p className="mt-2 text-xs text-red-400">On hold — awaiting independent review resolution. No auto-refund/release.</p>}
     </div>
   );
 }
 
 function msStatusLabel(s: string) {
-  return ({ pending: "Pending", in_progress: "In Progress", completed: "Completed", exited: "Exited", rejected: "Rejected" } as Record<string,string>)[s] || s;
+  return ({ pending: "Pending", awaiting_payment: "Awaiting payment", funded: "Funded", in_progress: "In Progress", work_submitted: "Submitted", completed: "Approved (payout pending)", released: "Released (paid)", exited: "Exited", rejected: "Rejected (under review)", disputed: "Under independent review", refunded: "Refunded" } as Record<string,string>)[s] || s;
 }
 function msStatusClass(s: string) {
-  return ({ pending: "bg-yellow-600/20 text-yellow-400", in_progress: "bg-blue-600/20 text-blue-400", completed: "bg-green-600/20 text-green-400", exited: "bg-red-600/20 text-red-400", rejected: "bg-gray-600/20 text-gray-400" } as Record<string,string>)[s] || "bg-gray-600/20 text-gray-400";
+  return ({ pending: "bg-yellow-600/20 text-yellow-400", awaiting_payment: "bg-yellow-600/20 text-yellow-400", funded: "bg-blue-600/20 text-blue-400", in_progress: "bg-blue-600/20 text-blue-400", work_submitted: "bg-gold-500/20 text-gold-400", completed: "bg-blue-600/20 text-blue-400", released: "bg-green-600/20 text-green-400", exited: "bg-red-600/20 text-red-400", rejected: "bg-orange-600/20 text-orange-400", disputed: "bg-red-600/20 text-red-400", refunded: "bg-gray-600/20 text-gray-400" } as Record<string,string>)[s] || "bg-gray-600/20 text-gray-400";
 }
 function getStatusLabel(status: DealStatus): string {
   return ({ awaiting_payment: "Awaiting Payment", locked: "Funds Locked", work_submitted: "Work Submitted", reviewing: "Under Review", released: "Released", disputed: "Disputed", refunded: "Refunded" } as Record<DealStatus,string>)[status];
