@@ -2164,3 +2164,83 @@ func (s *Service) PublicRejectMilestone(ctx context.Context, shareToken, milesto
 	s.notifyDisputed(deal)
 	return s.GetPublicDeal(ctx, shareToken)
 }
+
+// ResolveMilestone is the independent-review money resolution for a disputed milestone.
+// release: settle+pay via canonical ReleaseMilestone (idempotent). refund: cancel hold + mark refunded.
+// No auto-refund on reject/exit; this explicit resolution moves the held funds.
+func (s *Service) ResolveMilestone(ctx context.Context, operatorEmail, dealID, milestoneID string, resolution DisputeResolution) (*Milestone, error) {
+	operatorEmail = strings.ToLower(strings.TrimSpace(operatorEmail))
+	if operatorEmail == "" || dealID == "" || milestoneID == "" {
+		return nil, fmt.Errorf("%w: operator email, deal id and milestone id are required", ErrInvalidInput)
+	}
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+	if err != nil {
+		return nil, err
+	}
+	if m.DealID != deal.ID {
+		return nil, ErrMilestoneNotFound
+	}
+	if m.Status != MilestoneDisputed && m.Status != MilestoneRejected && !(resolution == DisputeResolutionRelease && m.Status == MilestoneWorkSubmitted) && !(resolution == DisputeResolutionRelease && m.Status == MilestoneCompleted) {
+		// allow resolving disputed/rejected; allow operator release of submitted/completed for parity
+		if !(m.Status == MilestoneDisputed || m.Status == MilestoneRejected) {
+			return nil, fmt.Errorf("%w: only a disputed/rejected milestone can be resolved, got %s", ErrInvalidTransition, m.Status)
+		}
+	}
+	switch resolution {
+	case DisputeResolutionRelease:
+		rm, err := s.ReleaseMilestone(ctx, deal, milestoneID)
+		if err != nil {
+			return nil, err
+		}
+		// advance sequence/finalize deal like approve paths
+		ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+		idx := -1
+		for i := range ms {
+			if ms[i].ID == milestoneID {
+				idx = i
+				break
+			}
+		}
+		if idx >= 0 && idx+1 < len(ms) {
+			next := ms[idx+1]
+			if next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
+				_ = s.FundMilestone(ctx, deal, &next)
+			} else if next.Status == MilestonePending {
+				_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
+			}
+			s.notifyMilestoneMoved(deal, rm.Order, next.Order)
+		} else if idx >= 0 {
+			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+			s.notifyReleased(deal)
+		}
+		return rm, nil
+	case DisputeResolutionRefund:
+		// idempotent: if already refunded, return
+		if m.Status == MilestoneRefunded {
+			return m, nil
+		}
+		if m.PreimageHash != "" {
+			if _, err := s.lnbits.CancelHold(ctx, m.PreimageHash); err != nil {
+				log.Printf("warn: cancel milestone hold on refund deal=%s milestone=%s: %v", deal.ID, m.ID, err)
+				// best-effort: if hold is already gone/cancelled, treat as refunded; otherwise surface.
+				// (no direct "not found" helper here; operator can reconcile via LNbits if needed)
+				return nil, fmt.Errorf("cancelling milestone escrow hold: %w", err)
+			}
+		}
+		now := time.Now().UTC()
+		if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneRefunded, &now); err != nil {
+			return nil, err
+		}
+		// do not auto-fund next on refund; sequence halted pending policy
+		m.Status = MilestoneRefunded
+		m.CompletedAt = sql.NullTime{Time: now, Valid: true}
+		s.notifyExited(deal)
+		return m, nil
+	default:
+		return nil, fmt.Errorf("%w: resolution must be %q or %q", ErrInvalidInput, DisputeResolutionRelease, DisputeResolutionRefund)
+	}
+}

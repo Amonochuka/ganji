@@ -387,10 +387,43 @@ func (h *Handler) ResolveDispute(c *gin.Context) {
 
 // RegisterArbitrationRoutes mounts the operator-only arbitration endpoints.
 // Callers must already attach middleware.OperatorRequired to the router.
+
+
+func (h *Handler) ResolveMilestone(c *gin.Context) {
+	operatorEmail := c.GetString("email")
+	dealID := c.Param("dealID")
+	milestoneID := c.Param("milestoneID")
+	var req resolveDisputeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "resolution is required"})
+		return
+	}
+	m, err := h.service.ResolveMilestone(c.Request.Context(), operatorEmail, dealID, milestoneID, req.Resolution)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition), errors.Is(err, ErrPayoutInFlight):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+	msg := "milestone dispute resolved — escrow released to the freelancer"
+	if req.Resolution == DisputeResolutionRefund {
+		msg = "milestone dispute resolved — escrow refunded to the client"
+	}
+	c.JSON(http.StatusOK, gin.H{"message": msg, "milestone_id": m.ID, "status": m.Status})
+}
+
 func RegisterArbitrationRoutes(router gin.IRouter, h *Handler) {
 	group := router.Group("/disputes")
 	group.GET("", h.ListDisputes)
 	group.POST("/:dealID/resolve", h.ResolveDispute)
+	group.POST("/deals/:dealID/milestones/:milestoneID/resolve", h.ResolveMilestone)
 
 	// Operator reconcile for hung payouts: the human backstop to the
 	// no-auto-resend payout policy (see Service.ReconcilePayout). Mounted here
