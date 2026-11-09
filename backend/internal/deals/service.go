@@ -295,9 +295,41 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 	if err != nil {
 		return nil, err
 	}
-
 	if deal.FreelancerID != userID {
 		return nil, ErrForbidden
+	}
+
+	ms, err := s.repo.GetMilestonesByDeal(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ms) > 0 {
+		// Sequential milestone mode: mark active funded/in-progress milestone as submitted.
+		for i := range ms {
+			_ = s.refreshMilestonePayment(ctx, &ms[i])
+		}
+		ms, _ = s.repo.GetMilestonesByDeal(ctx, dealID)
+		idx := -1
+		for i := range ms {
+			if ms[i].Status == MilestoneInProgress || ms[i].Status == MilestoneFunded || ms[i].Status == MilestoneWorkSubmitted {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			for i := range ms {
+				if ms[i].Status == MilestoneAwaitingPayment {
+					return nil, fmt.Errorf("%w: milestone %d is awaiting payment before work can be submitted", ErrInvalidTransition, ms[i].Order)
+				}
+			}
+			return nil, fmt.Errorf("%w: no active milestone to submit", ErrInvalidTransition)
+		}
+		if ms[idx].Status != MilestoneWorkSubmitted && ms[idx].Status != MilestoneReleased && ms[idx].Status != MilestoneCompleted {
+			_ = s.repo.UpdateMilestoneStatus(ctx, ms[idx].ID, MilestoneWorkSubmitted, nil)
+		}
+		deal.Status = StatusWorkSubmitted
+		_ = s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted)
+		return deal, nil
 	}
 
 	artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID)
@@ -307,15 +339,12 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 	if len(artifacts) == 0 {
 		return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
 	}
-
 	if !CanTransition(deal.Status, StatusWorkSubmitted) {
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusWorkSubmitted)
 	}
-
 	if err := s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted); err != nil {
 		return nil, fmt.Errorf("submitting work for deal %s: %w", dealID, err)
 	}
-
 	deal.Status = StatusWorkSubmitted
 	return deal, nil
 }
@@ -340,14 +369,70 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(deal.ClientEmail, email) {
+		return nil, ErrForbidden
+	}
+
+	ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	if len(ms) > 0 {
+		// Sequential milestone mode: reuse public approve logic by resolving share token's equivalent behavior.
+		// Authorize by email (authenticated) and release active milestone / fund next.
+		for i := range ms {
+			_ = s.refreshMilestonePayment(ctx, &ms[i])
+		}
+		ms, _ = s.repo.GetMilestonesByDeal(ctx, deal.ID)
+		idx := -1
+		for i := range ms {
+			st := ms[i].Status
+			if st == MilestoneWorkSubmitted || st == MilestoneInProgress || st == MilestoneFunded || st == MilestoneCompleted {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return nil, fmt.Errorf("%w: no milestone available for approval", ErrInvalidTransition)
+		}
+		target := ms[idx]
+		if target.CheckingID != "" && target.Preimage != "" && target.Status != MilestoneReleased {
+			if _, err := s.ReleaseMilestone(ctx, deal, target.ID); err != nil {
+				return nil, err
+			}
+		} else if target.Status != MilestoneReleased {
+			now := time.Now().UTC()
+			_ = s.repo.UpdateMilestoneStatus(ctx, target.ID, MilestoneReleased, &now)
+		}
+		if idx+1 < len(ms) {
+			next := ms[idx+1]
+			if next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
+				_ = s.FundMilestone(ctx, deal, &next)
+			} else if next.Status == MilestonePending {
+				_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
+			}
+			s.notifyMilestoneMoved(deal, target.Order, next.Order)
+			deal.Status = StatusWorkSubmitted
+		} else {
+			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+			deal.Status = StatusReleased
+			s.notifyReleased(deal)
+		}
+		fresh, _ := s.repo.GetDealByID(ctx, deal.ID)
+		if fresh != nil {
+			return fresh, nil
+		}
+		return deal, nil
+	}
 
 	return s.releaseEscrow(ctx, dealID, releaseEscrowOptions{
-		authorize: func(deal *Deal) error {
-			if !strings.EqualFold(deal.ClientEmail, email) {
+		authorize: func(d *Deal) error {
+			if !strings.EqualFold(d.ClientEmail, email) {
 				return ErrForbidden
 			}
-			if !CanTransition(deal.Status, StatusReleased) {
-				return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
+			if !CanTransition(d.Status, StatusReleased) {
+				return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, d.Status, StatusReleased)
 			}
 			return nil
 		},

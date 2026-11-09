@@ -791,14 +791,14 @@ func (h *Handler) ExitDeal(c *gin.Context) {
 		return
 	}
 
-	// Only client can exit the deal
+	// Symmetric exit: either participant (client or freelancer) may exit, per redesign.
 	isClient := email != "" && strings.EqualFold(deal.ClientEmail, email)
-	if !isClient {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the client can exit the deal"})
+	isFreelancer := userID != "" && deal.FreelancerID == userID
+	if !isClient && !isFreelancer {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only deal participants can exit the deal"})
 		return
 	}
 
-	// Exit the deal - mark it as exited and notify freelancer
 	if err := h.service.ExitDeal(c.Request.Context(), dealID); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -810,7 +810,7 @@ func (h *Handler) ExitDeal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "deal exited by client",
+		"message": "deal exited",
 	})
 }
 
