@@ -89,7 +89,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"deal": deal.View(),
+		"deal": h.service.dealViewWithMilestones(c.Request.Context(), deal),
 	})
 }
 
@@ -116,7 +116,7 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"deal": deal.View(),
+		"deal": h.service.dealViewWithMilestones(c.Request.Context(), deal),
 	})
 }
 
@@ -137,8 +137,14 @@ func (h *Handler) ListDeals(c *gin.Context) {
 		return
 	}
 
+	// Include per-milestone truth in the list view (N per-deal lookups;
+	// acceptable at freelancer-dashboard scale).
+	views := make([]DealView, 0, len(deals))
+	for i := range deals {
+		views = append(views, h.service.dealViewWithMilestones(c.Request.Context(), &deals[i]))
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"deals": dealsView(deals),
+		"deals": views,
 	})
 }
 

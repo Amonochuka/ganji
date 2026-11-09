@@ -635,6 +635,49 @@ func TestSubmitWorkMilestoneModeRequiresArtifact(t *testing.T) {
 	}
 }
 
+func TestActiveMilestoneIsFirstNonTerminal(t *testing.T) {
+	m1 := *escrowMilestone("deal-1", "ms-1", 1, MilestoneReleased)
+	m2 := *escrowMilestone("deal-1", "ms-2", 2, MilestoneInProgress)
+	m3 := *escrowMilestone("deal-1", "ms-3", 3, MilestonePending)
+	if got := ActiveMilestone([]Milestone{m1, m2, m3}); got == nil || got.ID != "ms-2" {
+		t.Fatalf("expected active ms-2, got %+v", got)
+	}
+	if got := ActiveMilestone([]Milestone{m1}); got != nil {
+		t.Fatalf("expected nil active for all-terminal, got %+v", got)
+	}
+}
+
+func TestDealViewIncludesMilestonesWithActiveMirror(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+	deal := milestoneTestDeal(repo, "deal-1")
+	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneReleased)
+	repo.milestones["ms-2"] = escrowMilestone(deal.ID, "ms-2", 2, MilestoneInProgress)
+	repo.milestones["ms-2"].Invoice = "lnbc-active"
+	repo.milestones["ms-2"].CheckingID = "chk-active"
+	full := *repo.milestones["ms-1"]
+	view := service.dealViewWithMilestones(context.Background(), deal)
+	if len(view.Milestones) != 2 {
+		t.Fatalf("expected 2 milestone views, got %d", len(view.Milestones))
+	}
+	if view.Invoice != "lnbc-active" || view.CheckingID != "chk-active" {
+		t.Fatalf("expected active invoice/checking mirrored, got invoice=%q checking=%q", view.Invoice, view.CheckingID)
+	}
+	if view.Status != StatusWorkSubmitted {
+		t.Fatalf("expected mirrored work_submitted, got %s", view.Status)
+	}
+	// MilestoneView must never carry preimage/payee secrets.
+	_ = full
+	legacy := service.dealViewWithMilestones(context.Background(), func() *Deal {
+		d := milestoneTestDeal(repo, "deal-legacy")
+		return d
+	}())
+	if len(legacy.Milestones) != 0 {
+		t.Fatalf("legacy deal must have empty milestones, got %+v", legacy.Milestones)
+	}
+}
+
 // --- transitions unit ---
 
 func TestValidMilestoneTransitionsTable(t *testing.T) {

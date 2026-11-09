@@ -328,7 +328,7 @@ List all deals owned by the authenticated user. Ordered by `created_at DESC`.
 
 ### `GET /deals/:dealID`
 
-Get a single deal. Ownership enforced.
+Get a single deal. Ownership enforced. In milestone mode the response `deal` includes `milestones[]` (ordered by `order`) and `invoice`/`checking_id`/`status` mirror the **active milestone** — the first milestone whose status is not `released`/`refunded`/`exited`. Use `GET /deals/:dealID/milestones` (or this list) for exact per-milestone state; a nil active milestone means all are terminal. Same contract applies to `POST /deals` (201), `GET /deals` (list entries), and public `GET /public/deals/:shareToken`.
 
 **Response `200`**
 ```json

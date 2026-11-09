@@ -144,6 +144,11 @@ type DealView struct {
 	ResolvedBy     string     `json:"resolved_by,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	VerifiedAt     *time.Time `json:"verified_at"`
+	// Milestones carries per-milestone truth in milestone mode (empty in
+	// legacy single-hold mode). Order by Order asc. Invoice/CheckingID/Status
+	// on the view mirror the active milestone (first non-terminal) for
+	// legacy consumers; use this list for the exact per-milestone state.
+	Milestones []MilestoneView `json:"milestones,omitempty"`
 }
 
 // nullTime converts a sql.NullTime to a JSON-friendly *time.Time. The

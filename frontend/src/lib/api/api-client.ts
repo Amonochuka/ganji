@@ -232,6 +232,9 @@ export type DealView = {
   resolved_by: string | null;
   created_at: string;
   verified_at: string | null;
+  // Milestone mode: per-milestone truth. `invoice`/`checking_id`/`status`
+  // mirror the active milestone (first non-terminal) for legacy consumers.
+  milestones?: MilestoneView[];
 };
 
 export type CreateDealRequest = {
