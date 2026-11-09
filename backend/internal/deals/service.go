@@ -324,6 +324,18 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 			}
 			return nil, fmt.Errorf("%w: no active milestone to submit", ErrInvalidTransition)
 		}
+		// Milestone-mode submit requires evidence, same as the legacy
+		// single-hold flow. Per-milestone artifact scoping (milestone_id on
+		// artifacts) is a follow-up; the deal-level gate closes the current
+		// bypass so work cannot be submitted with zero artifacts. Artifacts
+		// are anchored to the freelancer's CV at deal release.
+		artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID)
+		if err != nil {
+			return nil, fmt.Errorf("checking submitted artifacts: %w", err)
+		}
+		if len(artifacts) == 0 {
+			return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
+		}
 		if ms[idx].Status != MilestoneWorkSubmitted && ms[idx].Status != MilestoneReleased && ms[idx].Status != MilestoneCompleted {
 			_ = s.repo.UpdateMilestoneStatus(ctx, ms[idx].ID, MilestoneWorkSubmitted, nil)
 		}

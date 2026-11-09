@@ -532,7 +532,7 @@ In milestone mode each milestone is its own escrow leg with its own hold invoice
 
 Auth/portal behavior in milestone mode:
 
-- `POST /deals/:dealID/submit` (freelancer) submits the **active milestone** (`funded`/`in_progress` → `work_submitted`) and sets the deal to `work_submitted`. Milestone-mode submit does **not** require deal-level artifacts (per-milestone artifacts are not yet enforced — see `MILESTONE_REDESIGN_NOTES.md` Outstanding).
+- `POST /deals/:dealID/submit` (freelancer) submits the **active milestone** (`funded`/`in_progress` → `work_submitted`) and sets the deal to `work_submitted`. Milestone-mode submit requires at least one deal-level artifact, same as the legacy flow. Per-milestone artifact scoping is a follow-up — see `MILESTONE_REDESIGN_NOTES.md` Outstanding.
 - `POST /deals/:dealID/approve` (client by email) releases the active milestone via the canonical payout path and funds the next milestone; releasing the final milestone releases the deal. Disputed/rejected milestones cannot be approved (operator resolution required).
 - `POST /deals/:dealID/exit` (freelancer **or** client by email) — symmetric participant exit. Pre-submission milestones (`pending`/`awaiting_payment`/`funded`/`in_progress`) are not paid: their holds are cancelled/refunded to the client (unfunded → `exited`). Post-submission milestones (`work_submitted`/`completed`/`rejected`) do **not** move money — they go to `disputed` for independent review. Legacy single-hold deals: post-submission → dispute review; otherwise the hold is cancelled → `refunded`.
 

@@ -610,6 +610,31 @@ func TestUpdateMilestoneStatusCannotBypassMoneyMoves(t *testing.T) {
 	}
 }
 
+func TestSubmitWorkMilestoneModeRequiresArtifact(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+	deal := milestoneTestDeal(repo, "deal-1")
+	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneInProgress)
+	// No artifacts on the deal -> must fail with invalid input.
+	_, err := service.SubmitWork(context.Background(), "freelancer-1", deal.ID)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid input for submit without artifact, got %v", err)
+	}
+	// Add evidence -> submit succeeds and the milestone moves to submitted.
+	repo.artifacts[deal.ID] = []Artifact{{ID: "artifact-1", DealID: deal.ID, Kind: ArtifactSourceCode}}
+	got, err := service.SubmitWork(context.Background(), "freelancer-1", deal.ID)
+	if err != nil {
+		t.Fatalf("SubmitWork with artifact: %v", err)
+	}
+	if got.Status != StatusWorkSubmitted {
+		t.Fatalf("expected work_submitted, got %s", got.Status)
+	}
+	if repo.milestones["ms-1"].Status != MilestoneWorkSubmitted {
+		t.Fatalf("expected milestone work_submitted, got %s", repo.milestones["ms-1"].Status)
+	}
+}
+
 // --- transitions unit ---
 
 func TestValidMilestoneTransitionsTable(t *testing.T) {
