@@ -524,12 +524,10 @@ func (h *Handler) PublicApproveDeal(c *gin.Context) {
 		return
 	}
 
-	// PublicDeal, not deal.View(): the GET endpoint is meticulously redacted
-	// and the approve response must not leak client_email / freelancer_id /
-	// deal id / share_token to a link holder.
+	pd, _ := h.service.GetPublicDeal(c.Request.Context(), shareToken)
 	c.JSON(http.StatusOK, gin.H{
-		"message": "deal approved and escrow released",
-		"deal":    deal.PublicView(),
+		"message": "deal approved / milestone released (sequential holds)",
+		"deal":    pd,
 	})
 }
 

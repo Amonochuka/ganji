@@ -1505,8 +1505,9 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	}, nil
 }
 
-// PublicApproveDeal allows a client to approve a deal from the public share link
-// without authentication. The share token proves they have the link.
+// PublicApproveDeal allows a client to approve a deal from the public share link.
+// Sequential milestone mode: releases the active milestone escrow (if present) and advances/funds next; final milestone completes deal.
+// Legacy mode (no milestones / deal-level escrow): releases the single deal hold.
 func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*Deal, error) {
 	if shareToken == "" {
 		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
@@ -1517,21 +1518,77 @@ func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*De
 		return nil, err
 	}
 
-	// Refresh payment status in case webhook was delayed
 	if deal.CheckingID != "" && deal.Status == StatusAwaitingPayment {
 		_ = s.refreshPaymentStatus(ctx, deal)
 	}
 
-	// Client can only approve if deal is locked (payment held) or work_submitted
+	ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	if len(ms) > 0 {
+		for i := range ms {
+			_ = s.refreshMilestonePayment(ctx, &ms[i])
+		}
+		ms, _ = s.repo.GetMilestonesByDeal(ctx, deal.ID)
+		// find active milestone to approve/release
+		idx := -1
+		for i := range ms {
+			st := ms[i].Status
+			if st == MilestoneWorkSubmitted || st == MilestoneInProgress || st == MilestoneFunded || st == MilestoneCompleted {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			// maybe awaiting payment on first milestone
+			for i := range ms {
+				if ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending {
+					return nil, fmt.Errorf("%w: milestone %d is not funded/submitted for approval", ErrInvalidTransition, ms[i].Order)
+				}
+			}
+			return nil, fmt.Errorf("%w: no milestone available for approval", ErrInvalidTransition)
+		}
+		target := ms[idx]
+		if target.CheckingID != "" && target.Preimage != "" && target.Status != MilestoneReleased {
+			if _, err := s.ReleaseMilestone(ctx, deal, target.ID); err != nil {
+				return nil, err
+			}
+		} else if target.Status != MilestoneReleased {
+			now := time.Now().UTC()
+			_ = s.repo.UpdateMilestoneStatus(ctx, target.ID, MilestoneReleased, &now)
+		}
+		if idx+1 < len(ms) {
+			next := ms[idx+1]
+			if next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
+				_ = s.FundMilestone(ctx, deal, &next)
+			} else if next.Status == MilestonePending {
+				_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
+			}
+			s.notifyMilestoneMoved(deal, target.Order, next.Order)
+			deal.Status = StatusWorkSubmitted // keep deal open for next milestone cycle
+		} else {
+			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+			deal.Status = StatusReleased
+			s.notifyReleased(deal)
+		}
+		// return fresh deal view
+		fresh, _ := s.repo.GetDealByID(ctx, deal.ID)
+		if fresh != nil {
+			return fresh, nil
+		}
+		return deal, nil
+	}
+
+	// Legacy single-hold flow
+	if deal.CheckingID == "" && deal.Status == StatusAwaitingPayment {
+		return nil, fmt.Errorf("%w: deal has no escrow to approve (fund it first)", ErrInvalidTransition)
+	}
 	if deal.Status != StatusLocked && deal.Status != StatusWorkSubmitted {
 		return nil, fmt.Errorf("%w: deal cannot be approved from status %s", ErrInvalidTransition, deal.Status)
 	}
 
 	return s.releaseEscrow(ctx, deal.ID, releaseEscrowOptions{
-		authorize: func(deal *Deal) error {
-			// No email check needed - share token proves access
-			if !CanTransition(deal.Status, StatusReleased) {
-				return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusReleased)
+		authorize: func(d *Deal) error {
+			if !CanTransition(d.Status, StatusReleased) {
+				return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, d.Status, StatusReleased)
 			}
 			return nil
 		},
