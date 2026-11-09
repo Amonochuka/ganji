@@ -379,8 +379,6 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 
 	ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
 	if len(ms) > 0 {
-		// Sequential milestone mode: reuse public approve logic by resolving share token's equivalent behavior.
-		// Authorize by email (authenticated) and release active milestone / fund next.
 		for i := range ms {
 			_ = s.refreshMilestonePayment(ctx, &ms[i])
 		}
@@ -394,20 +392,22 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 			}
 		}
 		if idx < 0 {
+			for i := range ms {
+				if ms[i].Status == MilestoneDisputed || ms[i].Status == MilestoneRejected {
+					return nil, fmt.Errorf("%w: milestone %d is under review/dispute; independent resolution required", ErrInvalidTransition, ms[i].Order)
+				}
+			}
 			return nil, fmt.Errorf("%w: no milestone available for approval", ErrInvalidTransition)
 		}
 		target := ms[idx]
-		if target.CheckingID != "" && target.Preimage != "" && target.Status != MilestoneReleased {
-			if _, err := s.ReleaseMilestone(ctx, deal, target.ID); err != nil {
-				return nil, err
-			}
-		} else if target.Status != MilestoneReleased {
-			now := time.Now().UTC()
-			_ = s.repo.UpdateMilestoneStatus(ctx, target.ID, MilestoneReleased, &now)
+		if _, err := s.releaseMilestoneViaCanonicalPath(ctx, deal, &target); err != nil {
+			return nil, err
 		}
+		// re-read target status after canonical release
+		rel, _ := s.repo.GetMilestoneByID(ctx, target.ID)
 		if idx+1 < len(ms) {
 			next := ms[idx+1]
-			if next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
+			if rel != nil && rel.Status == MilestoneReleased && next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
 				_ = s.FundMilestone(ctx, deal, &next)
 			} else if next.Status == MilestonePending {
 				_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
@@ -415,9 +415,11 @@ func (s *Service) ApproveDeal(ctx context.Context, email, dealID string) (*Deal,
 			s.notifyMilestoneMoved(deal, target.Order, next.Order)
 			deal.Status = StatusWorkSubmitted
 		} else {
-			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
-			deal.Status = StatusReleased
-			s.notifyReleased(deal)
+			if rel != nil && rel.Status == MilestoneReleased {
+				_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+				deal.Status = StatusReleased
+				s.notifyReleased(deal)
+			}
 		}
 		fresh, _ := s.repo.GetDealByID(ctx, deal.ID)
 		if fresh != nil {
@@ -1613,7 +1615,7 @@ func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*De
 			_ = s.refreshMilestonePayment(ctx, &ms[i])
 		}
 		ms, _ = s.repo.GetMilestonesByDeal(ctx, deal.ID)
-		// find active milestone to approve/release
+		// find active milestone to approve/release (disputed requires independent review resolution)
 		idx := -1
 		for i := range ms {
 			st := ms[i].Status
@@ -1623,8 +1625,10 @@ func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*De
 			}
 		}
 		if idx < 0 {
-			// maybe awaiting payment on first milestone
 			for i := range ms {
+				if ms[i].Status == MilestoneDisputed || ms[i].Status == MilestoneRejected {
+					return nil, fmt.Errorf("%w: milestone %d is under review/dispute; independent resolution required", ErrInvalidTransition, ms[i].Order)
+				}
 				if ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending {
 					return nil, fmt.Errorf("%w: milestone %d is not funded/submitted for approval", ErrInvalidTransition, ms[i].Order)
 				}
@@ -1632,27 +1636,26 @@ func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*De
 			return nil, fmt.Errorf("%w: no milestone available for approval", ErrInvalidTransition)
 		}
 		target := ms[idx]
-		if target.CheckingID != "" && target.Preimage != "" && target.Status != MilestoneReleased {
-			if _, err := s.ReleaseMilestone(ctx, deal, target.ID); err != nil {
-				return nil, err
-			}
-		} else if target.Status != MilestoneReleased {
-			now := time.Now().UTC()
-			_ = s.repo.UpdateMilestoneStatus(ctx, target.ID, MilestoneReleased, &now)
+		if _, err := s.releaseMilestoneViaCanonicalPath(ctx, deal, &target); err != nil {
+			return nil, err
 		}
+		// re-read target status after canonical release
+		rel, _ := s.repo.GetMilestoneByID(ctx, target.ID)
 		if idx+1 < len(ms) {
 			next := ms[idx+1]
-			if next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
+			if rel != nil && rel.Status == MilestoneReleased && next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
 				_ = s.FundMilestone(ctx, deal, &next)
 			} else if next.Status == MilestonePending {
 				_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
 			}
 			s.notifyMilestoneMoved(deal, target.Order, next.Order)
-			deal.Status = StatusWorkSubmitted // keep deal open for next milestone cycle
+			deal.Status = StatusWorkSubmitted
 		} else {
-			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
-			deal.Status = StatusReleased
-			s.notifyReleased(deal)
+			if rel != nil && rel.Status == MilestoneReleased {
+				_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+				deal.Status = StatusReleased
+				s.notifyReleased(deal)
+			}
 		}
 		// return fresh deal view
 		fresh, _ := s.repo.GetDealByID(ctx, deal.ID)
@@ -1911,6 +1914,27 @@ func (s *Service) refreshMilestonePayment(ctx context.Context, m *Milestone) err
 }
 
 // ReleaseMilestone settles the milestone's hold and pays the freelancer, then marks released.
+
+// releaseMilestoneViaCanonicalPath releases an escrow-backed milestone ONLY through
+// ReleaseMilestone (settle+pay). For state-only milestones with no escrow leg, it
+// marks completed (NOT released/paid) so money semantics remain honest.
+func (s *Service) releaseMilestoneViaCanonicalPath(ctx context.Context, deal *Deal, m *Milestone) (*Milestone, error) {
+	if m.Status == MilestoneReleased {
+		return m, nil
+	}
+	if m.PreimageHash != "" || m.CheckingID != "" {
+		return s.ReleaseMilestone(ctx, deal, m.ID)
+	}
+	// No escrow hold ever attached (legacy/state-only). Never mark released/paid.
+	now := time.Now().UTC()
+	if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneCompleted, &now); err != nil {
+		return nil, err
+	}
+	m.Status = MilestoneCompleted
+	m.CompletedAt = sql.NullTime{Time: now, Valid: true}
+	return m, nil
+}
+
 // ReleaseMilestone is the ONLY path that moves a milestone escrow to released/paid:
 // settles the milestone hold and pays the freelancer, then marks MilestoneReleased.
 // completed = approved/payout-pending (if used), never "paid"; released = money moved.
@@ -2078,20 +2102,16 @@ func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, mil
 		return nil, ErrMilestoneNotFound
 	}
 	target := ms[idx]
-	// If milestone has its own escrow invoice, release it (pays freelancer for M1).
-	if target.CheckingID != "" && target.Preimage != "" && target.Status != MilestoneReleased {
-		if _, err := s.ReleaseMilestone(ctx, deal, target.ID); err != nil {
-			return nil, err
-		}
-	} else if target.Status != MilestoneReleased && target.Status != MilestoneCompleted {
-		// no escrow leg yet (legacy/state-only) — mark completed
-		now := time.Now().UTC()
-		_ = s.repo.UpdateMilestoneStatus(ctx, target.ID, MilestoneCompleted, &now)
+	if target.Status == MilestoneDisputed || target.Status == MilestoneRejected {
+		return nil, fmt.Errorf("%w: milestone is under review/dispute; independent resolution required", ErrInvalidTransition)
 	}
-	// Fund/start next milestone sequentially
+	if _, err := s.releaseMilestoneViaCanonicalPath(ctx, deal, &target); err != nil {
+		return nil, err
+	}
+	rel, _ := s.repo.GetMilestoneByID(ctx, target.ID)
 	if idx+1 < len(ms) {
 		next := ms[idx+1]
-		if next.CheckingID == "" && next.AmountSats > 0 {
+		if rel != nil && rel.Status == MilestoneReleased && next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
 			if err := s.FundMilestone(ctx, deal, &next); err != nil {
 				return nil, err
 			}
@@ -2100,10 +2120,11 @@ func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, mil
 		}
 		s.notifyMilestoneMoved(deal, target.Order, next.Order)
 	} else {
-		// final milestone released -> release/complete deal record (legacy anchor/notify)
-		_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
-		deal.Status = StatusReleased
-		s.notifyReleased(deal)
+		if rel != nil && rel.Status == MilestoneReleased {
+			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+			deal.Status = StatusReleased
+			s.notifyReleased(deal)
+		}
 	}
 	return s.GetPublicDeal(ctx, shareToken)
 }
