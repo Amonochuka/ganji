@@ -350,7 +350,10 @@ var ValidMilestoneTransitions = map[MilestoneStatus][]MilestoneStatus{
 	// completed = approved/payout-pending (if used); must reach released via idempotent payout path.
 	MilestoneCompleted:       {MilestoneReleased, MilestoneDisputed},
 	// rejected = client rejected submitted work; HOLD STAYS, goes to independent review/dispute resolution.
-	MilestoneRejected:        {MilestoneDisputed, MilestoneInProgress, MilestoneWorkSubmitted},
+	// rejected -> released is operator-release-only (canonical path); direct
+	// approve/accept-next still refuses rejected (requires independent
+	// resolution). Enforced in service layer, mirrored here for completeness.
+	MilestoneRejected:        {MilestoneDisputed, MilestoneInProgress, MilestoneWorkSubmitted, MilestoneReleased},
 	// disputed = independent review; resolution releases or refunds the hold.
 	MilestoneDisputed:        {MilestoneReleased, MilestoneRefunded},
 	MilestoneReleased:        {}, // terminal (paid)

@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,13 @@ import (
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
+
+var mockIDCounter int64
+
+func mockID() string {
+	mockIDCounter++
+	return fmt.Sprintf("mock-%d", mockIDCounter)
+}
 
 // noopConnector hands back a real *sql.DB whose transactions commit/rollback
 // as no-ops. The fake repo doesn't execute SQL, so this is only needed so
@@ -44,6 +52,7 @@ func (noopTx) Rollback() error { return nil }
 type fakeDealRepo struct {
 	deals       map[string]*Deal
 	artifacts   map[string][]Artifact
+	milestones  map[string]*Milestone
 	getDealErr  error
 	updateErr   error
 	createErr   error
@@ -52,12 +61,18 @@ type fakeDealRepo struct {
 	// read and its guarded write: on the next guarded update, the row is first
 	// moved to raceMoveTo and the guard reports itself as lost.
 	raceMoveTo Status
+	// milestoneRaceMoveTo simulates another actor moving a milestone between
+	// the caller's Phase 1 read and its Phase 3 re-lock: on the next
+	// GetMilestoneForUpdate after MarkMilestonePayoutAttempted, the row is
+	// first moved to this status so Phase 3 re-validation is exercised.
+	milestoneRaceMoveTo MilestoneStatus
 }
 
 func newFakeDealRepo() *fakeDealRepo {
 	return &fakeDealRepo{
-		deals:     map[string]*Deal{},
-		artifacts: map[string][]Artifact{},
+		deals:      map[string]*Deal{},
+		artifacts:  map[string][]Artifact{},
+		milestones: map[string]*Milestone{},
 	}
 }
 
@@ -1820,13 +1835,118 @@ func TestDisputeDealGuardLosesToConcurrentRelease(t *testing.T) {
 	}
 }
 
-func (f *fakeDealRepo) CreateMilestone(ctx context.Context, milestone *Milestone) error { return nil }
-func (f *fakeDealRepo) GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error) { return nil, nil }
-func (f *fakeDealRepo) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) { return nil, ErrMilestoneNotFound }
-func (f *fakeDealRepo) GetMilestoneForUpdate(ctx context.Context, milestoneID string) (*Milestone, error) { return f.GetMilestoneByID(ctx, milestoneID) }
-func (f *fakeDealRepo) UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error { return nil }
-func (f *fakeDealRepo) UpdateMilestoneEscrow(ctx context.Context, m *Milestone) error { return nil }
-func (f *fakeDealRepo) UpdateMilestonePayout(ctx context.Context, milestoneID, payoutCheckingID string) error { return nil }
-func (f *fakeDealRepo) MarkMilestonePayoutAttempted(ctx context.Context, milestoneID string) error { return nil }
-func (f *fakeDealRepo) ClearMilestonePayoutTracking(ctx context.Context, milestoneID string) error { return nil }
-func (f *fakeDealRepo) DeleteMilestone(ctx context.Context, milestoneID string) error { return nil }
+func (f *fakeDealRepo) CreateMilestone(ctx context.Context, milestone *Milestone) error {
+	if milestone.ID == "" {
+		milestone.ID = mockID()
+	}
+	milestone.CreatedAt = time.Now()
+	f.milestones[milestone.ID] = milestone
+	return nil
+}
+
+func (f *fakeDealRepo) GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error) {
+	var out []Milestone
+	for _, m := range f.milestones {
+		if m.DealID == dealID {
+			out = append(out, *m)
+		}
+	}
+	// order by order asc
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Order < out[i].Order {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDealRepo) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
+	m, ok := f.milestones[milestoneID]
+	if !ok {
+		return nil, ErrMilestoneNotFound
+	}
+	return m, nil
+}
+
+func (f *fakeDealRepo) GetMilestoneForUpdate(ctx context.Context, milestoneID string) (*Milestone, error) {
+	m, ok := f.milestones[milestoneID]
+	if !ok {
+		return nil, ErrMilestoneNotFound
+	}
+	// Simulate a concurrent actor moving the row during Phase 2: if the
+	// milestone has a durable payout attempt but no payout ID (i.e. we are
+	// past Phase 1), raceMoveTo fires once so Phase 3 re-validation sees
+	// the new status.
+	if f.milestoneRaceMoveTo != "" && m.PayoutAttemptedAt.Valid && m.PayoutCheckingID == "" {
+		m.Status = f.milestoneRaceMoveTo
+		f.milestoneRaceMoveTo = ""
+	}
+	return m, nil
+}
+
+func (f *fakeDealRepo) UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error {
+	m, ok := f.milestones[milestoneID]
+	if !ok {
+		return ErrMilestoneNotFound
+	}
+	m.Status = status
+	if completedAt != nil {
+		m.CompletedAt = sql.NullTime{Time: *completedAt, Valid: true}
+	}
+	return nil
+}
+
+func (f *fakeDealRepo) UpdateMilestoneEscrow(ctx context.Context, m *Milestone) error {
+	stored, ok := f.milestones[m.ID]
+	if !ok {
+		return ErrMilestoneNotFound
+	}
+	stored.PreimageHash = m.PreimageHash
+	stored.Preimage = m.Preimage
+	stored.PayeeInvoice = m.PayeeInvoice
+	stored.Invoice = m.Invoice
+	stored.CheckingID = m.CheckingID
+	stored.Status = m.Status
+	return nil
+}
+
+func (f *fakeDealRepo) UpdateMilestonePayout(ctx context.Context, milestoneID, payoutCheckingID string) error {
+	m, ok := f.milestones[milestoneID]
+	if !ok {
+		return ErrMilestoneNotFound
+	}
+	m.PayoutCheckingID = payoutCheckingID
+	if !m.PayoutAttemptedAt.Valid {
+		m.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	}
+	return nil
+}
+
+func (f *fakeDealRepo) MarkMilestonePayoutAttempted(ctx context.Context, milestoneID string) error {
+	m, ok := f.milestones[milestoneID]
+	if !ok {
+		return ErrMilestoneNotFound
+	}
+	m.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	return nil
+}
+
+func (f *fakeDealRepo) ClearMilestonePayoutTracking(ctx context.Context, milestoneID string) error {
+	m, ok := f.milestones[milestoneID]
+	if !ok {
+		return ErrMilestoneNotFound
+	}
+	m.PayoutCheckingID = ""
+	m.PayoutAttemptedAt = sql.NullTime{}
+	return nil
+}
+
+func (f *fakeDealRepo) DeleteMilestone(ctx context.Context, milestoneID string) error {
+	if _, ok := f.milestones[milestoneID]; !ok {
+		return ErrMilestoneNotFound
+	}
+	delete(f.milestones, milestoneID)
+	return nil
+}

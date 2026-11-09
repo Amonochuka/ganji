@@ -95,8 +95,8 @@ _Last updated: 2026-11-09 (branch `main`, post-`22c915b`)_
 - **Notifications:** `DealExited`/`MilestoneMoved` wired (best-effort).
 
 ### Partially done (needs hardening)
-- **Milestone release tx/lock parity:** `ReleaseMilestone` is locked/idempotent but not yet at full deal `releaseEscrow` parity across every edge/race; needs tests (double-call, ambiguous payout, crash-window).
-- **Dispute/review completeness:** operator release/refund exists per milestone; refund idempotency on “hold already gone/ambiguous cancel” needs parity with `cancelEscrowHold`; rework-after-reject policy/state transitions and deal-level dispute coherence for milestone mode need refinement.
+- **Milestone release tx/lock parity (done 2026-11-09):** `ReleaseMilestone` now mirrors `releaseEscrow` (Phase-3 re-validation, disputed-during-release guard, confirmed/failed/ambiguous + crash-window verdicts, already-settled settle). Tests in `milestone_service_test.go`.
+- **Dispute/review completeness:** operator release/refund + refund idempotency done; rework-after-reject policy (rejected → in_progress/work_submitted vs dispute-only) and deal-level dispute coherence for milestone mode still need refinement.
 - **Deal-level coherence:** deal `status/invoice/checking_id`/current milestone mirrored for compatibility but not a fully explicit authenticated contract.
 - **Artifacts/evidence:** milestone-mode submit bypasses deal-level artifact requirement.
 
@@ -105,12 +105,11 @@ _Last updated: 2026-11-09 (branch `main`, post-`22c915b`)_
 - If a **dev DB** applied old incremental `000009/000010` before consolidation: while **not in prod**, **reset/recreate the dev DB and migrate fresh** (or carefully align `schema_migrations` to consolidated `000008`). **Do not do this in prod.** No incremental add-column migrations added.
 
 ## What’s left / TODOs
-- [x] **Canonical `completed→released` payout path (core):** `ReleaseMilestone` only pays/marks `released`; bypasses removed (`releaseMilestoneViaCanonicalPath`); `completed` = payout-pending not paid; UI labels updated. _Follow-up:_ full tx/lock parity + tests.
+- [x] **Canonical `completed→released` payout path (core):** `ReleaseMilestone` only pays/marks `released`; bypasses removed (`releaseMilestoneViaCanonicalPath`); `completed` = payout-pending not paid; UI labels updated.
 - [x] **Escrow mandatory (no-escrow path hardened):** releasing/advancing a milestone with no hold is an explicit **“fund it first”** error — never mark/advance as paid without escrow.
-- [x] **Post-submission reject/exit hold-stays + independent review (core):** no auto-refund; reject/exit → `disputed`; operator `ResolveMilestone` releases (canonical) or refunds (cancel hold). _Follow-up:_ refund idempotency for ambiguous/“hold gone” cancel, rework/resubmit-after-review policy, deal/milestone dispute coherence.
-- [ ] **Idempotency/atomicity parity (finish):** full `releaseEscrow`-level discipline for milestone release/resolve; tests for double-call, in-flight/ambiguous payout, crash-window, and refund/cancel races.
+- [x] **Post-submission reject/exit hold-stays + independent review (core):** no auto-refund; reject/exit → `disputed`; operator `ResolveMilestone` releases (canonical) or refunds (cancel hold).
+- [x] **Idempotency/atomicity parity (2026-11-09, `milestone_service_test.go`):** `ReleaseMilestone` Phase-3 re-validation (disputed-during-release abort + `CanMilestoneTransition` gate), `awaiting_payment→released` removed (must refresh/submit first), `rejected→released` operator path added; `cancelMilestoneHold` idempotency (already-gone hold = success, still-held stays disputed); `UpdateMilestoneStatus` blocks direct `released`/`refunded` and enforces transitions; `CreateMilestone` validates title/amount/order; `ResolveMilestone` escrow-mandatory. 23 tests cover double-call, in-flight/ambiguous, crash-window, refund races, no-escrow, settle-already-settled, disputed-during-release, reject/exit money rules, share-token auth, transitions. _Remaining:_ rework-after-reject policy, deal/milestone dispute coherence.
 - [ ] **Artifacts/evidence model:** milestone-mode submit bypasses deal-level artifact requirement — decide per-milestone artifacts/submissions and enforce.
 - [ ] **Deal lifecycle/current-milestone contract:** explicit deal-level `status/invoice/checking_id` + “active milestone” for legacy/authenticated consumers.
 - [ ] **UX/API polish:** authenticated per-milestone submit/accept-next with role gating and active milestone invoice/payment state; document operator resolve endpoint in `API_REFERENCE`/ops docs.
-- [ ] **Tests:** transitions, share-token-only auth, escrow edge cases, dispute resolve release/refund.
 - [ ] **E2E (real LNbits + DB, not run here):** apply fresh `000008` → create milestone deal → pay M1 → submit → approve/release M1 (freelancer paid) → fund/pay M2 → … plus reject→review→resolve and exit/refund (pre vs post-submission).
