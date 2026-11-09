@@ -1805,36 +1805,51 @@ func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
 	}
 
 	now := time.Now().UTC()
-	// Agreed: mid-milestone exit when work not submitted/approved => not paid; cancel/refund hold.
-	// Consequences become material when submitted/approved/disputed (TODO: handle submitted/rejected/disputed holds).
 	for i := range milestones {
 		m := milestones[i]
-		if m.Status == MilestoneReleased {
+		if m.Status == MilestoneReleased || m.Status == MilestoneRefunded || m.Status == MilestoneExited {
 			continue
 		}
 		switch m.Status {
 		case MilestoneAwaitingPayment, MilestoneFunded, MilestoneInProgress, MilestonePending:
+			// Not submitted/approved: not paid to freelancer; cancel/refund hold (symmetric).
 			if m.PreimageHash != "" && m.Status != MilestonePending {
 				if _, err := s.lnbits.CancelHold(ctx, m.PreimageHash); err != nil {
 					log.Printf("warn: cancel milestone hold on exit deal=%s milestone=%s: %v", deal.ID, m.ID, err)
 				}
-				_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneRefunded, &now)
+				if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneRefunded, &now); err != nil {
+					return err
+				}
 			} else {
-				_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneExited, &now)
+				if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneExited, &now); err != nil {
+					return err
+				}
 			}
-		case MilestoneWorkSubmitted, MilestoneCompleted:
-			// Work submitted/approved-state consequences are material; do not auto-cancel/refund here (needs review/dispute flow).
-			log.Printf("info: exit deal=%s leaves milestone=%s in %s (requires review/dispute resolution)", deal.ID, m.ID, m.Status)
-		case MilestoneRefunded, MilestoneExited, MilestoneRejected:
-			// no-op
+		case MilestoneWorkSubmitted, MilestoneCompleted, MilestoneRejected:
+			// Material consequences: do NOT move money. Hold stays; force independent review/dispute resolution.
+			if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneDisputed, &now); err != nil {
+				return err
+			}
+			if deal.DisputeReason == "" {
+				deal.DisputeReason = "exit requested while milestone requires review (post-submission)"
+				_, _ = s.repo.UpdateDisputeIfCurrent(ctx, deal.ID, deal.Status, deal.DisputeReason)
+			}
+		case MilestoneDisputed:
+			// already awaiting resolution; keep hold, no money move
 		default:
 			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneExited, &now)
 		}
 	}
 
 	if len(milestones) == 0 && deal.PreimageHash != "" && deal.Status != StatusReleased && deal.Status != StatusRefunded {
-		_ = s.cancelEscrowHold(ctx, deal)
-		_ = s.repo.UpdateStatus(ctx, deal.ID, StatusRefunded)
+		if deal.Status == StatusWorkSubmitted || deal.Status == StatusReviewing || deal.Status == StatusDisputed {
+			if deal.DisputeReason == "" {
+				_, _ = s.repo.UpdateDisputeIfCurrent(ctx, deal.ID, deal.Status, "exit requested after submission (requires review)")
+			}
+		} else {
+			_ = s.cancelEscrowHold(ctx, deal)
+			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusRefunded)
+		}
 	}
 
 	s.notifyExited(deal)
@@ -1936,7 +1951,7 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 	if m.PayoutAttemptedAt.Valid && m.PayoutCheckingID == "" {
 		return nil, fmt.Errorf("%w: milestone payout attempt exists with unknown outcome, reconcile before retrying", ErrPayoutInFlight)
 	}
-	if m.Status != MilestoneInProgress && m.Status != MilestoneWorkSubmitted && m.Status != MilestoneFunded && m.Status != MilestoneCompleted {
+	if m.Status != MilestoneInProgress && m.Status != MilestoneWorkSubmitted && m.Status != MilestoneFunded && m.Status != MilestoneCompleted && m.Status != MilestoneDisputed {
 		return nil, fmt.Errorf("%w: milestone cannot be released from status %s", ErrInvalidTransition, m.Status)
 	}
 	if err := s.repo.MarkMilestonePayoutAttempted(ctx, m.ID); err != nil {
@@ -2037,31 +2052,30 @@ func (s *Service) PublicRejectMilestone(ctx context.Context, shareToken, milesto
 	if reason == "" {
 		return nil, fmt.Errorf("%w: reason is required", ErrInvalidInput)
 	}
+	if length := len([]rune(reason)); length > maxDisputeReasonRunes {
+		return nil, fmt.Errorf("%w: reason must be at most %d characters", ErrInvalidInput, maxDisputeReasonRunes)
+	}
 	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
 	if err != nil {
 		return nil, err
 	}
-	ms, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
 	if err != nil {
 		return nil, err
 	}
-	found := false
-	for i := range ms {
-		if ms[i].ID == milestoneID {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if m.DealID != deal.ID {
 		return nil, ErrMilestoneNotFound
 	}
-	// State scaffolding: mark rejected and notify. Money/dispute consequences depend
-	// on milestone escrow wiring (per-milestone invoices).
+	// Rejected after submission: DO NOT auto-refund. Hold stays; force independent review/dispute.
+	// Only allow rejecting submitted/completed (material) work.
+	if m.Status != MilestoneWorkSubmitted && m.Status != MilestoneCompleted {
+		return nil, fmt.Errorf("%w: milestone cannot be rejected from status %s (submit work or await review)", ErrInvalidTransition, m.Status)
+	}
 	now := time.Now().UTC()
-	if err := s.repo.UpdateMilestoneStatus(ctx, milestoneID, MilestoneRejected, &now); err != nil {
+	if err := s.repo.UpdateMilestoneStatus(ctx, milestoneID, MilestoneDisputed, &now); err != nil {
 		return nil, err
 	}
-	deal.DisputeReason = reason
+	_, _ = s.repo.UpdateDisputeIfCurrent(ctx, deal.ID, deal.Status, reason)
 	s.notifyDisputed(deal)
 	return s.GetPublicDeal(ctx, shareToken)
 }

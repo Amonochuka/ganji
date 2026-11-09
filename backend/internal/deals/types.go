@@ -335,15 +335,27 @@ const (
 	MilestoneExited         MilestoneStatus = "exited"
 	MilestoneRejected       MilestoneStatus = "rejected"
 	MilestoneRefunded       MilestoneStatus = "refunded"
+	MilestoneDisputed       MilestoneStatus = "disputed"
 )
 
-// ValidMilestoneTransitions defines allowed milestone status transitions.
+// ValidMilestoneTransitions defines allowed milestone status transitions for
+// sequential per-milestone escrow. Money-moving outcomes (release/refund) must
+// also satisfy payout/idempotency rules in the service layer.
 var ValidMilestoneTransitions = map[MilestoneStatus][]MilestoneStatus{
-	MilestonePending:      {MilestoneInProgress, MilestoneExited, MilestoneRejected},
-	MilestoneInProgress:   {MilestoneCompleted, MilestoneExited, MilestoneRejected},
-	MilestoneCompleted:    {}, // terminal
-	MilestoneExited:       {}, // terminal
-	MilestoneRejected:     {}, // terminal
+	MilestonePending:         {MilestoneAwaitingPayment, MilestoneInProgress, MilestoneExited},
+	MilestoneAwaitingPayment: {MilestoneFunded, MilestoneInProgress, MilestoneExited, MilestoneRefunded},
+	MilestoneFunded:          {MilestoneInProgress, MilestoneExited, MilestoneRefunded, MilestoneDisputed},
+	MilestoneInProgress:      {MilestoneWorkSubmitted, MilestoneReleased, MilestoneExited, MilestoneRefunded, MilestoneDisputed},
+	MilestoneWorkSubmitted:   {MilestoneReleased, MilestoneCompleted, MilestoneRejected, MilestoneDisputed, MilestoneExited},
+	// completed = approved/payout-pending (if used); must reach released via idempotent payout path.
+	MilestoneCompleted:       {MilestoneReleased, MilestoneDisputed},
+	// rejected = client rejected submitted work; HOLD STAYS, goes to independent review/dispute resolution.
+	MilestoneRejected:        {MilestoneDisputed, MilestoneInProgress, MilestoneWorkSubmitted},
+	// disputed = independent review; resolution releases or refunds the hold.
+	MilestoneDisputed:        {MilestoneReleased, MilestoneRefunded},
+	MilestoneReleased:        {}, // terminal (paid)
+	MilestoneRefunded:        {}, // terminal
+	MilestoneExited:          {}, // terminal
 }
 
 // CanMilestoneTransition checks whether moving from one milestone status to

@@ -18,7 +18,7 @@ CREATE TABLE milestones (
     CONSTRAINT valid_milestone_status CHECK (
         status IN (
             'pending','awaiting_payment','funded','in_progress','work_submitted',
-            'completed','released','exited','rejected','refunded'
+            'completed','released','exited','rejected','refunded','disputed'
         )
     ),
     CONSTRAINT unique_deal_milestone_order UNIQUE (deal_id, "order")

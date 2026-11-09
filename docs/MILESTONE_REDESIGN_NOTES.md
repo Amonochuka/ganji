@@ -71,10 +71,12 @@ Must be reliable enough for UX but must not break money-path correctness (curren
 - in-app/UI indicators + email where configured
 
 ## Agreed Rules (captured)
-- **Sequential per-milestone funding/invoices**: fund/release M1, then fund/start M2, etc. (good design; matches partial payout & limits exposure). Money-path wiring is separate from state/UX scaffolding.
-- **Client exit mid-milestone (not submitted/approved)**: that milestone is not paid to freelancer; funds for that milestone refunded/cancelled per policy.
-- **Freelancer exit**: symmetric/fair — can exit after a milestone or mid-milestone (including if they change mind). Mid-milestone (not submitted/approved) => no payout for that milestone; funds returned to client per same policy. Consequences become material when work is submitted/approved or disputed. Define explicitly per state: not started / in progress / submitted / approved.
-- **Public share-link client UI**: required because clients don’t log in. Share-link actions are authorized by **`:shareToken` only** (no auth session, no internal IDs/secrets leaked), consistent with existing public deal flow.
+- **Sequential per-milestone funding/invoices**: fund/release M1, then fund/start M2, etc. Money-path wiring is sequential per-milestone holds.
+- **Exit when work NOT submitted/approved** (pre-submission: `pending`/`awaiting_payment`/`funded`/`in_progress`): milestone **not paid** to freelancer; that milestone hold is **cancelled/refunded to the client**. Symmetric for client/freelancer exit. Later unfunded milestones do not get paid.
+- **Submitted/approved = material consequences (no auto-refund/release on exit):** if `work_submitted` (or `completed` but not `released`), **exit does not move money**. The milestone hold **stays in escrow** and the case is forced to **independent review/dispute/explicit resolution** (client reviews; if rejected → review/dispute; resolver releases to freelancer or refunds client). Participants cannot exit to bypass review.
+- **Approve vs reject (submitted work):** **approved → release/settle milestone hold + pay freelancer** (then fund next milestone). **Rejected → do NOT auto-refund**; **hold stays** and it goes to **independent review/decision** there (like the original single-milestone flow). Resolution outcome moves money (release or refund), idempotently.
+- **`completed` vs `released` (hold semantics):** **`released` = hold settled + freelancer paid (money moved)**. `completed` (if used) means approved/payout-pending — **never treat as paid** — and must have exactly one idempotent payout-safe path to `released`.
+- **Public share-link client UI:** clients don’t log in. Share-link actions authorized by **`:shareToken` only** (no auth session, no internal IDs/secrets leaked).
 
 ## Implementation Status (WIP, not production-complete)
 _Last updated: 2026-11-09 (branch `main`)_
