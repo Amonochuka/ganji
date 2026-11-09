@@ -36,10 +36,12 @@ export const metadata: Metadata = {
   title: "ganji",
   description:
     "Bitcoin Lightning escrow with a cryptographically anchored freelancer reputation layer. No platform lock-in, no bank account required.",
-  links: [
-    { rel: "icon", type: "image/svg+xml", href: "/gnj-logo.svg" },
-    { rel: "icon", href: "/gnj-logo.ico" },
-  ],
+  icons: {
+    icon: [
+      { url: "/gnj-logo.svg", type: "image/svg+xml" },
+      { url: "/gnj-logo.ico" },
+    ],
+  },
 };
 
 export default function RootLayout({
