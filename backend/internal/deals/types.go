@@ -109,6 +109,11 @@ type PublicMilestoneAction struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+type MilestoneInput struct {
+	Title      string `json:"title"`
+	AmountSats int64  `json:"amount_sats"`
+}
+
 // DealView is the safe authed view of a deal. It is what every authenticated
 // deal endpoint serializes instead of the full *Deal, which carries secrets
 // that must never leave the server:

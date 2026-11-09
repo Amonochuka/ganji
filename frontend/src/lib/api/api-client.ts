@@ -240,6 +240,7 @@ export type CreateDealRequest = {
   source_platform: string;
   client_email: string;
   payee_invoice: string;
+  milestones?: { title: string; amount_sats: number }[];
 };
 
 export type CreateDealResponse = {

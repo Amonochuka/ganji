@@ -35,12 +35,18 @@ type updateDealStatusRequest struct {
 	Status Status `json:"status" binding:"required"`
 }
 
+type milestoneInput struct {
+	Title      string `json:"title" binding:"required"`
+	AmountSats int64  `json:"amount_sats" binding:"required"`
+}
+
 type createDealRequest struct {
-	Title          string `json:"title" binding:"required"`
-	AmountSats     int64  `json:"amount_sats" binding:"required"`
-	SourcePlatform string `json:"source_platform" binding:"required"`
-	ClientEmail    string `json:"client_email" binding:"required"`
-	PayeeInvoice   string `json:"payee_invoice" binding:"required"`
+	Title          string           `json:"title" binding:"required"`
+	AmountSats     int64            `json:"amount_sats"` // required for legacy single-hold; derived from milestones when provided
+	SourcePlatform string           `json:"source_platform" binding:"required"`
+	ClientEmail    string           `json:"client_email" binding:"required"`
+	PayeeInvoice   string           `json:"payee_invoice" binding:"required"`
+	Milestones     []milestoneInput `json:"milestones,omitempty"` // sequential per-milestone holds (M1 funded first)
 }
 
 func (h *Handler) CreateDeal(c *gin.Context) {
@@ -64,19 +70,19 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 		PayeeInvoice:   req.PayeeInvoice,
 	}
 
-	if err := h.service.CreateDeal(c.Request.Context(), deal); err != nil {
+	var ms []MilestoneInput
+	for _, mi := range req.Milestones {
+		ms = append(ms, MilestoneInput{Title: mi.Title, AmountSats: mi.AmountSats})
+	}
+
+	if err := h.service.CreateDealWithMilestones(c.Request.Context(), deal, ms); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			// The only non-validation failure on this path is upstream: the
-			// LNbits hold invoice (or, rarely, preimage/token generation or
-			// the DB). Log the real cause — a swallowed error here made the
-			// original "demo.lnbits.com: hold invoices not supported" bug
-			// indistinguishable from an internal crash.
 			log.Printf("create deal failed: %v", err)
 			c.JSON(http.StatusBadGateway, gin.H{
-				"error": "payment provider error: could not create the escrow hold invoice. Your LNbits wallet must support hold (HODL) invoices — see backend/.env LNBITS_URL.",
+				"error": "payment provider error: could not create escrow (deal or milestone). Your LNbits wallet must support hold (HODL) invoices — see backend/.env LNBITS_URL.",
 			})
 		}
 		return

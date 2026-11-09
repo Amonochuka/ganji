@@ -91,6 +91,10 @@ func NewService(repo DealRepository, lnbits *lnbits.Client, opts ...Option) *Ser
 }
 
 func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
+	return s.CreateDealWithMilestones(ctx, deal, nil)
+}
+
+func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, milestones []MilestoneInput) error {
 	deal.Title = strings.TrimSpace(deal.Title)
 	deal.SourcePlatform = strings.TrimSpace(deal.SourcePlatform)
 	deal.PayeeInvoice = strings.TrimSpace(deal.PayeeInvoice)
@@ -98,92 +102,117 @@ func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	if deal.FreelancerID == "" {
 		return fmt.Errorf("%w: freelancer id is required", ErrInvalidInput)
 	}
-
 	deal.ClientEmail = strings.ToLower(strings.TrimSpace(deal.ClientEmail))
 	if !isValidEmail(deal.ClientEmail) {
 		return fmt.Errorf("%w: valid client email is required", ErrInvalidInput)
 	}
-
 	if deal.Title == "" {
 		return fmt.Errorf("%w: title is required", ErrInvalidInput)
 	}
-
-	if deal.AmountSats <= 0 {
-		return fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
-	}
-
 	if deal.SourcePlatform == "" {
 		return fmt.Errorf("%w: source platform is required", ErrInvalidInput)
 	}
-
 	if deal.PayeeInvoice == "" {
 		return fmt.Errorf("%w: payee invoice is required", ErrInvalidInput)
 	}
-
 	if deal.Status == "" {
 		deal.Status = StatusAwaitingPayment
 	}
 
-	// Generate the preimage that controls the escrow. LNbits holds the
-	// payment against sha256(preimage); only a successful settle (reveal)
-	// releases it to the freelancer, and only a cancel returns it to the
-	// client. We keep the raw preimage in the DB because LNbits's settle
-	// endpoint takes the preimage body.
-	preimage := make([]byte, 32)
-	if _, err := rand.Read(preimage); err != nil {
-		return fmt.Errorf("generating escrow preimage: %w", err)
+	milestoneMode := len(milestones) > 0
+	if milestoneMode {
+		var total int64
+		for i, mi := range milestones {
+			if strings.TrimSpace(mi.Title) == "" || mi.AmountSats <= 0 {
+				return fmt.Errorf("%w: each milestone needs a title and positive amount", ErrInvalidInput)
+			}
+			milestones[i].Title = strings.TrimSpace(mi.Title)
+			total += mi.AmountSats
+		}
+		deal.AmountSats = total
+		// No single upfront deal hold in sequential per-milestone mode.
+		deal.PreimageHash = ""
+		deal.Preimage = ""
+		deal.Invoice = ""
+		deal.CheckingID = ""
+	} else {
+		if deal.AmountSats <= 0 {
+			return fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
+		}
 	}
 
-	hash := sha256.Sum256(preimage)
-	deal.Preimage = hex.EncodeToString(preimage[:])
-	deal.PreimageHash = hex.EncodeToString(hash[:])
-
-	// High-entropy, revocable share token for the public payment link. Kept
-	// separate from the deal's DB id so a leaked link can be rotated without
-	// exposing (or changing) the internal row handle.
 	shareToken, err := generateShareToken()
 	if err != nil {
 		return fmt.Errorf("generating share token: %w", err)
 	}
 	deal.ShareToken = shareToken
 
-	hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
-		Out:         false,
-		Amount:      deal.AmountSats,
-		Memo:        deal.Title,
-		PaymentHash: deal.PreimageHash,
-	})
-	if err != nil {
-		return fmt.Errorf("creating LNBits hold invoice: %w", err)
-	}
+	if !milestoneMode {
+		preimage := make([]byte, 32)
+		if _, err := rand.Read(preimage); err != nil {
+			return fmt.Errorf("generating escrow preimage: %w", err)
+		}
+		hash := sha256.Sum256(preimage)
+		deal.Preimage = hex.EncodeToString(preimage[:])
+		deal.PreimageHash = hex.EncodeToString(hash[:])
 
-	deal.Invoice = hold.PaymentRequest
-	deal.CheckingID = hold.CheckingID
+		hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
+			Out: false, Amount: deal.AmountSats, Memo: deal.Title, PaymentHash: deal.PreimageHash,
+		})
+		if err != nil {
+			return fmt.Errorf("creating LNBits hold invoice: %w", err)
+		}
+		deal.Invoice = hold.PaymentRequest
+		deal.CheckingID = hold.CheckingID
+	}
 
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
-		s.cancelOrphanHold(ctx, deal.PreimageHash)
+		if deal.PreimageHash != "" {
+			s.cancelOrphanHold(ctx, deal.PreimageHash)
+		}
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-
-	// Rollback is safe after Commit (it returns sql.ErrTxDone), and unlike an
-	// err-guard it cannot be defeated by a shadowed err in a later branch.
 	defer tx.Rollback()
-
 	repo := s.repo.WithTx(tx)
 
 	if err := repo.CreateDeal(ctx, deal); err != nil {
-		s.cancelOrphanHold(ctx, deal.PreimageHash)
+		if deal.PreimageHash != "" {
+			s.cancelOrphanHold(ctx, deal.PreimageHash)
+		}
 		return err
 	}
 
+	var first *Milestone
+	for i, mi := range milestones {
+		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, Order: i + 1, Status: MilestonePending}
+		if err := repo.CreateMilestone(ctx, m); err != nil {
+			if deal.PreimageHash != "" {
+				s.cancelOrphanHold(ctx, deal.PreimageHash)
+			}
+			return err
+		}
+		if i == 0 {
+			copyM := *m
+			first = &copyM
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
-		// A commit error is ambiguous — the row may or may not have persisted
-		// server-side. Either way the safer money truth is to tear the hold
-		// down: a dead invoice on a live row is swept to refunded, whereas an
-		// orphaned hold strands a paying client for the full expiry window.
-		s.cancelOrphanHold(ctx, deal.PreimageHash)
+		if deal.PreimageHash != "" {
+			s.cancelOrphanHold(ctx, deal.PreimageHash)
+		}
 		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// Sequential per-milestone holds: fund M1 on demand after deal+milestones exist.
+	if first != nil {
+		if err := s.FundMilestone(ctx, deal, first); err != nil {
+			return err
+		}
+		deal.Invoice = first.Invoice
+		deal.CheckingID = first.CheckingID
+		deal.Status = StatusAwaitingPayment
 	}
 
 	return nil
@@ -1439,6 +1468,8 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	}
 	ms, _ = s.repo.GetMilestonesByDeal(ctx, deal.ID)
 	views := make([]MilestoneView, 0, len(ms))
+	activeInvoice := deal.Invoice
+	activeStatus := deal.Status
 	for i := range ms {
 		var completed *string
 		if ms[i].CompletedAt.Valid {
@@ -1455,13 +1486,19 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 			CompletedAt: completed,
 			CreatedAt:   ms[i].CreatedAt,
 		})
+		if activeInvoice == "" && (ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending || ms[i].Status == MilestoneFunded || ms[i].Status == MilestoneInProgress) && ms[i].Invoice != "" {
+			activeInvoice = ms[i].Invoice
+		}
+		if ms[i].Status == MilestoneAwaitingPayment {
+			activeStatus = StatusAwaitingPayment
+		}
 	}
 	return &PublicDeal{
 		Title:          deal.Title,
 		AmountSats:     deal.AmountSats,
 		SourcePlatform: deal.SourcePlatform,
-		Invoice:        deal.Invoice,
-		Status:         deal.Status,
+		Invoice:        activeInvoice,
+		Status:         activeStatus,
 		DisputeReason:  deal.DisputeReason,
 		CreatedAt:      deal.CreatedAt,
 		Milestones:     views,
