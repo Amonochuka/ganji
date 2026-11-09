@@ -1804,56 +1804,32 @@ func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
 		return err
 	}
 
-	// Find current open milestone.
-	var open *Milestone
-	for i := range milestones {
-		if milestones[i].Status == MilestonePending || milestones[i].Status == MilestoneInProgress {
-			open = &milestones[i]
-			break
-		}
-	}
-	// Rule (agreed): mid-milestone exit when work is NOT submitted/approved => that
-	// milestone is not paid and its funds are refunded/cancelled. For sequential
-	// per-milestone holds, cancel that milestone's hold; for legacy single-hold deals,
-	// cancel the deal hold.
-	if open != nil && open.Status != MilestoneCompleted && open.Status != MilestoneReleased {
-		if open.PreimageHash != "" {
-			_, _ = s.lnbits.CancelHold(ctx, open.PreimageHash)
-			_ = s.repo.UpdateMilestoneStatus(ctx, open.ID, MilestoneRefunded, nil)
-		} else {
-			_ = s.cancelEscrowHold(ctx, deal)
-		}
-	}
-
-	tx, err := s.repo.BeginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-	repo := s.repo.WithTx(tx)
-
 	now := time.Now().UTC()
-	if open != nil {
-		if err := repo.UpdateMilestoneStatus(ctx, open.ID, MilestoneExited, &now); err != nil {
-			return fmt.Errorf("update milestone status: %w", err)
-		}
-	}
-	// Mark remaining pending/in_progress milestones as exited too (client left).
+	// Agreed rule: mid-milestone exit when work is NOT submitted/approved => milestone not paid;
+	// cancel/refund escrow hold. Consequences material when submitted/approved/disputed (handled later).
+	// We cancel any non-released milestone holds (awaiting_payment/funded/in_progress/work_submitted/pending)
+	// and mark them exited/refunded as appropriate. Released milestones remain paid.
 	for i := range milestones {
-		if open != nil && milestones[i].ID == open.ID {
+		m := milestones[i]
+		if m.Status == MilestoneReleased || m.Status == MilestoneCompleted {
 			continue
 		}
-		if milestones[i].Status == MilestonePending || milestones[i].Status == MilestoneInProgress {
-			if err := repo.UpdateMilestoneStatus(ctx, milestones[i].ID, MilestoneExited, &now); err != nil {
-				return fmt.Errorf("update milestone status: %w", err)
+		if m.PreimageHash != "" && m.Status != MilestoneRefunded && m.Status != MilestoneExited {
+			if _, err := s.lnbits.CancelHold(ctx, m.PreimageHash); err != nil {
+				log.Printf("warn: cancel milestone hold on exit deal=%s milestone=%s: %v", deal.ID, m.ID, err)
 			}
+			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneRefunded, &now)
 		}
+		if m.Status != MilestoneReleased && m.Status != MilestoneRefunded {
+			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneExited, &now)
+		}
+	}
+
+	if len(milestones) == 0 && deal.PreimageHash != "" && deal.Status != StatusReleased && deal.Status != StatusRefunded {
+		_ = s.cancelEscrowHold(ctx, deal)
 	}
 
 	s.notifyExited(deal)
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
 	return nil
 }
 
@@ -1920,22 +1896,44 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 	if m.DealID != deal.ID {
 		return nil, ErrMilestoneNotFound
 	}
-	// If no milestone escrow leg exists, cannot release via milestone path.
+	if m.Status == MilestoneReleased {
+		return m, nil
+	}
 	if m.Preimage == "" || m.CheckingID == "" {
 		return nil, fmt.Errorf("%w: milestone has no escrow invoice (fund it first)", ErrInvalidInput)
 	}
-	// Refresh payment state
 	_ = s.refreshMilestonePayment(ctx, m)
+	if m.PayoutCheckingID != "" {
+		payment, err := s.lnbits.CheckPayment(ctx, m.PayoutCheckingID)
+		if err == nil && payment.Paid {
+			now := time.Now().UTC()
+			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneReleased, &now)
+			m.Status = MilestoneReleased
+			m.CompletedAt = sql.NullTime{Time: now, Valid: true}
+			return m, nil
+		}
+		if err == nil {
+			switch payment.Details.Status {
+			case "FAILED":
+				_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+				m.PayoutCheckingID = ""
+				m.PayoutAttemptedAt = sql.NullTime{}
+			default:
+				return nil, fmt.Errorf("%w: milestone payout is in flight, check LNbits before retrying", ErrPayoutInFlight)
+			}
+		} else {
+			return nil, fmt.Errorf("%w: could not verify milestone payout status, check LNbits before retrying", ErrPayoutInFlight)
+		}
+	}
+	if m.PayoutAttemptedAt.Valid && m.PayoutCheckingID == "" {
+		return nil, fmt.Errorf("%w: milestone payout attempt exists with unknown outcome, reconcile before retrying", ErrPayoutInFlight)
+	}
 	if m.Status != MilestoneInProgress && m.Status != MilestoneWorkSubmitted && m.Status != MilestoneFunded && m.Status != MilestoneCompleted {
 		return nil, fmt.Errorf("%w: milestone cannot be released from status %s", ErrInvalidTransition, m.Status)
 	}
-	// conservative payout attempt marker
-	if m.PayoutCheckingID == "" && !m.PayoutAttemptedAt.Valid {
-		if err := s.repo.MarkMilestonePayoutAttempted(ctx, m.ID); err != nil {
-			return nil, err
-		}
+	if err := s.repo.MarkMilestonePayoutAttempted(ctx, m.ID); err != nil {
+		return nil, err
 	}
-	// settle hold (guarded by already-settled check)
 	if _, err := s.lnbits.SettleHold(ctx, m.Preimage); err != nil {
 		payment, checkErr := s.lnbits.CheckPayment(ctx, m.CheckingID)
 		if checkErr != nil || payment.Details.Status != "SETTLED" {
@@ -1955,9 +1953,13 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 		}
 		return nil, fmt.Errorf("%w: paying freelancer for milestone %s: %v", ErrPayoutInFlight, m.ID, err)
 	}
-	_ = s.repo.UpdateMilestonePayout(ctx, m.ID, payoutID)
+	if err := s.repo.UpdateMilestonePayout(ctx, m.ID, payoutID); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
-	_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneReleased, &now)
+	if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneReleased, &now); err != nil {
+		return nil, err
+	}
 	m.Status = MilestoneReleased
 	m.PayoutCheckingID = payoutID
 	m.CompletedAt = sql.NullTime{Time: now, Valid: true}
