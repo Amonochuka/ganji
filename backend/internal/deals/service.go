@@ -1451,6 +1451,23 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 			CreatedAt:   ms[i].CreatedAt,
 		})
 	}
+	for i := range ms {
+		var completed *string
+		if ms[i].CompletedAt.Valid {
+			s := ms[i].CompletedAt.Time.Format(time.RFC3339)
+			completed = &s
+		}
+		views = append(views, MilestoneView{
+			ID:          ms[i].ID,
+			Title:       ms[i].Title,
+			AmountSats:  ms[i].AmountSats,
+			Order:       ms[i].Order,
+			Status:      string(ms[i].Status),
+			Invoice:     ms[i].Invoice,
+			CompletedAt: completed,
+			CreatedAt:   ms[i].CreatedAt,
+		})
+	}
 	return &PublicDeal{
 		Title:          deal.Title,
 		AmountSats:     deal.AmountSats,

@@ -34,7 +34,12 @@ type DealRepository interface {
 	CreateMilestone(ctx context.Context, milestone *Milestone) error
 	GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error)
 	GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error)
+	GetMilestoneForUpdate(ctx context.Context, milestoneID string) (*Milestone, error)
 	UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error
+	UpdateMilestoneEscrow(ctx context.Context, m *Milestone) error
+	UpdateMilestonePayout(ctx context.Context, milestoneID, payoutCheckingID string) error
+	MarkMilestonePayoutAttempted(ctx context.Context, milestoneID string) error
+	ClearMilestonePayoutTracking(ctx context.Context, milestoneID string) error
 	DeleteMilestone(ctx context.Context, milestoneID string) error
 
 	// Artifacts

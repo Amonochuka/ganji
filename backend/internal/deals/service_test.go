@@ -1819,3 +1819,14 @@ func TestDisputeDealGuardLosesToConcurrentRelease(t *testing.T) {
 		t.Fatalf("expected the released deal to stay released, got %s", repo.deals[deal.ID].Status)
 	}
 }
+
+func (f *fakeDealRepo) CreateMilestone(ctx context.Context, milestone *Milestone) error { return nil }
+func (f *fakeDealRepo) GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error) { return nil, nil }
+func (f *fakeDealRepo) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) { return nil, ErrMilestoneNotFound }
+func (f *fakeDealRepo) GetMilestoneForUpdate(ctx context.Context, milestoneID string) (*Milestone, error) { return f.GetMilestoneByID(ctx, milestoneID) }
+func (f *fakeDealRepo) UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error { return nil }
+func (f *fakeDealRepo) UpdateMilestoneEscrow(ctx context.Context, m *Milestone) error { return nil }
+func (f *fakeDealRepo) UpdateMilestonePayout(ctx context.Context, milestoneID, payoutCheckingID string) error { return nil }
+func (f *fakeDealRepo) MarkMilestonePayoutAttempted(ctx context.Context, milestoneID string) error { return nil }
+func (f *fakeDealRepo) ClearMilestonePayoutTracking(ctx context.Context, milestoneID string) error { return nil }
+func (f *fakeDealRepo) DeleteMilestone(ctx context.Context, milestoneID string) error { return nil }

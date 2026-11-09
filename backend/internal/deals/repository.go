@@ -823,3 +823,34 @@ func (r *Repository) CreateMilestone(ctx context.Context, milestone *Milestone) 
 	}
 	return nil
 }
+
+func (r *Repository) UpdateMilestoneEscrow(ctx context.Context, m *Milestone) error {
+	enc, err := encryptPreimage(r.preimageKey, m.Preimage)
+	if err != nil {
+		return fmt.Errorf("repository: encrypt milestone preimage: %w", err)
+	}
+	_, err = r.q.ExecContext(ctx, `UPDATE milestones SET preimage_hash=$1, preimage=$2, payee_invoice=$3, invoice=$4, checking_id=$5, status=$6 WHERE id=$7;`,
+		nullString(m.PreimageHash), nullString(enc), nullString(m.PayeeInvoice), nullString(m.Invoice), nullString(m.CheckingID), m.Status, m.ID)
+	if err != nil {
+		return fmt.Errorf("repository: update milestone escrow: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) UpdateMilestonePayout(ctx context.Context, milestoneID, payoutCheckingID string) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE milestones SET payout_checking_id=$1, payout_attempted_at=COALESCE(payout_attempted_at,NOW()) WHERE id=$2;`, payoutCheckingID, milestoneID)
+	if err != nil {
+		return fmt.Errorf("repository: update milestone payout: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) MarkMilestonePayoutAttempted(ctx context.Context, milestoneID string) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE milestones SET payout_attempted_at=NOW() WHERE id=$1;`, milestoneID)
+	return err
+}
+
+func (r *Repository) ClearMilestonePayoutTracking(ctx context.Context, milestoneID string) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE milestones SET payout_checking_id=NULL, payout_attempted_at=NULL WHERE id=$1;`, milestoneID)
+	return err
+}
