@@ -505,7 +505,7 @@ func (h *Handler) GetPublicDeal(c *gin.Context) {
 func (h *Handler) PublicApproveDeal(c *gin.Context) {
 	shareToken := c.Param("shareToken")
 
-	deal, err := h.service.PublicApproveDeal(c.Request.Context(), shareToken)
+	_, err := h.service.PublicApproveDeal(c.Request.Context(), shareToken)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
