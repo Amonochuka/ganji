@@ -1911,8 +1911,37 @@ func (s *Service) refreshMilestonePayment(ctx context.Context, m *Milestone) err
 }
 
 // ReleaseMilestone settles the milestone's hold and pays the freelancer, then marks released.
+// ReleaseMilestone is the ONLY path that moves a milestone escrow to released/paid:
+// settles the milestone hold and pays the freelancer, then marks MilestoneReleased.
+// completed = approved/payout-pending (if used), never "paid"; released = money moved.
+// Conservative/idempotent: existing confirmed payout -> release without re-pay;
+// failed payout -> clear+retry; ambiguous/in-flight or unknown crash-window -> ErrPayoutInFlight.
 func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID string) (*Milestone, error) {
-	m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+	// Lightweight precheck (no lock) so common cases fail fast.
+	m0, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+	if err != nil {
+		return nil, err
+	}
+	if m0.DealID != deal.ID {
+		return nil, ErrMilestoneNotFound
+	}
+	if m0.Status == MilestoneReleased {
+		return m0, nil
+	}
+	if m0.Preimage == "" || m0.CheckingID == "" {
+		return nil, fmt.Errorf("%w: milestone has no escrow invoice (fund it first)", ErrInvalidInput)
+	}
+	_ = s.refreshMilestonePayment(ctx, m0)
+
+	// Phase 1: lock milestone, verify payout state, commit durable intent before any money moves.
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	repo := s.repo.WithTx(tx)
+
+	m, err := repo.GetMilestoneForUpdate(ctx, milestoneID)
 	if err != nil {
 		return nil, err
 	}
@@ -1922,71 +1951,106 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 	if m.Status == MilestoneReleased {
 		return m, nil
 	}
-	if m.Preimage == "" || m.CheckingID == "" {
-		return nil, fmt.Errorf("%w: milestone has no escrow invoice (fund it first)", ErrInvalidInput)
-	}
-	_ = s.refreshMilestonePayment(ctx, m)
-	if m.PayoutCheckingID != "" {
-		payment, err := s.lnbits.CheckPayment(ctx, m.PayoutCheckingID)
-		if err == nil && payment.Paid {
-			now := time.Now().UTC()
-			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneReleased, &now)
-			m.Status = MilestoneReleased
-			m.CompletedAt = sql.NullTime{Time: now, Valid: true}
-			return m, nil
+
+	confirmed := false
+	payoutCheckingID := m.PayoutCheckingID
+	switch {
+	case m.PayoutCheckingID != "":
+		ok, failed, err := s.checkOutgoingPayout(ctx, m.PayoutCheckingID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: verifying milestone payout %s for %s: %v", ErrPayoutInFlight, m.PayoutCheckingID, m.ID, err)
 		}
-		if err == nil {
-			switch payment.Details.Status {
-			case "FAILED":
-				_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
-				m.PayoutCheckingID = ""
-				m.PayoutAttemptedAt = sql.NullTime{}
-			default:
-				return nil, fmt.Errorf("%w: milestone payout is in flight, check LNbits before retrying", ErrPayoutInFlight)
+		switch {
+		case ok:
+			confirmed = true
+		case failed:
+			if err := repo.ClearMilestonePayoutTracking(ctx, m.ID); err != nil {
+				return nil, fmt.Errorf("resetting milestone payout tracking %s: %w", m.ID, err)
 			}
-		} else {
-			return nil, fmt.Errorf("%w: could not verify milestone payout status, check LNbits before retrying", ErrPayoutInFlight)
+			payoutCheckingID = ""
+			m.PayoutCheckingID = ""
+			m.PayoutAttemptedAt = sql.NullTime{}
+		default:
+			return nil, fmt.Errorf("%w: milestone payout %s for %s is not confirmed", ErrPayoutInFlight, m.PayoutCheckingID, m.ID)
+		}
+	case m.PayoutAttemptedAt.Valid:
+		return nil, fmt.Errorf("%w: milestone %s has an unconfirmed payout attempt", ErrPayoutInFlight, m.ID)
+	}
+
+	if !confirmed {
+		allowed := map[MilestoneStatus]bool{
+			MilestoneInProgress: true, MilestoneWorkSubmitted: true, MilestoneFunded: true,
+			MilestoneCompleted: true, MilestoneDisputed: true, MilestoneAwaitingPayment: true,
+		}
+		if !allowed[m.Status] {
+			return nil, fmt.Errorf("%w: milestone cannot be released from status %s", ErrInvalidTransition, m.Status)
+		}
+		if m.Preimage == "" || m.CheckingID == "" {
+			return nil, fmt.Errorf("%w: milestone has no escrow invoice (fund it first)", ErrInvalidInput)
+		}
+		if err := repo.MarkMilestonePayoutAttempted(ctx, m.ID); err != nil {
+			return nil, fmt.Errorf("recording milestone payout attempt %s: %w", m.ID, err)
 		}
 	}
-	if m.PayoutAttemptedAt.Valid && m.PayoutCheckingID == "" {
-		return nil, fmt.Errorf("%w: milestone payout attempt exists with unknown outcome, reconcile before retrying", ErrPayoutInFlight)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
-	if m.Status != MilestoneInProgress && m.Status != MilestoneWorkSubmitted && m.Status != MilestoneFunded && m.Status != MilestoneCompleted && m.Status != MilestoneDisputed {
-		return nil, fmt.Errorf("%w: milestone cannot be released from status %s", ErrInvalidTransition, m.Status)
-	}
-	if err := s.repo.MarkMilestonePayoutAttempted(ctx, m.ID); err != nil {
-		return nil, err
-	}
-	if _, err := s.lnbits.SettleHold(ctx, m.Preimage); err != nil {
-		payment, checkErr := s.lnbits.CheckPayment(ctx, m.CheckingID)
-		if checkErr != nil || payment.Details.Status != "SETTLED" {
-			_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
-			return nil, fmt.Errorf("settling milestone escrow %s: %w", m.ID, err)
+
+	// Phase 2: money legs outside lock/tx.
+	if !confirmed {
+		if _, err := s.lnbits.SettleHold(ctx, m.Preimage); err != nil {
+			payment, checkErr := s.lnbits.CheckPayment(ctx, m.CheckingID)
+			if checkErr != nil || payment.Details.Status != "SETTLED" {
+				_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+				return nil, fmt.Errorf("settling milestone escrow %s: %w", m.ID, err)
+			}
 		}
+		payee := m.PayeeInvoice
+		if payee == "" {
+			payee = deal.PayeeInvoice
+		}
+		id, err := s.lnbits.PayInvoice(ctx, payee)
+		if err != nil {
+			if errors.Is(err, lnbits.ErrPayoutRefused) {
+				_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+				return nil, fmt.Errorf("paying freelancer for milestone %s: %w", m.ID, err)
+			}
+			return nil, fmt.Errorf("%w: paying freelancer for milestone %s: %v", ErrPayoutInFlight, m.ID, err)
+		}
+		payoutCheckingID = id
 	}
-	payee := m.PayeeInvoice
-	if payee == "" {
-		payee = deal.PayeeInvoice
-	}
-	payoutID, err := s.lnbits.PayInvoice(ctx, payee)
+
+	// Phase 3: finalize under lock. Never record released without a confirmed/recorded payout.
+	tx2, err := s.repo.BeginTx(ctx)
 	if err != nil {
-		if errors.Is(err, lnbits.ErrPayoutRefused) {
-			_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
-			return nil, fmt.Errorf("paying freelancer for milestone %s: %w", m.ID, err)
-		}
-		return nil, fmt.Errorf("%w: paying freelancer for milestone %s: %v", ErrPayoutInFlight, m.ID, err)
+		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
-	if err := s.repo.UpdateMilestonePayout(ctx, m.ID, payoutID); err != nil {
+	defer tx2.Rollback()
+	repo2 := s.repo.WithTx(tx2)
+	m2, err := repo2.GetMilestoneForUpdate(ctx, milestoneID)
+	if err != nil {
 		return nil, err
+	}
+	if payoutCheckingID != "" && m2.PayoutCheckingID == "" {
+		if err := repo2.UpdateMilestonePayout(ctx, m2.ID, payoutCheckingID); err != nil {
+			return nil, fmt.Errorf("recording milestone payout %s: %w", m2.ID, err)
+		}
 	}
 	now := time.Now().UTC()
-	if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneReleased, &now); err != nil {
-		return nil, err
+	if m2.Status != MilestoneReleased {
+		if err := repo2.UpdateMilestoneStatus(ctx, m2.ID, MilestoneReleased, &now); err != nil {
+			return nil, err
+		}
 	}
-	m.Status = MilestoneReleased
-	m.PayoutCheckingID = payoutID
-	m.CompletedAt = sql.NullTime{Time: now, Valid: true}
-	return m, nil
+	if err := tx2.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+	m2.Status = MilestoneReleased
+	if payoutCheckingID != "" {
+		m2.PayoutCheckingID = payoutCheckingID
+	}
+	m2.CompletedAt = sql.NullTime{Time: now, Valid: true}
+	return m2, nil
 }
 
 // PublicAcceptNextMilestone: sequential per-milestone holds.
