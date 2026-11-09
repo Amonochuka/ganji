@@ -294,6 +294,7 @@ export type MilestoneView = {
   amount_sats: number;
   order: number;
   status: string;
+  invoice?: string;
   completed_at: string | null;
   created_at: string;
 };

@@ -91,13 +91,17 @@ Frontend:
 - `frontend/src/app/public/deals/[shareToken]/page.tsx`: client-facing share-link UI shows milestones and actions (approve/start next, reject with reason, exit) — **state/UX scaffolding; not wired to per-milestone escrow settlement yet**.
 - Authenticated deal detail still shows milestones and exit (WIP).
 
+## Sequential Per-Milestone Holds (implemented slice, WIP)
+- `000009` adds per-milestone escrow columns (`preimage_hash/preimage/payee_invoice/invoice/checking_id/payout_*`) and expanded milestone statuses.
+- Backend service: `FundMilestone` creates a hold invoice for a milestone (escrow leg) and stores it; `ReleaseMilestone` settles hold + pays freelancer (idempotent-ish payout attempt marker); `refreshMilestonePayment` locks/funds on payment detection. `PublicAcceptNextMilestone` (share-token) **releases** the target milestone’s escrow if it has a hold, then **funds/creates the next milestone’s hold** (M1→M2 sequential). `exitDeal` cancels the open milestone’s hold (per-milestone) or falls back to legacy deal hold when not completed/released.
+- Public deal view refreshes milestone payment state and returns milestone `invoice`.
+- Public UI shows “Fund this milestone” invoice when `awaiting_payment`, and actions for approve/release/start-next.
+
 ## Known Gaps / TODO
-- **Escrow settlement for milestones (CRITICAL)**: per-milestone hold invoices / sequential funding & release; current `approve` releases the single legacy deal hold. Define when M1 invoice is paid vs M2 created.
-- **Freelancer exit** parity (authenticated flow) + consistent policy enforcement.
-- Tighten milestone state machine (submitted vs approved vs in_progress) and align accept/reject/exit transitions with the agreed per-state rules.
-- Public reject currently notifies dispute-like; decide proper “request changes” vs “dispute” vs “reject & exit/refund” semantics.
-- DB migration `.down.sql`, tests, and public-action hardening (rate limits/abuse considerations for share-token endpoints).
-- UI/role separation polish and clear copy about money-path status.
+- **Legacy single full-deal hold still created in `CreateDeal`** and legacy `ApproveDeal`/public approve release that single hold. To be fully sequential: stop creating a total upfront hold for milestone-based deals; fund M1 on demand (and define payee/amounts), then M2 after M1 release. Requires flow/product decision + careful backward compatibility.
+- Add authenticated endpoints for fund/release milestone and freelancer-exit parity; enforce submitted/approved state transitions.
+- Tighten idempotency/race handling for milestone release (mirror deal `releaseEscrow`’s full two-phase/confirm logic).
+- Public reject semantics (request changes vs dispute/refund) and `000008.down.sql`/tests/rate limiting.
 
 ## Open Decisions
 - Milestones-in-deal vs many-deals-per-job as the primary model.

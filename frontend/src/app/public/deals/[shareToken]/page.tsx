@@ -239,7 +239,8 @@ function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onRejec
   ms: MilestoneView; isLast: boolean; canAct: boolean; actionLoading: string | null;
   onAcceptNext: () => void; onReject: () => void;
 }) {
-  const actionable = canAct && (ms.status === "in_progress" || ms.status === "pending" || ms.status === "completed");
+  const needsFunding = ms.status === "awaiting_payment" && !!ms.invoice;
+  const actionable = canAct && (ms.status === "in_progress" || ms.status === "pending" || ms.status === "completed" || ms.status === "funded" || ms.status === "work_submitted" || ms.status === "awaiting_payment");
   return (
     <div className="p-4 rounded-lg border border-vault-border bg-vault-raised/40">
       <div className="flex justify-between items-start gap-3">
@@ -250,23 +251,28 @@ function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onRejec
         <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${msStatusClass(ms.status)}`}>{msStatusLabel(ms.status)}</span>
       </div>
       {ms.completed_at && <p className="mt-1 text-xs text-ink-500 font-mono">Completed: {new Date(ms.completed_at).toLocaleString()}</p>}
-      {actionable && (
+      {needsFunding && (
+        <div className="mt-3 p-3 rounded border border-gold-500/30 bg-gold-500/5">
+          <p className="text-xs text-ink-400 mb-2">Fund this milestone (sequential hold invoice):</p>
+          <div className="flex gap-2">
+            <input type="text" readOnly value={ms.invoice || ""} className="flex-1 rounded border border-vault-border bg-vault-bg px-2 py-1 text-xs font-mono text-ink-400" />
+            <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(ms.invoice || "")}>Copy</Button>
+          </div>
+        </div>
+      )}
+      {actionable && !needsFunding && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {!isLast && (ms.status === "in_progress" || ms.status === "completed" || ms.status === "pending") && (
-            <Button size="sm" onClick={onAcceptNext} isLoading={actionLoading === `accept-${ms.id}`} disabled={!!actionLoading}>
-              Approve & Start Next
-            </Button>
-          )}
-          {isLast && (ms.status === "in_progress" || ms.status === "completed") && (
-            <span className="text-xs text-ink-500">Final milestone — use deal approval/release when wired for milestone payouts.</span>
-          )}
-          {ms.status !== "exited" && ms.status !== "rejected" && (
+          <Button size="sm" onClick={onAcceptNext} isLoading={actionLoading === `accept-${ms.id}`} disabled={!!actionLoading}>
+            {ms.status === "released" || ms.status === "completed" ? (isLast ? "Completed" : "Start Next") : "Approve / Release Milestone"}
+          </Button>
+          {ms.status !== "exited" && ms.status !== "rejected" && ms.status !== "released" && (
             <Button size="sm" variant="outline" onClick={onReject} isLoading={actionLoading === `reject-${ms.id}`} disabled={!!actionLoading}>
               Reject
             </Button>
           )}
         </div>
       )}
+      {isLast && ms.status === "released" && <p className="mt-2 text-xs text-green-400">Final milestone released.</p>}
     </div>
   );
 }

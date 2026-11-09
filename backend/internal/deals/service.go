@@ -1434,23 +1434,11 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 		_ = s.refreshPaymentStatus(ctx, deal)
 	}
 	ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
-	views := make([]MilestoneView, 0, len(ms))
 	for i := range ms {
-		var completed *string
-		if ms[i].CompletedAt.Valid {
-			s := ms[i].CompletedAt.Time.Format(time.RFC3339)
-			completed = &s
-		}
-		views = append(views, MilestoneView{
-			ID:          ms[i].ID,
-			Title:       ms[i].Title,
-			AmountSats:  ms[i].AmountSats,
-			Order:       ms[i].Order,
-			Status:      string(ms[i].Status),
-			CompletedAt: completed,
-			CreatedAt:   ms[i].CreatedAt,
-		})
+		_ = s.refreshMilestonePayment(ctx, &ms[i])
 	}
+	ms, _ = s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	views := make([]MilestoneView, 0, len(ms))
 	for i := range ms {
 		var completed *string
 		if ms[i].CompletedAt.Valid {
@@ -1646,12 +1634,16 @@ func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
 		}
 	}
 	// Rule (agreed): mid-milestone exit when work is NOT submitted/approved => that
-	// milestone is not paid and its funds are refunded/cancelled. For the legacy
-	// single-hold deal (one escrow leg for the whole deal), exiting before any
-	// release means cancel/refund the hold if it may be funded.
-	if open != nil && open.Status != MilestoneCompleted {
-		// Best-effort cancel for legacy hold-funded deals; ignore if not cancellable.
-		_ = s.cancelEscrowHold(ctx, deal)
+	// milestone is not paid and its funds are refunded/cancelled. For sequential
+	// per-milestone holds, cancel that milestone's hold; for legacy single-hold deals,
+	// cancel the deal hold.
+	if open != nil && open.Status != MilestoneCompleted && open.Status != MilestoneReleased {
+		if open.PreimageHash != "" {
+			_, _ = s.lnbits.CancelHold(ctx, open.PreimageHash)
+			_ = s.repo.UpdateMilestoneStatus(ctx, open.ID, MilestoneRefunded, nil)
+		} else {
+			_ = s.cancelEscrowHold(ctx, deal)
+		}
 	}
 
 	tx, err := s.repo.BeginTx(ctx)
@@ -1686,6 +1678,115 @@ func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
 	return nil
 }
 
+// FundMilestone creates a hold invoice (escrow leg) for a milestone and stores it.
+// Sequential per-milestone holds: client pays this invoice to fund the milestone.
+func (s *Service) FundMilestone(ctx context.Context, deal *Deal, m *Milestone) error {
+	if m.AmountSats <= 0 {
+		m.AmountSats = deal.AmountSats // fallback (legacy/single)
+	}
+	payee := m.PayeeInvoice
+	if payee == "" {
+		payee = deal.PayeeInvoice
+	}
+	preimage := make([]byte, 32)
+	if _, err := rand.Read(preimage); err != nil {
+		return fmt.Errorf("generating milestone preimage: %w", err)
+	}
+	hash := sha256.Sum256(preimage)
+	m.Preimage = hex.EncodeToString(preimage[:])
+	m.PreimageHash = hex.EncodeToString(hash[:])
+	m.PayeeInvoice = payee
+	hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
+		Out: false, Amount: m.AmountSats, Memo: fmt.Sprintf("%s — M%d: %s", deal.Title, m.Order, m.Title), PaymentHash: m.PreimageHash,
+	})
+	if err != nil {
+		return fmt.Errorf("creating milestone hold invoice: %w", err)
+	}
+	m.Invoice = hold.PaymentRequest
+	m.CheckingID = hold.CheckingID
+	m.Status = MilestoneAwaitingPayment
+	if err := s.repo.UpdateMilestoneEscrow(ctx, m); err != nil {
+		// best-effort cancel orphan
+		_, _ = s.lnbits.CancelHold(ctx, m.PreimageHash)
+		return err
+	}
+	return nil
+}
+
+func (s *Service) refreshMilestonePayment(ctx context.Context, m *Milestone) error {
+	if m.CheckingID == "" || m.Status != MilestoneAwaitingPayment {
+		return nil
+	}
+	payment, err := s.lnbits.CheckPayment(ctx, m.CheckingID)
+	if err != nil {
+		return err
+	}
+	if payment.Paid {
+		m.Status = MilestoneFunded
+		if err := s.repo.UpdateMilestoneEscrow(ctx, m); err == nil {
+			// best-effort: move to in_progress if it was just funded
+			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneInProgress, nil)
+			m.Status = MilestoneInProgress
+		}
+	}
+	return nil
+}
+
+// ReleaseMilestone settles the milestone's hold and pays the freelancer, then marks released.
+func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID string) (*Milestone, error) {
+	m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+	if err != nil {
+		return nil, err
+	}
+	if m.DealID != deal.ID {
+		return nil, ErrMilestoneNotFound
+	}
+	// If no milestone escrow leg exists, cannot release via milestone path.
+	if m.Preimage == "" || m.CheckingID == "" {
+		return nil, fmt.Errorf("%w: milestone has no escrow invoice (fund it first)", ErrInvalidInput)
+	}
+	// Refresh payment state
+	_ = s.refreshMilestonePayment(ctx, m)
+	if m.Status != MilestoneInProgress && m.Status != MilestoneWorkSubmitted && m.Status != MilestoneFunded && m.Status != MilestoneCompleted {
+		return nil, fmt.Errorf("%w: milestone cannot be released from status %s", ErrInvalidTransition, m.Status)
+	}
+	// conservative payout attempt marker
+	if m.PayoutCheckingID == "" && !m.PayoutAttemptedAt.Valid {
+		if err := s.repo.MarkMilestonePayoutAttempted(ctx, m.ID); err != nil {
+			return nil, err
+		}
+	}
+	// settle hold (guarded by already-settled check)
+	if _, err := s.lnbits.SettleHold(ctx, m.Preimage); err != nil {
+		payment, checkErr := s.lnbits.CheckPayment(ctx, m.CheckingID)
+		if checkErr != nil || payment.Details.Status != "SETTLED" {
+			_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+			return nil, fmt.Errorf("settling milestone escrow %s: %w", m.ID, err)
+		}
+	}
+	payee := m.PayeeInvoice
+	if payee == "" {
+		payee = deal.PayeeInvoice
+	}
+	payoutID, err := s.lnbits.PayInvoice(ctx, payee)
+	if err != nil {
+		if errors.Is(err, lnbits.ErrPayoutRefused) {
+			_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+			return nil, fmt.Errorf("paying freelancer for milestone %s: %w", m.ID, err)
+		}
+		return nil, fmt.Errorf("%w: paying freelancer for milestone %s: %v", ErrPayoutInFlight, m.ID, err)
+	}
+	_ = s.repo.UpdateMilestonePayout(ctx, m.ID, payoutID)
+	now := time.Now().UTC()
+	_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneReleased, &now)
+	m.Status = MilestoneReleased
+	m.PayoutCheckingID = payoutID
+	m.CompletedAt = sql.NullTime{Time: now, Valid: true}
+	return m, nil
+}
+
+// PublicAcceptNextMilestone: sequential per-milestone holds.
+// If the target milestone has an escrow leg, release it (settle+pay). Then fund next milestone (create its hold invoice) so client can pay M2.
 func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, milestoneID string) (*PublicDeal, error) {
 	if shareToken == "" {
 		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
@@ -1698,9 +1799,6 @@ func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, mil
 	if err != nil {
 		return nil, err
 	}
-	// Find target milestone and ensure it belongs to this deal; mark completed/accepted
-	// and move next to in_progress. Money settlement for sequential per-milestone
-	// invoices is wired separately (state/UX scaffolding now).
 	idx := -1
 	for i := range ms {
 		if ms[i].ID == milestoneID {
@@ -1711,15 +1809,33 @@ func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, mil
 	if idx < 0 {
 		return nil, ErrMilestoneNotFound
 	}
-	now := time.Now().UTC()
-	if err := s.repo.UpdateMilestoneStatus(ctx, ms[idx].ID, MilestoneCompleted, &now); err != nil {
-		return nil, err
-	}
-	if idx+1 < len(ms) {
-		if err := s.repo.UpdateMilestoneStatus(ctx, ms[idx+1].ID, MilestoneInProgress, nil); err != nil {
+	target := ms[idx]
+	// If milestone has its own escrow invoice, release it (pays freelancer for M1).
+	if target.CheckingID != "" && target.Preimage != "" && target.Status != MilestoneReleased {
+		if _, err := s.ReleaseMilestone(ctx, deal, target.ID); err != nil {
 			return nil, err
 		}
-		s.notifyMilestoneMoved(deal, ms[idx].Order, ms[idx+1].Order)
+	} else if target.Status != MilestoneReleased && target.Status != MilestoneCompleted {
+		// no escrow leg yet (legacy/state-only) — mark completed
+		now := time.Now().UTC()
+		_ = s.repo.UpdateMilestoneStatus(ctx, target.ID, MilestoneCompleted, &now)
+	}
+	// Fund/start next milestone sequentially
+	if idx+1 < len(ms) {
+		next := ms[idx+1]
+		if next.CheckingID == "" && next.AmountSats > 0 {
+			if err := s.FundMilestone(ctx, deal, &next); err != nil {
+				return nil, err
+			}
+		} else if next.Status == MilestonePending {
+			_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
+		}
+		s.notifyMilestoneMoved(deal, target.Order, next.Order)
+	} else {
+		// final milestone released -> release/complete deal record (legacy anchor/notify)
+		_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+		deal.Status = StatusReleased
+		s.notifyReleased(deal)
 	}
 	return s.GetPublicDeal(ctx, shareToken)
 }
