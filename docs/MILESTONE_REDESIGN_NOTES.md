@@ -77,34 +77,20 @@ Must be reliable enough for UX but must not break money-path correctness (curren
 - **Public share-link client UI**: required because clients don’t log in. Share-link actions are authorized by **`:shareToken` only** (no auth session, no internal IDs/secrets leaked), consistent with existing public deal flow.
 
 ## Implementation Status (WIP, not production-complete)
-Backend:
-- `backend/migrations/000008_create_milestones_table.up.sql` added.
-- `deals` types include `Milestone`, `MilestoneStatus`, transitions; `PublicDeal` includes `milestones`.
-- `DealRepository` + impl: milestone CRUD.
-- Authenticated routes: create/list/update milestones, `POST /deals/:dealID/exit` (client).
-- **Public (share-token) routes**: `GET /public/deals/:shareToken/milestones`, `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`, `POST /public/deals/:shareToken/milestones/:milestoneID/reject`, `POST /public/deals/:shareToken/exit` (alongside existing public deal/approve).
-- Exit logic (state scaffolding): marks open milestones exited, best-effort cancels legacy hold for non-completed open milestone, notifies. `PublicAcceptNextMilestone`/`PublicRejectMilestone` added (state + notify; money settlement separate).
-- `DealNotifier`: `DealExited`, `MilestoneMoved` (email best-effort). `go build ./...` passes.
+- **Fresh migration (not in prod):** consolidated into `backend/migrations/000008_create_milestones_table.up.sql/.down.sql` (milestones table + full escrow/status columns + `deals.preimage_hash/invoice` nullable for milestone mode). Incremental `000009/000010` removed.
+- Added milestone domain types/statuses and repo helpers: `backend/internal/deals/types.go`, `interface_types.go`, `repository.go`, `errors.go`.
+- Sequential escrow (WIP): `CreateDealWithMilestones` stores milestones, skips total upfront hold, funds **M1**. `FundMilestone`/`ReleaseMilestone` (settle+pay; conservative payout-attempt/idempotency checks) / `refreshMilestonePayment`. Public+authenticated approve/submit/accept-next release active milestone and fund next; final completes deal. Exit cancels/refunds open milestone holds (agreed: mid-milestone not submitted/approved => not paid). Symmetric participant exit (auth handler).
+- Handlers/routes: milestone CRUD + exit and share-token-only public actions.
+- Frontend: milestone inputs on `deals/new`; authenticated deal detail milestone/symmetric actions; client-facing public share link; API client updated. `layout.tsx` Metadata icons fixed.
+- Email notifications: `DealExited`/`MilestoneMoved`.
 
-Frontend:
-- API client: `getPublicMilestones`, `publicAcceptNextMilestone`, `publicRejectMilestone`, `publicExitDeal`; `PublicDeal.milestones`.
-- `frontend/src/app/public/deals/[shareToken]/page.tsx`: client-facing share-link UI shows milestones and actions (approve/start next, reject with reason, exit) — **state/UX scaffolding; not wired to per-milestone escrow settlement yet**.
-- Authenticated deal detail still shows milestones and exit (WIP).
+## Migration application (fresh DB / not in prod)
+- Apply migrations in order through `000008` (`migrate -path backend/migrations -database "$DATABASE_URL" up` or project equivalent).
+- If a **dev DB** already applied old incremental `000009/000010` before consolidation: while not in prod, **reset/recreate the dev DB** and migrate fresh (or carefully down+migrate to align `schema_migrations` with consolidated `000008`). Do **not** do this in prod.
 
-## Sequential Per-Milestone Holds (implemented slice, WIP)
-- `000009` adds per-milestone escrow columns (`preimage_hash/preimage/payee_invoice/invoice/checking_id/payout_*`) and expanded milestone statuses.
-- Backend service: `FundMilestone` creates a hold invoice for a milestone (escrow leg) and stores it; `ReleaseMilestone` settles hold + pays freelancer (idempotent-ish payout attempt marker); `refreshMilestonePayment` locks/funds on payment detection. `PublicAcceptNextMilestone` (share-token) **releases** the target milestone’s escrow if it has a hold, then **funds/creates the next milestone’s hold** (M1→M2 sequential). `exitDeal` cancels the open milestone’s hold (per-milestone) or falls back to legacy deal hold when not completed/released.
-- Public deal view refreshes milestone payment state and returns milestone `invoice`.
-- Public UI shows “Fund this milestone” invoice when `awaiting_payment`, and actions for approve/release/start-next.
-
-## Known Gaps / TODO
-- **Legacy single full-deal hold still created in `CreateDeal`** and legacy `ApproveDeal`/public approve release that single hold. To be fully sequential: stop creating a total upfront hold for milestone-based deals; fund M1 on demand (and define payee/amounts), then M2 after M1 release. Requires flow/product decision + careful backward compatibility.
-- Add authenticated endpoints for fund/release milestone and freelancer-exit parity; enforce submitted/approved state transitions.
-- Tighten idempotency/race handling for milestone release (mirror deal `releaseEscrow`’s full two-phase/confirm logic).
-- Public reject semantics (request changes vs dispute/refund) and `000008.down.sql`/tests/rate limiting.
-
-## Open Decisions
-- Milestones-in-deal vs many-deals-per-job as the primary model.
-- Per-milestone escrow vs grouped job escrow strategy.
-- Whether clients must authenticate for milestone decisions, or public-link actions are sufficient (with security considerations).
-- Exact payout/refund rules on client/freelancer exit at each milestone state.
+## Important gaps / TODOs
+1. **Money consequences by state (complete):** awaiting_payment/funded/in_progress/work_submitted/approved/disputed/rejected/exited — especially submitted-but-rejected/disputed (hold/resolve) vs pre-submission exit. Public responses non-sensitive.
+2. **Idempotency/atomicity parity:** align milestone release with deal `releaseEscrow` transaction/locking discipline; add tests.
+3. **Artifacts/evidence:** milestone-mode submit currently bypasses deal-level artifact requirement; decide per-milestone artifacts.
+4. **Deal lifecycle coherence:** keep deal-level status/invoice/checking_id/current-milestone clear across sequential milestones; legacy compatibility.
+5. **E2E with real LNbits+DB:** create milestone deal → pay M1 hold → submit → approve/release M1 → fund/pay M2 → exit/refund; add integration tests.

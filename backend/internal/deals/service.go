@@ -1805,28 +1805,36 @@ func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
 	}
 
 	now := time.Now().UTC()
-	// Agreed rule: mid-milestone exit when work is NOT submitted/approved => milestone not paid;
-	// cancel/refund escrow hold. Consequences material when submitted/approved/disputed (handled later).
-	// We cancel any non-released milestone holds (awaiting_payment/funded/in_progress/work_submitted/pending)
-	// and mark them exited/refunded as appropriate. Released milestones remain paid.
+	// Agreed: mid-milestone exit when work not submitted/approved => not paid; cancel/refund hold.
+	// Consequences become material when submitted/approved/disputed (TODO: handle submitted/rejected/disputed holds).
 	for i := range milestones {
 		m := milestones[i]
-		if m.Status == MilestoneReleased || m.Status == MilestoneCompleted {
+		if m.Status == MilestoneReleased {
 			continue
 		}
-		if m.PreimageHash != "" && m.Status != MilestoneRefunded && m.Status != MilestoneExited {
-			if _, err := s.lnbits.CancelHold(ctx, m.PreimageHash); err != nil {
-				log.Printf("warn: cancel milestone hold on exit deal=%s milestone=%s: %v", deal.ID, m.ID, err)
+		switch m.Status {
+		case MilestoneAwaitingPayment, MilestoneFunded, MilestoneInProgress, MilestonePending:
+			if m.PreimageHash != "" && m.Status != MilestonePending {
+				if _, err := s.lnbits.CancelHold(ctx, m.PreimageHash); err != nil {
+					log.Printf("warn: cancel milestone hold on exit deal=%s milestone=%s: %v", deal.ID, m.ID, err)
+				}
+				_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneRefunded, &now)
+			} else {
+				_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneExited, &now)
 			}
-			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneRefunded, &now)
-		}
-		if m.Status != MilestoneReleased && m.Status != MilestoneRefunded {
+		case MilestoneWorkSubmitted, MilestoneCompleted:
+			// Work submitted/approved-state consequences are material; do not auto-cancel/refund here (needs review/dispute flow).
+			log.Printf("info: exit deal=%s leaves milestone=%s in %s (requires review/dispute resolution)", deal.ID, m.ID, m.Status)
+		case MilestoneRefunded, MilestoneExited, MilestoneRejected:
+			// no-op
+		default:
 			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneExited, &now)
 		}
 	}
 
 	if len(milestones) == 0 && deal.PreimageHash != "" && deal.Status != StatusReleased && deal.Status != StatusRefunded {
 		_ = s.cancelEscrowHold(ctx, deal)
+		_ = s.repo.UpdateStatus(ctx, deal.ID, StatusRefunded)
 	}
 
 	s.notifyExited(deal)
