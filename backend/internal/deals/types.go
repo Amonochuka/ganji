@@ -295,29 +295,41 @@ type Verification struct {
 }
 
 // Milestone represents a single step within a deal. A deal may have one or
-// more milestones that break the work into step-by-step deliverables. The
-// client can review each milestone and decide to approve, exit, or reject
-// before moving to the next milestone or releasing the deal.
+// more milestones that break the work into step-by-step deliverables.
+// Sequential per-milestone escrow: each milestone can have its own hold
+// invoice/escrow leg (fund M1 -> release M1 -> fund/start M2 ...).
 type Milestone struct {
-	ID          string       `json:"id"`
-	DealID      string       `json:"deal_id"`
-	Title       string       `json:"title"`
-	AmountSats  int64        `json:"amount_sats"`
-	Order       int          `json:"order"`
-	Status      MilestoneStatus `json:"status"`
-	CompletedAt sql.NullTime `json:"completed_at,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
+	ID                string          `json:"id"`
+	DealID            string          `json:"deal_id"`
+	Title             string          `json:"title"`
+	AmountSats        int64           `json:"amount_sats"`
+	Order             int             `json:"order"`
+	Status            MilestoneStatus `json:"status"`
+	CompletedAt       sql.NullTime    `json:"completed_at,omitempty"`
+	CreatedAt         time.Time       `json:"created_at"`
+	PreimageHash      string          `json:"preimage_hash,omitempty"`
+	Preimage          string          `json:"preimage,omitempty"`
+	PayeeInvoice      string          `json:"payee_invoice,omitempty"`
+	Invoice           string          `json:"invoice,omitempty"`
+	CheckingID        string          `json:"checking_id,omitempty"`
+	PayoutCheckingID  string          `json:"payout_checking_id,omitempty"`
+	PayoutAttemptedAt sql.NullTime    `json:"payout_attempted_at,omitempty"`
 }
 
 // MilestoneStatus are the possible states a milestone can be in.
 type MilestoneStatus string
 
 const (
-	MilestonePending       MilestoneStatus = "pending"
-	MilestoneInProgress    MilestoneStatus = "in_progress"
-	MilestoneCompleted     MilestoneStatus = "completed"
-	MilestoneExited        MilestoneStatus = "exited"
-	MilestoneRejected      MilestoneStatus = "rejected"
+	MilestonePending        MilestoneStatus = "pending"
+	MilestoneAwaitingPayment MilestoneStatus = "awaiting_payment"
+	MilestoneFunded         MilestoneStatus = "funded"
+	MilestoneInProgress     MilestoneStatus = "in_progress"
+	MilestoneWorkSubmitted  MilestoneStatus = "work_submitted"
+	MilestoneCompleted      MilestoneStatus = "completed"
+	MilestoneReleased       MilestoneStatus = "released"
+	MilestoneExited         MilestoneStatus = "exited"
+	MilestoneRejected       MilestoneStatus = "rejected"
+	MilestoneRefunded       MilestoneStatus = "refunded"
 )
 
 // ValidMilestoneTransitions defines allowed milestone status transitions.

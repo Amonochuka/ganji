@@ -681,36 +681,66 @@ func (r *Repository) BeginTx(ctx context.Context) (*sql.Tx, error) {
 	return r.db.BeginTx(ctx, nil)
 }
 
-func (r *Repository) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
-	query := `SELECT id, deal_id, title, amount_sats, "order", status, completed_at, created_at
-			  FROM milestones
-			  WHERE id = $1;`
-	row := r.q.QueryRowContext(ctx, query, milestoneID)
-	m := Milestone{}
-	err := row.Scan(
-		&m.ID,
-		&m.DealID,
-		&m.Title,
-		&m.AmountSats,
-		&m.Order,
-		&m.Status,
-		&m.CompletedAt,
-		&m.CreatedAt,
+const milestoneColumns = `
+		id, deal_id, title, amount_sats, "order", status, completed_at, created_at,
+		preimage_hash, preimage, payee_invoice, invoice, checking_id, payout_checking_id, payout_attempted_at
+	`
+
+func (r *Repository) scanMilestone(row interface{ Scan(dest ...any) error }) (*Milestone, error) {
+	var (
+		preimageHash sql.NullString
+		preimage     sql.NullString
+		payeeInvoice sql.NullString
+		invoice      sql.NullString
+		checkingID   sql.NullString
+		payoutID     sql.NullString
 	)
+	m := &Milestone{}
+	if err := row.Scan(
+		&m.ID, &m.DealID, &m.Title, &m.AmountSats, &m.Order, &m.Status, &m.CompletedAt, &m.CreatedAt,
+		&preimageHash, &preimage, &payeeInvoice, &invoice, &checkingID, &payoutID, &m.PayoutAttemptedAt,
+	); err != nil {
+		return nil, err
+	}
+	decrypted, err := decryptPreimage(r.preimageKey, preimage.String)
+	if err != nil {
+		return nil, err
+	}
+	m.Preimage = decrypted
+	m.PreimageHash = preimageHash.String
+	m.PayeeInvoice = payeeInvoice.String
+	m.Invoice = invoice.String
+	m.CheckingID = checkingID.String
+	m.PayoutCheckingID = payoutID.String
+	return m, nil
+}
+
+func (r *Repository) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
+	query := "SELECT" + milestoneColumns + "FROM milestones WHERE id = $1;"
+	m, err := r.scanMilestone(r.q.QueryRowContext(ctx, query, milestoneID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrMilestoneNotFound
 		}
 		return nil, fmt.Errorf("repository: get milestone by id: %w", err)
 	}
-	return &m, nil
+	return m, nil
+}
+
+func (r *Repository) GetMilestoneForUpdate(ctx context.Context, milestoneID string) (*Milestone, error) {
+	query := "SELECT" + milestoneColumns + "FROM milestones WHERE id = $1 FOR UPDATE;"
+	m, err := r.scanMilestone(r.q.QueryRowContext(ctx, query, milestoneID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMilestoneNotFound
+		}
+		return nil, fmt.Errorf("repository: get milestone for update: %w", err)
+	}
+	return m, nil
 }
 
 func (r *Repository) GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error) {
-	query := `SELECT id, deal_id, title, amount_sats, "order", status, completed_at, created_at
-			  FROM milestones
-			  WHERE deal_id = $1
-			  ORDER BY "order" ASC;`
+	query := "SELECT" + milestoneColumns + `FROM milestones WHERE deal_id = $1 ORDER BY "order" ASC;`
 	rows, err := r.q.QueryContext(ctx, query, dealID)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list milestones by deal: %w", err)
@@ -718,21 +748,11 @@ func (r *Repository) GetMilestonesByDeal(ctx context.Context, dealID string) ([]
 	defer rows.Close()
 	var milestones []Milestone
 	for rows.Next() {
-		var m Milestone
-		err := rows.Scan(
-			&m.ID,
-			&m.DealID,
-			&m.Title,
-			&m.AmountSats,
-			&m.Order,
-			&m.Status,
-			&m.CompletedAt,
-			&m.CreatedAt,
-		)
+		m, err := r.scanMilestone(rows)
 		if err != nil {
 			return nil, fmt.Errorf("repository: scan milestone: %w", err)
 		}
-		milestones = append(milestones, m)
+		milestones = append(milestones, *m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("repository: iterate milestones: %w", err)
