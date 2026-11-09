@@ -261,12 +261,25 @@ export default function DealDetailPage() {
                         Rotate Share Link
                       </Button>
                     )}
+                    {deal.status !== "released" && deal.status !== "refunded" && (
+                      <Button
+                        variant="outline"
+                        onClick={handleExitDeal}
+                        disabled={actionLoading === "exit deal"}
+                        isLoading={actionLoading === "exit deal"}
+                      >
+                        Exit Deal
+                      </Button>
+                    )}
                     {deal.status === "released" && (
                       <span className="flex items-center px-3 py-2 text-sm text-green-400 bg-green-600/10 rounded-lg border border-green-600/30">
                         ✅ Released — {formatCurrency(deal.amount_sats)} paid to your invoice
                       </span>
                     )}
                   </div>
+                  {deal.status !== "released" && deal.status !== "refunded" && (
+                    <p className="text-xs text-ink-400 mt-3">Exit mid-milestone (not submitted/approved): that milestone’s escrow hold is cancelled/refunded per redesign.</p>
+                  )}
                 </div>
               )}
 
@@ -276,7 +289,7 @@ export default function DealDetailPage() {
                   {clientCanApprove && (
                     <div className="mb-4 p-4 rounded-lg bg-gold-500/5 border border-gold-500/30">
                       <p className="font-medium text-gold-400 mb-1">Review the delivered work</p>
-                      <p className="text-sm text-ink-300">Approving releases the escrowed {formatCurrency(deal.amount_sats)} to the freelancer.</p>
+                      <p className="text-sm text-ink-300">Approving releases escrow (current milestone in sequential mode) to the freelancer.</p>
                     </div>
                   )}
                   <div className="flex flex-wrap gap-3">
@@ -313,7 +326,6 @@ export default function DealDetailPage() {
                         ↩️ Escrow refunded
                       </span>
                     )}
-                    {/* Exit button for client - appears when deal is active */}
                     {deal.status !== "released" && deal.status !== "refunded" && (
                       <Button
                         variant="danger"
