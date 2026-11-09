@@ -8,9 +8,13 @@ link, no account needed.
 
 ## Design — Why a Separate Token, Not the Deal UUID
 
-The public share-link endpoints (`GET /public/deals/:shareToken` and
-`POST /public/deals/:shareToken/approve`) are the only unauthenticated deal
-endpoints.
+The public share-link endpoints (`GET /public/deals/:shareToken`,
+`GET /public/deals/:shareToken/milestones`,
+`POST /public/deals/:shareToken/approve`,
+`POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`,
+`POST /public/deals/:shareToken/milestones/:milestoneID/reject`,
+`POST /public/deals/:shareToken/exit`) are the only unauthenticated deal
+endpoints. All are authorized by the share token alone — no JWT, no email match.
 The share token is a **deliberately separate secret from the deal's DB UUID**:
 
 - **Revocable.** `POST /deals/:dealID/share-link` (freelancer) mints a fresh
@@ -53,6 +57,11 @@ The share token is a **deliberately separate secret from the deal's DB UUID**:
   The token itself is the authorization, so no email match happens on this
   path; `disputed → released` deliberately stays authed-only (arbitration is
   email-gated).
+- **Milestone mode**: `Service.PublicAcceptNextMilestone` / `PublicRejectMilestone`
+  / `PublicExitDeal` / `GetPublicDeal(milestones)` follow the same token-only
+  authorization. Accept-next releases via the canonical per-milestone path;
+  reject/exit post-submission freeze the hold for operator resolution — no
+  public money move outside the escrow rules.
 - **Route wiring**: `GET /public/deals/:shareToken` and
   `POST /public/deals/:shareToken/approve` are mounted on the **root
   router** (unauthenticated), while `POST /deals/:dealID/share-link` lives in
@@ -62,14 +71,20 @@ The share token is a **deliberately separate secret from the deal's DB UUID**:
 
 | Method | Path | Auth | Effect |
 |---|---|---|---|
-| `GET` | `/public/deals/:shareToken` | none | safe public deal view; refreshes hold status (locks if paid) |
-| `POST` | `/public/deals/:shareToken/approve` | none (share token) | settle hold + pay freelancer — releases funds |
+| `GET` | `/public/deals/:shareToken` | none | safe public deal view; refreshes hold status (locks if paid); includes `milestones[]` in milestone mode |
+| `GET` | `/public/deals/:shareToken/milestones` | none (share token) | list milestones for the share link |
+| `POST` | `/public/deals/:shareToken/approve` | none (share token) | settle hold + pay freelancer — releases funds (milestone mode: releases active milestone, funds next) |
+| `POST` | `/public/deals/:shareToken/milestones/:milestoneID/accept-next` | none (share token) | release that escrow-backed milestone (settle + pay, canonical path), fund next |
+| `POST` | `/public/deals/:shareToken/milestones/:milestoneID/reject` | none (share token) | milestone → `disputed`; hold stays (no auto-refund) pending operator resolution |
+| `POST` | `/public/deals/:shareToken/exit` | none (share token) | symmetric exit; pre-submission refunds, post-submission → review |
 | `POST` | `/deals/:dealID/share-link` | freelancer | rotate token → revoke old link, return new one |
 
 ## Threat Model / Trade-offs
 
 - Link is bearer: whoever has it can see the deal, pay the invoice, **and
-  approve it — releasing the freelancer's payment**. Paying and approving are
+  approve it — releasing the freelancer's payment** (in milestone mode, whoever
+  has it can also accept/reject the active milestone or exit — reject/exit
+  post-submission freeze for review rather than paying). Paying and approving are
   both the point, and the token is unguessable. It is effectively a bearer
   payment authorization — treat it like one, and rotate to revoke a leaked
   link before it's abused.

@@ -26,6 +26,8 @@ backend/
                       trust-score derivation
     db/               pool + auto-migration on boot
     deals/            deal model, state machine, share link, escrow service,
+                      milestones (sequential per-milestone holds, canonical
+                      ReleaseMilestone, exit, operator resolve),
                       artifacts (streamed upload/download), verifications,
                       expiry sweep
     health/           GET /health
@@ -36,7 +38,7 @@ backend/
                       traversal-safe keys, S3-ready)
     webhook/          LNbits payment webhook + HMAC signature verification
     websocket/        STUB (real-time updates planned)
-  migrations/         numbered SQL schema (golang-migrate, run at boot)
+  migrations/         numbered SQL schema (golang-migrate, run at boot; 000001–000008 incl. `000008` milestones)
   pkg/                hash/ (sha256 anchor helper), sanitize/ — mostly empty
 frontend/             Next.js app (out of scope here)
 ```
@@ -60,6 +62,11 @@ frontend/             Next.js app (out of scope here)
 | LNbits client | `backend/internal/lnbits/client.go` + `models.go` |
 | Webhook endpoint + HMAC | `backend/internal/webhook/` |
 | Deal service tests | `backend/internal/deals/service_test.go` |
+| Milestone types/transitions | `backend/internal/deals/types.go` (`Milestone`, `ValidMilestoneTransitions`) |
+| Milestones migration (000008) | `backend/migrations/000008_create_milestones_table.up.sql` |
+
+Milestone mode is a second, sequential escrow inside the same `deals` module:
+`Service.CreateDealWithMilestones` → `FundMilestone` (M1) → `ReleaseMilestone` (canonical, idempotent) → `FundMilestone` (next). The webhook reconciles deal-level holds only; milestone holds are refreshed by poll (`refreshMilestonePayment`).
 
 ## Design Constants
 

@@ -105,7 +105,11 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	publicDeals := router.Group("/public")
 	publicDeals.Use(middleware.RateLimitByIP(60, time.Minute))
 	publicDeals.GET("/deals/:shareToken", dealHandler.GetPublicDeal)
+	publicDeals.GET("/deals/:shareToken/milestones", dealHandler.PublicListMilestones)
 	publicDeals.POST("/deals/:shareToken/approve", dealHandler.PublicApproveDeal)
+	publicDeals.POST("/deals/:shareToken/milestones/:milestoneID/accept-next", dealHandler.PublicAcceptNextMilestone)
+	publicDeals.POST("/deals/:shareToken/milestones/:milestoneID/reject", dealHandler.PublicRejectMilestone)
+	publicDeals.POST("/deals/:shareToken/exit", dealHandler.PublicExitDeal)
 	deals.RegisterArtifactRoutes(protected, dealHandler)
 	deals.RegisterVerificationRoutes(protected, dealHandler)
 

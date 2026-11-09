@@ -10,10 +10,14 @@
   captured at deal creation; the client needs **no account** to receive the
   link, pay, and even approve delivery straight from it
   (`POST /public/deals/:shareToken/approve` — the share token is the
-  authorization). Disputing still requires an account: they sign up with that
-  same email; the JWT carries `email` (set by `middleware/auth.go`), and
+  authorization). Milestone accept/reject/exit are also share-token-only
+  (`POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`,
+  `.../reject`, `POST /public/deals/:shareToken/exit`). Disputing still
+  requires an account: they sign up with that same email; the JWT carries
+  `email` (set by `middleware/auth.go`), and
   `strings.EqualFold(deal.ClientEmail, email)` authorizes dispute, authed
-  approve, and deal viewing.
+  approve, and deal viewing. Symmetric exit is allowed for both participants
+  via `POST /deals/:dealID/exit` (authed) or the public exit endpoint.
 
 - **Operator** = promoted from `OPERATOR_EMAILS` env var at boot. Role rides
   in the access token as `is_operator` claim. Routes sit behind
@@ -35,7 +39,16 @@
 | `POST /deals/:id/share-link` | ✓ | ✗ | ✗ |
 | `GET /auth/me` | ✓ (self) | ✓ (self) | ✓ (self) |
 | `GET /public/deals/:shareToken` | public (share token) | public (share token) | public (share token) |
+| `GET /public/deals/:shareToken/milestones` | public (share token) | public (share token) | public (share token) |
 | `POST /public/deals/:shareToken/approve` | public (share token) | public (share token) | public (share token) |
+| `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` | public (share token) | public (share token) | public (share token) |
+| `POST /public/deals/:shareToken/milestones/:milestoneID/reject` | public (share token) | public (share token) | public (share token) |
+| `POST /public/deals/:shareToken/exit` | public (share token) | public (share token) | public (share token) |
+| `POST /deals/:dealID/milestones` | ✓ | ✗ | ✗ |
+| `GET /deals/:dealID/milestones` | ✓ | ✓ | ✓ |
+| `PATCH /deals/:dealID/milestones/:milestoneID` | ✓ | ✗ | ✗ |
+| `POST /deals/:dealID/exit` | ✓ | ✓ | ✗ |
+| `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve` | ✗ | ✗ | ✓ |
 | `GET /deals/:id/artifacts` | ✓ | ✓ | ✓ |
 | `GET /deals/:id/artifacts/:artifactID` | ✓ | ✓ | ✓ |
 | `GET /deals/:id/artifacts/:artifactID/download` | ✓ | ✓ | ✓ |
@@ -57,8 +70,9 @@
 ## Money-State Endpoints
 
 - **Client-scoped**: approve, dispute (must match `client_email`)
-- **Link-bearer-scoped**: public approve (`POST /public/deals/:shareToken/approve`) — share token authorizes the same settle+payout as authed approve; dispute is deliberately excluded
-- **Freelancer-scoped**: submit, payee-invoice, share-link (must be deal owner)
+- **Link-bearer-scoped**: public approve (`POST /public/deals/:shareToken/approve`) — share token authorizes the same settle+payout as authed approve; dispute is deliberately excluded. Public milestone accept-next/reject/exit are similarly share-token-only (reject/exit post-submission go to review, not a money move).
+- **Freelancer-scoped**: submit, payee-invoice, share-link, milestone create/update (must be deal owner)
+- **Participant-scoped (exit)**: `POST /deals/:dealID/exit` accepts freelancer owner **or** client by email match (symmetric exit; pre-submission refunds, post-submission → dispute)
 - **Generic status PATCH**: freelancer-only but **blocked** from money states
   (`locked`, `released`, `disputed`, `refunded`)
-- **Operator-scoped**: dispute queue, resolve, reconcile
+- **Operator-scoped**: dispute queue, deal resolve, milestone resolve (`POST /disputes/deals/:dealID/milestones/:milestoneID/resolve`), reconcile

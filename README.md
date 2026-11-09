@@ -4,6 +4,8 @@ Bitcoin Lightning escrow + an unfakeable, cryptographically anchored freelancer 
 
 Ganji ("money" in Sheng) lets a freelancer and a client transact safely over any channel — WhatsApp, Telegram, X, LinkedIn DM — with no platform lock-in and no bank account required. Escrow is drawn directly on Lightning: Ganji creates a `hold invoice` the client pays into, funds stay held on the network, and only the client's approval settles + forwards them to the freelancer. If the client disputes the work, the funds **freeze** and an operator resolves the dispute (release to the freelancer, or refund to the client). Every completed deal becomes a permanent, hash-verified entry on the freelancer's public **Live CV**.
 
+**Milestones (sequential per-milestone escrow):** a deal can instead split the job into milestones, each with its own hold invoice — fund M1 → release M1 → fund M2, etc. `released` means paid; `completed` means payout-pending. Post-submission reject/exit freezes the hold for independent review. See [`docs/MILESTONE_REDESIGN_NOTES.md`](./docs/MILESTONE_REDESIGN_NOTES.md).
+
 ---
 
 ## Documentation
@@ -32,6 +34,7 @@ The living docs are the source of truth. The original product build document (a 
 | [`docs/ENVIRONMENT.md`](./docs/ENVIRONMENT.md) | All environment variables with defaults |
 | [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) | Fixed + remaining bugs, not-built items |
 | [`docs/LNBITS_SETUP.md`](./docs/LNBITS_SETUP.md) | Complete LNbits setup (Demo, regtest, own instance), webhook config, curl flow |
+| [`docs/MILESTONE_REDESIGN_NOTES.md`](./docs/MILESTONE_REDESIGN_NOTES.md) | Milestone/exit redesign: agreed money rules, implementation status, TODOs |
 
 ---
 

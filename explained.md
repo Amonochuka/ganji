@@ -18,6 +18,7 @@ separate file in [`docs/`](./docs/) for easier navigation.
 | [`ENVIRONMENT.md`](./docs/ENVIRONMENT.md) | All environment variables with defaults |
 | [`KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) | Fixed + remaining bugs, not-built items |
 | [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) | OpenTimestamps anchor/verify pipeline (plain English + jargon) |
+| [`docs/MILESTONE_REDESIGN_NOTES.md`](./docs/MILESTONE_REDESIGN_NOTES.md) | Milestone/exit redesign: money rules, implementation status, TODOs |
 
 ---
 
@@ -49,6 +50,11 @@ freelancer creates deal   ──►  Ganji draws a hold invoice for amount_sats
 Every released deal stamps `verified_at` and its artifacts become hash-verified
 lines on the freelancer's public **Live CV** (`GET /cv/:slug` + hash verification
 endpoint).
+
+**Milestone mode (sequential per-milestone escrow)** — a deal with `milestones[]`
+funds M1 on creation, then M2 only after M1 is `released` (paid), etc. `completed`
+is payout-pending, never paid; escrow is mandatory ("fund it first"); post-submission
+reject/exit freezes the hold for independent review. See `docs/MILESTONE_REDESIGN_NOTES.md`.
 
 ---
 

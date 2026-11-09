@@ -115,9 +115,11 @@ needed; the schema is not yet in production):
 
 ### Step 1 — Approving a deal "releases" the CV entries
 
-`backend/internal/deals/service.go:562` — the approve path calls
+`backend/internal/deals/service.go` — the approve path calls
 `s.cv.AnchorReleasedDeal(freelancerID, dealID)`. The two services are glued
 together in `backend/cmd/api/router.go` via `deals.WithCVAnchorer(cvService)`.
+
+In milestone mode the deal is `released` only when its final milestone is `released` (paid), so anchoring still happens once, at deal release, over the deal's artifacts. Per-milestone artifact anchoring is not implemented (milestone-mode submit currently bypasses the deal-level artifact gate — see `MILESTONE_REDESIGN_NOTES.md` Outstanding).
 
 ### Step 2 — Hashing the files
 

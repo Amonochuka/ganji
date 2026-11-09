@@ -126,6 +126,20 @@ be clawed back by the client alone.
 Swaps the payout destination while the deal is open. Unsticks a release where
 the original invoice expired mid-deal. Frozen after `released`/`refunded`.
 
+### Milestone Escrow (sequential per-milestone holds)
+
+In milestone mode there is **no single upfront deal hold**. Each milestone is its own escrow leg:
+
+1. `CreateDealWithMilestones` — creates the deal + all milestones (`pending`), commits, then funds M1 only (`FundMilestone`: fresh preimage + `CreateHoldInvoice` for that milestone's amount). `deal.Invoice`/`deal.CheckingID` mirror M1 for compatibility. Later milestones stay `pending`/unfunded.
+2. Client pays the M1 invoice → `refreshMilestonePayment` (poll/refresh on `SubmitWork`/public views, not the webhook) moves `awaiting_payment → funded → in_progress`. Milestone holds have per-milestone `checking_id`/`preimage`/`payout_checking_id` columns (migration `000008`); the webhook reconciles deal-level holds only.
+3. Freelancer submits the active milestone (`funded`/`in_progress` → `work_submitted`, no deal-level artifact gate in milestone mode).
+4. Client approves (`POST /deals/:dealID/approve` or public accept-next) → `releaseMilestoneViaCanonicalPath` → `ReleaseMilestone` (see below) → `released` (paid), then funds the next milestone. Final milestone released → deal `released`.
+5. **Canonical payout (`ReleaseMilestone`)** — the only path to `released`/paid: 3 phases mirroring `releaseEscrow` (Phase 1 lock + durable `payout_attempted_at` commit; Phase 2 network legs outside the lock — `SettleHold` then `PayInvoice`; Phase 3 re-lock + record `payout_checking_id` + `released`). Policy: confirmed paid → release without re-pay; confirmed failed → clear + retry; ambiguous/in-flight/unknown → `ErrPayoutInFlight`. **Escrow mandatory:** no hold → "fund it first" error; never marked paid.
+6. **Reject → independent review:** public reject (only from `work_submitted`/`completed`) does **not** auto-refund. Milestone → `disputed`, hold stays. Operator `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve`: `release` → canonical `ReleaseMilestone` + advance sequence; `refund` → `CancelHold` + `refunded` (idempotent; does not auto-fund next).
+7. **Exit (symmetric):** pre-submission → cancel/refund the open hold(s), not paid; post-submission → no money move, milestone → `disputed` (hold stays) for review. Legacy single-hold deals follow the same rule.
+
+`completed` (if used) = approved/payout-pending, never paid; only `released` means money moved (terminal).
+
 ### Hold-Expiry Sweep (background, `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS`, default 6 h)
 Reconciles stale open deals with LNbits. If LNbits reports
 `UNPAID`/`EXPIRED`/`CANCELLED` — the network already returned any funds —
@@ -133,3 +147,7 @@ the deal becomes `refunded`. Holds still held/settled are left alone. This
 is the backstop for an expired-but-never-refunded hold sitting in
 `awaiting_payment` forever. Now also covers `locked`, `work_submitted`,
 `reviewing`, and `disputed` states.
+
+The sweep reconciles **deal-level** holds only (`deal.CheckingID`). In
+milestone mode it checks the mirrored M1 `checking_id`; later per-milestone
+holds have no sweep coverage yet (stale M2+ holds need explicit handling — see `MILESTONE_REDESIGN_NOTES.md` Outstanding).

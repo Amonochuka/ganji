@@ -1,8 +1,8 @@
 # Ganji Frontend — Implementation Report
 
-**Last updated:** 2026-10-20  
+**Last updated:** 2026-11-09  
 **Branch:** main  
-**Commit:** cb4bee9
+**Commit:** post-`22c915b` (milestone redesign)
 
 ---
 
@@ -14,9 +14,9 @@
 | **Login** | `/login` | Email/password auth, redirects to dashboard | `POST /auth/login` |
 | **Signup** | `/signup` | Registration with validation, redirects to dashboard | `POST /auth/signup` |
 | **Dashboard** | `/dashboard` | Authenticated deal list with status cards, empty state, create CTA | `GET /deals` |
-| **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc) | `POST /deals` |
-| **Deal Detail** | `/deals/[id]` | Full deal view, timeline, actions (submit/dispute/rotate), share link, verification status | `GET /deals/:id`, `POST /submit`, `POST /dispute`, `POST /share-link`, `POST /approve` |
-| **Public Deal** | `/public/deals/[shareToken]` | Client-facing view: invoice to pay, approve button wired to the public approve endpoint, dispute status | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/approve` |
+| **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title + sats each) | `POST /deals` (with `milestones[]`) |
+| **Deal Detail** | `/deals/[id]` | Full deal view, timeline, actions (submit/dispute/rotate), share link, verification status; milestone list + per-milestone actions incl. symmetric exit | `GET /deals/:id`, `POST /submit`, `POST /dispute`, `POST /share-link`, `POST /approve`, `POST /exit`, milestone endpoints |
+| **Public Deal** | `/public/deals/[shareToken]` | Client-facing view: invoice to pay, approve button wired to the public approve endpoint, dispute status; milestone accept-next/reject/exit wired | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/approve`, public milestone actions |
 
 ---
 
@@ -42,17 +42,27 @@
 
 **Deals:**
 - `listDeals(token)` → `GET /deals`
-- `createDeal(data, token)` → `POST /deals`
+- `createDeal(data, token)` → `POST /deals` (`data.milestones?` supported)
 - `getDeal(id, token)` → `GET /deals/:id`
-- `submitWork(id, token)` → `POST /deals/:id/submit`
-- `approveDeal(id, token)` → `POST /deals/:id/approve`
+- `submitWork(id, token)` → `POST /deals/:id/submit` (milestone mode: submits the active milestone via the same endpoint)
+- `approveDeal(id, token)` → `POST /deals/:id/approve` (milestone mode: releases the active milestone)
 - `disputeDeal(id, reason, token)` → `POST /deals/:id/dispute`
 - `updatePayeeInvoice(id, data, token)` → `PATCH /deals/:id/payee-invoice`
 - `rotateShareLink(id, token)` → `POST /deals/:id/share-link`
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
+- `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
+- `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)
+- `publicRejectMilestone(shareToken, milestoneId, reason)` → `POST /public/deals/:shareToken/milestones/:milestoneID/reject` (no auth)
+- `publicExitDeal(shareToken)` → `POST /public/deals/:shareToken/exit` (no auth)
 
-**Types:** Full TypeScript interfaces for all requests/responses (DealView, DealStatus, PublicDeal, etc.)
+**Milestones (authed):**
+- `createMilestone(id, title, amountSats, order, token)` → `POST /deals/:id/milestones`
+- `listMilestones(id, token)` → `GET /deals/:id/milestones`
+- `updateMilestone(id, milestoneId, status, completedAt, token)` → `PATCH /deals/:id/milestones/:milestoneID`
+- `exitDeal(id, token)` → `POST /deals/:id/exit` (symmetric participant exit)
+
+**Types:** Full TypeScript interfaces for all requests/responses (DealView, DealStatus, PublicDeal, MilestoneView, etc.). Labels: `released` = paid, `completed` = payout pending (not paid), `disputed`/`rejected` = under review (hold stays).
 
 ---
 

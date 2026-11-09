@@ -57,6 +57,7 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
 - **Frontend compiles and has 7 pages implemented** — see [`FRONTEND_REPORT.md`](../FRONTEND_REPORT.md).
 - Still stubbed (unchanged): `internal/websocket`, `pkg/sanitize`.
   Rate limiting now implemented (in-memory) in `internal/middleware/ratelimit.go`.
+- **Milestone redesign (2026-11-09, `main`)** — sequential per-milestone escrow shipped as WIP (see [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) for canonical status). Consolidated migration `000008` (`milestones` + nullable deal hold); `CreateDealWithMilestones` funds M1; canonical `ReleaseMilestone` (idempotent two-phase payout); escrow-mandatory ("fund it first"); post-submission reject/exit → `disputed` (hold stays); operator per-milestone `ResolveMilestone`; symmetric exit; public milestone actions (`accept-next`/`reject`/`exit`). Outstanding: idempotency/atomicity parity + tests, per-milestone artifacts/evidence, deal-level current-milestone contract, UX/API polish, real-LNbits E2E (all tracked in the redesign notes TODOs).
 
 ---
 
@@ -74,7 +75,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 
 | Component | Status | Files |
 |---|---|---|
-| DB schema (7 migrations) | ✅ Done | `backend/migrations/000001–000007` |
+| DB schema (8 migrations) | ✅ Done | `backend/migrations/000001–000008` |
 | Auth (signup, login, logout, refresh) | ✅ Done | `internal/auth/` |
 | JWT access + refresh tokens | ✅ Done | `internal/auth/token.go` |
 | Password hashing (bcrypt) | ✅ Done | `internal/auth/service.go` |

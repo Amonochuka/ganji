@@ -22,6 +22,7 @@ LNbits servers:
 - Sweep
 - Payee-invoice rotation
 - Share-link (public view safe fields, lock-on-refresh, LNbits-down fallback, rotation owner/frozen)
+- Milestones: fake repo stubs `CreateMilestone`/`GetMilestonesByDeal`/etc. exist, but milestone flows (sequential funding, canonical `ReleaseMilestone` double-pay/ambiguous/crash-window, reject/exit → dispute, operator `ResolveMilestone` release/refund, share-token-only auth) have **no dedicated tests yet** — see `MILESTONE_REDESIGN_NOTES.md` Outstanding (add `milestone_service_test.go` / extend `service_test.go`; do not claim coverage until written)
 
 Transactions simulated via a no-op `database/sql` driver so `BeginTx/Commit` flows without a DB.
 

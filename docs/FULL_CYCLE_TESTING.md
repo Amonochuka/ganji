@@ -158,12 +158,14 @@ make test-cycle
 |------|----------|------|-------------|
 | 1 | `POST /auth/register` | — | Register freelancer |
 | 2 | `POST /auth/login` | — | Get access_token |
-| 3 | `POST /deals` | Freelancer | Create deal with `payee_invoice` |
+| 3 | `POST /deals` | Freelancer | Create deal with `payee_invoice` (with `milestones[]` for milestone mode) |
 | 4 | `GET /public/deals/:shareToken` | — | Public deal page (client pays here) |
 | 5 | `GET /deals/:id/payment` | Freelancer | Poll payment status |
-| 6 | `POST /deals/:id/submit` | Freelancer | Submit work |
-| 7 | `POST /deals/:id/approve` | Client (email) | Approve → settle hold + payout |
+| 6 | `POST /deals/:id/submit` | Freelancer | Submit work (milestone mode: submits the active milestone, no artifact gate) |
+| 7 | `POST /deals/:id/approve` | Client (email) | Approve → settle hold + payout (milestone mode: releases active milestone, funds next) |
 | 8 | `GET /cv/:slug` | — | View freelancer CV (auto-anchored on release) |
+
+Milestone E2E (not yet run — see `MILESTONE_REDESIGN_NOTES.md`): fresh `000008` → create milestone deal → pay M1 → submit → approve/release M1 (freelancer paid) → fund/pay M2 → … plus reject → review → operator `ResolveMilestone` (release/refund) and pre/post-submission exit/refund. Public milestone actions: `accept-next`, `reject`, `exit`.
 
 ### Deal States
 ```

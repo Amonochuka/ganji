@@ -58,7 +58,17 @@ api.updatePayeeInvoice(dealId, data, token)
 
 // Public (no auth)
 api.getPublicDeal(shareToken)
+api.getPublicMilestones(shareToken)
 api.publicApproveDeal(shareToken)
+api.publicAcceptNextMilestone(shareToken, milestoneId)
+api.publicRejectMilestone(shareToken, milestoneId, reason)
+api.publicExitDeal(shareToken)
+
+// Milestones (authed)
+api.createMilestone(dealId, title, amountSats, order, token)
+api.listMilestones(dealId, token)
+api.updateMilestone(dealId, milestoneId, status, completedAt, token)
+api.exitDeal(dealId, token)
 
 // Auth methods
 api.getMe(token)

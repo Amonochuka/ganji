@@ -68,7 +68,7 @@ Typed wrapper around `fetch` with two export styles:
 ```typescript
 // Functional API
 api.listDeals(token)
-api.createDeal(data, token)
+api.createDeal(data, token)          // data may include milestones[]
 api.getDeal(id, token)
 api.submitWork(id, token)
 api.approveDeal(id, token)
@@ -76,7 +76,15 @@ api.disputeDeal(id, reason, token)
 api.updatePayeeInvoice(id, data, token)
 api.rotateShareLink(id, token)
 api.getPublicDeal(shareToken)
+api.getPublicMilestones(shareToken)
 api.publicApproveDeal(shareToken)
+api.publicAcceptNextMilestone(shareToken, milestoneId)
+api.publicRejectMilestone(shareToken, milestoneId, reason)
+api.publicExitDeal(shareToken)
+api.createMilestone(id, title, amountSats, order, token)
+api.listMilestones(id, token)
+api.updateMilestone(id, milestoneId, status, completedAt, token)
+api.exitDeal(id, token)
 api.getMe(token)           // GET /auth/me
 api.getCVProfile(slug)     // GET /cv/:slug
 api.verifyEntry(slug, entryId)  // GET /cv/:slug/verify/:entryId
@@ -105,20 +113,32 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - `updatePayeeInvoice(id, data, token)` → `PATCH /deals/:id/payee-invoice`
 - `rotateShareLink(id, token)` → `POST /deals/:id/share-link`
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
+- `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
+- `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)
+- `publicRejectMilestone(shareToken, milestoneId, reason)` → `POST /public/deals/:shareToken/milestones/:milestoneID/reject` (no auth)
+- `publicExitDeal(shareToken)` → `POST /public/deals/:shareToken/exit` (no auth)
+- `createMilestone(id, title, amountSats, order, token)` → `POST /deals/:id/milestones`
+- `listMilestones(id, token)` → `GET /deals/:id/milestones`
+- `updateMilestone(id, milestoneId, status, completedAt, token)` → `PATCH /deals/:id/milestones/:milestoneID`
+- `exitDeal(id, token)` → `POST /deals/:id/exit`
 
 ### Operator Methods (authed, operator-only)
 
 - `listDisputes(token)` → `GET /disputes`
 - `resolveDispute(id, resolution, token)` → `POST /disputes/:id/resolve`
+- `resolveMilestone(dealId, milestoneId, resolution, token)` → `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve` (see redesign notes; frontend wiring for this resolver is still pending)
 - `reconcileDeal(id, action, payoutCheckingId, token)` → `POST /deals/:id/reconcile`
 
 ### Types (selected)
 
 - `User` — `id`, `email`, `display_name`, `slug`, `bitcoin_address`, `trust_score`, `is_operator`, `created_at`
 - `DealStatus` — `"awaiting_payment" | "locked" | "work_submitted" | "reviewing" | "released" | "disputed" | "refunded"`
-- `DealView` — full deal with all fields except `preimage`, `payee_invoice`, `verified_at` (redacted)
-- `PublicDeal` — limited view: `title`, `amount_sats`, `source_platform`, `invoice`, `status`, `dispute_reason`, `created_at`
+- `MilestoneStatus` — `"pending" | "awaiting_payment" | "funded" | "in_progress" | "work_submitted" | "completed" | "released" | "exited" | "rejected" | "refunded" | "disputed"` (`released` = paid, `completed` = payout pending, `disputed`/`rejected` = hold stays in review)
+- `MilestoneView` — `id`, `title`, `amount_sats`, `order`, `status`, `invoice?`, `completed_at`, `created_at`
+- `DealView` — full deal with all fields except `preimage`, `payee_invoice`, `verified_at` (redacted); in milestone mode `invoice`/`checking_id`/`status` mirror the active milestone — use `listMilestones` for per-milestone truth
+- `PublicDeal` — limited view: `title`, `amount_sats`, `source_platform`, `invoice`, `status`, `dispute_reason`, `created_at`, `milestones?`
+- `CreateDealRequest.milestones?` — `{title, amount_sats}[]`; when present, `amount_sats` on the deal is derived as the sum
 - `CVProfile` — `display_name`, `slug`, `trust_score`, `entries: CVEntry[]`
 - `CVEntry` — `id`, `deal_title`, `amount_sats`, `source_platform`, `artifact_kind`, `hash`, `algorithm`, `verified_at`, `created_at`, OTS fields
 - `VerifyResult` — hash comparison + OTS verification results
@@ -153,6 +173,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 ## State Machine Integration
 
 - Deal status transitions mirrored from backend `DEAL_LIFECYCLE.md`
+- Milestone status transitions mirrored from the same doc's milestone table (`released` = paid; `completed` = payout pending, never paid; `disputed`/`rejected` = hold stays in review)
 - UI disables actions invalid per state (e.g., freelancer cannot set `locked`/`released`/`disputed`/`refunded` status directly)
 - Freelancer-driven transitions: `awaiting_payment → work_submitted`, `locked → work_submitted`, `work_submitted → reviewing`
-- Backend-only money states (`locked`, `released`, `disputed`, `refunded`) set by payment detection, approve, dispute, and arbitration
+- Backend-only money states (`locked`, `released`, `disputed`, `refunded`) set by payment detection, approve, dispute, and arbitration; milestone `released` is set only by the canonical payout path and can never be set without escrow ("fund it first")

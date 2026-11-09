@@ -3,6 +3,12 @@
 **Base URL:** `http://localhost:8080`
 **Auth:** JWT Bearer token in `Authorization` header (except where noted)
 
+> **Milestone mode.** Deals may carry sequential milestones (`milestones` array on `POST /deals`).
+> Each milestone has its own hold invoice (see `MILESTONE_REDESIGN_NOTES.md`): fund M1 → release M1 → fund M2, etc.
+> `released` = hold settled + freelancer paid (terminal, paid). `completed` = approved/payout-pending, never paid.
+> A milestone with no escrow hold cannot be released as paid ("fund it first").
+> See §3 "Milestones" for endpoint details.
+
 ---
 
 ## Conventions
@@ -150,7 +156,7 @@ Requires auth. Returns the authenticated user's profile (same `User` shape as si
 
 ## 3. Deals
 
-All deal endpoints require `Authorization: Bearer <access_token>` **except the two public share-link endpoints** (`GET /public/deals/:shareToken` and `POST /public/deals/:shareToken/approve`), which are intentionally unauthenticated so the freelancer can share a link the client can open without an account — to check payment status, pay, and approve delivery.
+All deal endpoints require `Authorization: Bearer <access_token>` **except the public share-link endpoints** (`GET /public/deals/:shareToken`, `GET /public/deals/:shareToken/milestones`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`, `POST /public/deals/:shareToken/milestones/:milestoneID/reject`, `POST /public/deals/:shareToken/exit`), which are intentionally unauthenticated so the freelancer can share a link the client can open without an account — to check payment status, pay, approve delivery, accept/reject a milestone, or exit.
 
 Every deal carries a unique **`share_token`** — a high-entropy random value, separate from the deal's UUID. It is the only thing that identifies a deal on the public endpoint, so:
 
@@ -173,10 +179,16 @@ The endpoint **refreshes the hold status with LNbits before answering**: if the 
     "source_platform": "Telegram",
     "invoice": "lnbc50000n1...",
     "status": "locked",
-    "created_at": "2026-08-26T12:00:00Z"
+    "created_at": "2026-08-26T12:00:00Z",
+    "milestones": [
+      {"id": "uuid", "title": "Design", "amount_sats": 20000, "order": 1, "status": "released", "invoice": "lnbc...", "created_at": "..."},
+      {"id": "uuid", "title": "Build", "amount_sats": 30000, "order": 2, "status": "awaiting_payment", "invoice": "lnbc...", "created_at": "..."}
+    ]
   }
 }
 ```
+
+In milestone mode the endpoint also refreshes each active milestone hold with LNbits before answering, so status and the active invoice reflect reality even if the webhook was delayed. `invoice`/`status` are mirrored from the active milestone for compatibility; `milestones[]` carries per-milestone truth (`released` = paid, `completed` = payout pending, `disputed`/`rejected` = hold stays in review).
 
 **Response `404`**
 ```json
@@ -190,6 +202,8 @@ The endpoint **refreshes the hold status with LNbits before answering**: if the 
 Public. The client approves straight from the share link — no account and no JWT required; possession of the share token is the authorization. Money moves exactly like the authed `POST /deals/:dealID/approve`: settle the hold (preimage revealed, funds land in the Ganji wallet), then pay the freelancer's `payee_invoice`; on success the deal is `released` and the Live CV entry is anchored.
 
 Legal only from `locked` or `work_submitted` — the hold status is refreshed from LNbits first, so a just-paid deal locks on the spot. Approving from `disputed` still requires the authenticated, email-matched endpoint (arbitration stays gated). Anything else is `400`. Idempotent like the authed path: re-approving an already-settled deal pays out without double-settling.
+
+In milestone mode the endpoint releases the **active milestone's** hold via the canonical `ReleaseMilestone` path (settle + pay → `released`), then funds the next milestone. When the final milestone is released the deal itself becomes `released`. A milestone under `disputed`/`rejected` is not approvable here — it requires operator resolution. A milestone with no escrow hold errors with "fund it first" and is never marked paid.
 
 > **Note:** anyone holding the link can release the freelancer's payment. Rotate the link (`POST /deals/:dealID/share-link`) to revoke a leaked one.
 
@@ -239,7 +253,9 @@ The frontend renders the link from `share_token` (e.g. `FRONTEND_URL/deal/<share
 
 Create a new deal. Generates a fresh escrow preimage, draws a **hold invoice** on LNbits (`payment_hash = sha256(preimage)`), and stores the deal. No money moves on creation — the funds stay held on the network until approve/dispute.
 
-**Request**
+With `milestones` (≥1, each `title` + positive `amount_sats`) the deal is created in **sequential per-milestone mode**: no single upfront deal hold; `amount_sats` is derived as the sum; M1 is funded immediately (`FundMilestone` → per-milestone hold invoice); later milestones get their hold only after the previous milestone is `released` (paid). `deal.Invoice`/`deal.CheckingID` mirror the active (M1) hold for compatibility. Legacy single-hold flow is preserved when `milestones` is empty/omitted.
+
+**Request (legacy single-hold)**
 ```json
 {
   "title": "Landing page redesign",
@@ -247,6 +263,20 @@ Create a new deal. Generates a fresh escrow preimage, draws a **hold invoice** o
   "source_platform": "Telegram",
   "client_email": "client@example.com",
   "payee_invoice": "lnbc50000n1..."
+}
+```
+
+**Request (milestone mode)**
+```json
+{
+  "title": "Landing page redesign",
+  "source_platform": "Telegram",
+  "client_email": "client@example.com",
+  "payee_invoice": "lnbc50000n1...",
+  "milestones": [
+    {"title": "Design", "amount_sats": 20000},
+    {"title": "Build", "amount_sats": 30000}
+  ]
 }
 ```
 
@@ -328,6 +358,8 @@ Backend autodetect: on a CLN-backed LNbits a held invoice already reports `paid`
 
 Freelancer marks their work as delivered (requires at least one artifact). Legal from `locked` and from `awaiting_payment` — the latter keeps LND-flow deals from deadlocking before the client can approve.
 
+In milestone mode, submit targets the active milestone (`funded`/`in_progress` → `work_submitted`); no deal-level artifact is required (per-milestone artifacts are not yet enforced). An `awaiting_payment` milestone blocks submit with "awaiting payment before work can be submitted".
+
 **Response `200`**
 ```json
 {
@@ -338,6 +370,12 @@ Freelancer marks their work as delivered (requires at least one artifact). Legal
 ### `POST /deals/:dealID/approve`
 
 Client approves → money moves on the network in two legs: `settle` the hold (reveal the stored preimage, funds land in the Ganji wallet) then `pay` the freelancer's `payee_invoice`. Idempotent: re-approving an already-settled deal pays out without double-settling. On success the deal is `released` and `verified_at` is stamped (Live CV entry).
+
+In milestone mode this releases the active escrow-backed milestone through the canonical path only, then funds the next milestone; the deal becomes `released` only when its final milestone is `released` (paid). Disputed/rejected milestones cannot be approved here.
+
+### `POST /deals/:dealID/exit`
+
+Either participant (freelancer owner or client by email match) may exit — no silent exit; confirmation + reason semantics are enforced by the state rules. Pre-submission: open holds cancelled/refunded to the client, milestone not paid. Post-submission (`work_submitted`/`completed`/`rejected`): no money moves, hold stays, milestone → `disputed` for independent review. Legacy single-hold deals follow the same rule (post-submission → dispute; otherwise cancel → `refunded`).
 
 **Response `200`**
 ```json
@@ -482,7 +520,32 @@ locked → work_submitted
 work_submitted → reviewing
 ```
 
-The **money states** (\`locked\`, \`released\`, \`disputed\`, \`refunded\`) are backend-only: they are set by payment detection, approve, and dispute, never by this endpoint.
+The **money states** (`locked`, `released`, `disputed`, `refunded`) are backend-only: they are set by payment detection, approve, and dispute, never by this endpoint.
+
+### Milestones
+
+In milestone mode each milestone is its own escrow leg with its own hold invoice. Milestone statuses: `pending → awaiting_payment → funded → in_progress → work_submitted → (completed →) released`, with `rejected`/`disputed` for work under review (hold stays), `refunded`/`exited` terminal. `released` = hold settled + freelancer paid (terminal, paid). `completed` = payout-pending, never paid. See `DEAL_LIFECYCLE.md` for the full transition table.
+
+- `POST /deals/:dealID/milestones` (freelancer) — create an additional milestone on an existing deal. Body: `{title, amount_sats, order}` (order ≥ 1). Status starts `pending` (unfunded); it is funded only in sequence.
+- `GET /deals/:dealID/milestones` (freelancer or client by email) — list milestones ordered by `order`. Response: `{milestones: [{id, title, amount_sats, order, status, invoice?, completed_at?, created_at}]}`.
+- `PATCH /deals/:dealID/milestones/:milestoneID` (freelancer) — update milestone status. Body: `{status, completed_at? (RFC3339)}`. Thin status write; money-moving outcomes (`released`/`paid`) must still go through the canonical escrow path — a milestone with no hold cannot be marked paid via this endpoint alone.
+
+Auth/portal behavior in milestone mode:
+
+- `POST /deals/:dealID/submit` (freelancer) submits the **active milestone** (`funded`/`in_progress` → `work_submitted`) and sets the deal to `work_submitted`. Milestone-mode submit does **not** require deal-level artifacts (per-milestone artifacts are not yet enforced — see `MILESTONE_REDESIGN_NOTES.md` Outstanding).
+- `POST /deals/:dealID/approve` (client by email) releases the active milestone via the canonical payout path and funds the next milestone; releasing the final milestone releases the deal. Disputed/rejected milestones cannot be approved (operator resolution required).
+- `POST /deals/:dealID/exit` (freelancer **or** client by email) — symmetric participant exit. Pre-submission milestones (`pending`/`awaiting_payment`/`funded`/`in_progress`) are not paid: their holds are cancelled/refunded to the client (unfunded → `exited`). Post-submission milestones (`work_submitted`/`completed`/`rejected`) do **not** move money — they go to `disputed` for independent review. Legacy single-hold deals: post-submission → dispute review; otherwise the hold is cancelled → `refunded`.
+
+Public (share-token-only, no JWT) milestone actions:
+
+- `GET /public/deals/:shareToken/milestones` — list milestones for the share link.
+- `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` — release that escrow-backed milestone (settle + pay), then fund the next; final milestone releases the deal. `disputed`/`rejected` → `400` (operator resolution required). No-hold → "fund it first" error, never marked paid.
+- `POST /public/deals/:shareToken/milestones/:milestoneID/reject` — body `{reason}` (required, ≤2000 chars). Only from `work_submitted`/`completed`. **Does not auto-refund**: hold stays, milestone → `disputed` pending independent review. The reason also lands on the deal's `dispute_reason`.
+- `POST /public/deals/:shareToken/exit` — public exit with the same pre/post-submission money rules as the authed exit.
+
+Operator (arbitration):
+
+- `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve` (operator only, `OperatorRequired`). Body `{resolution: "release" | "refund"}`. Resolves a `disputed`/`rejected` milestone: `release` → canonical `ReleaseMilestone` (settle + pay) + advance sequence/finalize deal; `refund` → `CancelHold` + `refunded`. `release` is also accepted from `work_submitted`/`completed` for parity. Milestone `refund` does not auto-fund the next milestone.
 
 ---
 
@@ -719,6 +782,8 @@ confirmation). Live block-header verification is optional — set
 
 Public endpoint called by LNbits when an invoice is paid. No JWT auth required.
 
+Currently reconciles **deal-level** holds only (`awaiting_payment → locked` for legacy single-hold deals). Milestone holds (`awaiting_payment → funded → in_progress`) are reconciled by poll/refresh (`refreshMilestonePayment`, called from `SubmitWork`/public views) — there is no milestone webhook path yet.
+
 **Headers:**
 - `Content-Type: application/json`
 - `LNbits-Signature: t=<unix_timestamp>,v1=<hmac_sha256_hex>` (if webhook signing is enabled)
@@ -832,3 +897,29 @@ Network-as-escrow flow (hold invoices). `awaiting_payment → work_submitted` is
 ```
 
 `released` and `refunded` are terminal — no transitions out.
+
+### Milestone State Machine (sequential per-milestone escrow)
+
+```
+pending → awaiting_payment → funded → in_progress → work_submitted → (completed) → released
+              │                │           │               │
+              ▼                ▼           ▼               ▼
+           refunded         disputed ──→ released | refunded
+              │                ▲           ▲
+              ▼                │           │
+            exited           rejected ──→ disputed
+```
+
+Full transitions (`ValidMilestoneTransitions` in `backend/internal/deals/types.go`):
+
+- `pending` → `awaiting_payment`, `in_progress`, `exited`
+- `awaiting_payment` → `funded`, `in_progress`, `exited`, `refunded`
+- `funded` → `in_progress`, `exited`, `refunded`, `disputed`
+- `in_progress` → `work_submitted`, `released`, `exited`, `refunded`, `disputed`
+- `work_submitted` → `released`, `completed`, `rejected`, `disputed`, `exited`
+- `completed` → `released`, `disputed` (`completed` = payout-pending, never paid)
+- `rejected` → `disputed`, `in_progress`, `work_submitted`
+- `disputed` → `released`, `refunded`
+- `released`, `refunded`, `exited` terminal.
+
+Rules: `released` is set only by the canonical payout path (`ReleaseMilestone`: settle + pay, idempotent); no-hold milestones error "fund it first" and are never marked paid. `rejected`/`disputed`/`work_submitted` → exit does not move money (hold stays, review). `GET /disputes` lists **deal-level** disputes; milestone disputes are resolved via `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve`.

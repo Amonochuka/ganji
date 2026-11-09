@@ -26,7 +26,9 @@ tx.Commit()                                     // releases lock
 is its own transaction. Without explicit `BEGIN`, a `SELECT` and subsequent
 `UPDATE` are separate transactions — another request can sneak in between them.
 
-### The Split Pattern: Two-Phase Release (`releaseEscrow`)
+### The Split Pattern: Two-Phase Release (`releaseEscrow` + `ReleaseMilestone`)
+
+Milestone releases mirror this exactly: `ReleaseMilestone` (canonical, the only path to milestone `released`/paid) uses the same three phases — Phase 1 lock + durable `payout_attempted_at` commit, Phase 2 network legs (`SettleHold` + `PayInvoice`) outside any lock, Phase 3 re-lock + record `payout_checking_id` + `released`. Per-milestone payout tracking lives on `milestones.payout_checking_id`/`payout_attempted_at` (migration `000008`). Consequence: no double-pay without proof; ambiguous/crash-window attempts surface `ErrPayoutInFlight`. Escrow is mandatory — no hold → "fund it first" error, never marked paid. `completed` (if used) = payout-pending, never paid.
 
 The *release* paths (approve → `released`, dispute-resolve → `released`) are
 deliberately NOT a single lock-around-everything transaction. Holding a
@@ -189,7 +191,7 @@ tx.Commit()
 
 ### Sweep Job: `SweepExpiredHolds`
 
-Reconciles DB with network for stale deals:
+Reconciles DB with network for stale deals. Deal-level holds only (`deal.CheckingID`); per-milestone holds (M2+) have no sweep coverage yet — see `MILESTONE_REDESIGN_NOTES.md` Outstanding.
 
 ```go
 func (s *Service) SweepExpiredHolds(ctx, cutoff) {
@@ -295,6 +297,7 @@ DB records: resolved_at, resolved_by, payout_checking_id
 | `SweepExpiredHolds` | Reads open deals, then a guarded `UpdateStatusIfCurrent(dealID, expected, refunded)` per deal; LNbits-unreachable is skipped, never forced |
 | `PayInvoice` retry | Status-token verdict (§23): confirmed → release w/o resend; failed/refused → clear + retry; ambiguous → `ErrPayoutInFlight`, operator reconcile only |
 | `SettleHold` retry | LNbits native idempotency (preimage-based); already-settled verified and treated as success |
+| `ReleaseMilestone` (milestone release) | Same two-phase discipline as deal release: Phase-1 `SELECT FOR UPDATE` on the milestone + durable `payout_attempted_at` (committed before money moves), network legs unlocked, Phase-3 re-lock + re-validated transition. Concurrent releases share the milestone payout tracking and cannot double-pay. Escrow-mandatory: no hold → "fund it first" error. |
 
 ---
 

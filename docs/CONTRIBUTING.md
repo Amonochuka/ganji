@@ -1,6 +1,6 @@
 # Contributing to Ganji
 
-This document covers team ownership, build order, and git conventions. For the current architecture, money flows, and API contract, read [`explained.md`](./explained.md) and [`API_REFERENCE.md`](./API_REFERENCE.md) first. Those, plus [`BACKEND_STATUS.md`](./BACKEND_STATUS.md), are the source of truth — the original build document (a `.docx`) is not part of this repo.
+This document covers team ownership, build order, and git conventions. For the current architecture, money flows, and API contract, read [`explained.md`](../explained.md) and [`API_REFERENCE.md`](./API_REFERENCE.md) first. Those, plus [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) and [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) (milestone money rules + status), are the source of truth — the original build document (a `.docx`) is not part of this repo.
 
 ---
 
