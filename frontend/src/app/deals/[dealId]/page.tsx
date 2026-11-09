@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { DealCard } from "@/components/deals/deal-card";
-import { api, type DealView, type DealStatus, type DealDetailResponse, type SubmitWorkResponse, type DisputeDealResponse } from "@/lib/api/api-client";
+import { api, type DealView, type DealStatus, type DealDetailResponse, type SubmitWorkResponse, type DisputeDealResponse, type MilestoneView } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatCurrency } from "@/lib/utils/format";
 
@@ -20,6 +20,7 @@ export default function DealDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [milestones, setMilestones] = useState<MilestoneView[]>([]);
 
   useEffect(() => {
     if (!tokens) {
@@ -27,6 +28,7 @@ export default function DealDetailPage() {
       return;
     }
     fetchDeal();
+    fetchMilestones();
   }, [tokens, dealId, router]);
 
   async function fetchDeal() {
@@ -42,11 +44,22 @@ export default function DealDetailPage() {
     }
   }
 
+  async function fetchMilestones() {
+    if (!tokens) return;
+    try {
+      const res = await api.listMilestones(dealId, tokens.access_token);
+      setMilestones(res.milestones);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load milestones");
+    }
+  }
+
   async function handleAction(action: string, fn: () => Promise<void>) {
     setActionLoading(action);
     try {
       await fn();
       await fetchDeal();
+      await fetchMilestones();
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to ${action}`);
     } finally {
@@ -85,6 +98,23 @@ export default function DealDetailPage() {
     setTimeout(() => setError(null), 3000);
   }
 
+  async function handleApproveDeal() {
+    await handleAction("approve", async () => {
+      const res = await api.approveDeal(dealId, tokens!.access_token);
+      setDeal(res.deal);
+    });
+  }
+
+  async function handleExitDeal() {
+    if (!window.confirm("Are you sure you want to exit this deal?")) return;
+    await handleAction("exit deal", async () => {
+      await api.exitDeal(dealId, tokens!.access_token);
+      setDeal?.();
+      await fetchDeal();
+      await fetchMilestones();
+    });
+  }
+
   if (isLoading) {
     return (
       <main className="flex min-h-screen flex-col bg-vault-bg">
@@ -117,11 +147,6 @@ export default function DealDetailPage() {
   const canSubmit = isFreelancer && (deal.status === "locked" || deal.status === "awaiting_payment");
   const canDispute = isFreelancer && (deal.status === "locked" || deal.status === "work_submitted" || deal.status === "reviewing");
   const canRotateLink = isFreelancer;
-  // Backend authz for these is email-matched (ApproveDeal/DisputeDeal), so
-  // the client — who can already open this page via the same email match —
-  // gets the real buttons instead of a dead end. Approve mirrors the backend
-  // CanTransition set (work_submitted/reviewing/disputed -> released);
-  // dispute is unavailable from awaiting_payment and from disputed.
   const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(deal.status);
   const clientCanDispute = ["locked", "work_submitted", "reviewing"].includes(deal.status);
 
@@ -288,9 +313,69 @@ export default function DealDetailPage() {
                         ↩️ Escrow refunded
                       </span>
                     )}
+                    {/* Exit button for client - appears when deal is active */}
+                    {deal.status !== "released" && deal.status !== "refunded" && (
+                      <Button
+                        variant="danger"
+                        onClick={handleExitDeal}
+                        disabled={actionLoading === "exit deal"}
+                        isLoading={actionLoading === "exit deal"}
+                      >
+                        Exit Deal
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
+
+              <div className="space-y-6">
+                <div className="vault-card p-6 vault-seam">
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Milestones</h2>
+                  {milestones.length === 0 ? (
+                    <p className="text-ink-500">No milestones defined for this deal</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {milestones.map((ms) => (
+                        <div key={ms.id} className="p-4 rounded-lg border transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold-500">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h3 className="font-medium text-ink-100">{ms.title}</h3>
+                              <p className="text-sm text-ink-500">Sats: {formatCurrency(ms.amount_sats)} • Order: #{ms.order}</p>
+                            </div>
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${getMilestoneStatusClass(ms.status)}`}>
+                              {getMilestoneStatusLabel(ms.status)}
+                            </span>
+                          </div>
+                          {ms.completed_at && (
+                            <p className="mt-1 text-xs text-ink-500 font-mono">Completed: {new Date(ms.completed_at).toLocaleString()}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="vault-card p-6 vault-seam">
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Timeline</h2>
+                  <StatusTimeline deal={deal} />
+                </div>
+
+                <div className="vault-card p-6 vault-seam">
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Verification</h2>
+                  <p className="text-sm text-ink-500 mb-3">
+                    This deal will be anchored to Bitcoin via OpenTimestamps when released.
+                  </p>
+                  {deal.verified_at ? (
+                    <div className="p-3 rounded-lg bg-green-600/10 border border-green-600/30 text-green-400 text-sm">
+                      ✅ Verified on Bitcoin at {new Date(deal.verified_at).toLocaleString()}
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-lg bg-yellow-600/10 border border-yellow-600/30 text-yellow-400 text-sm">
+                      ⏳ Pending verification (anchors on release)
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-6">
@@ -316,27 +401,6 @@ export default function DealDetailPage() {
                   </p>
                 </div>
               </div>
-
-              <div className="vault-card p-6 vault-seam">
-                <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Timeline</h2>
-                <StatusTimeline deal={deal} />
-              </div>
-
-              <div className="vault-card p-6 vault-seam">
-                <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Verification</h2>
-                <p className="text-sm text-ink-500 mb-3">
-                  This deal will be anchored to Bitcoin via OpenTimestamps when released.
-                </p>
-                {deal.verified_at ? (
-                  <div className="p-3 rounded-lg bg-green-600/10 border border-green-600/30 text-green-400 text-sm">
-                    ✅ Verified on Bitcoin at {new Date(deal.verified_at).toLocaleString()}
-                  </div>
-                ) : (
-                  <div className="p-3 rounded-lg bg-yellow-600/10 border border-yellow-600/30 text-yellow-400 text-sm">
-                    ⏳ Pending verification (anchors on release)
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </div>
@@ -345,93 +409,24 @@ export default function DealDetailPage() {
   );
 }
 
-function DealHeader({ user }: { user: { display_name: string; id: string } | null }) {
-  return (
-    <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/dashboard" className="logo-gnj-sm" aria-label="Ganji Dashboard">
-          GNJ
-        </Link>
-        <nav className="flex items-center gap-4">
-          <span className="text-sm text-ink-300 hidden sm:block">{user?.display_name}</span>
-          <Button variant="ghost" className="h-10 px-4" onClick={() => { logout(); window.location.href = "/"; }}>
-            Log out
-          </Button>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
-function getStatusLabel(status: DealStatus): string {
-  const labels: Record<DealStatus, string> = {
-    awaiting_payment: "Awaiting Payment",
-    locked: "Locked",
-    work_submitted: "Work Submitted",
-    reviewing: "Under Review",
-    released: "Released",
-    disputed: "Disputed",
-    refunded: "Refunded",
+function getMilestoneStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "Pending",
+    in_progress: "In Progress",
+    completed: "Completed",
+    exited: "Exited",
+    rejected: "Rejected",
   };
-  return labels[status];
+  return labels[status] || status;
 }
 
-function getStatusIcon(status: DealStatus): string {
-  const icons: Record<DealStatus, string> = {
-    awaiting_payment: "⏳",
-    locked: "🔒",
-    work_submitted: "📤",
-    reviewing: "👁️",
-    released: "✅",
-    disputed: "⚠️",
-    refunded: "↩️",
+function getMilestoneStatusClass(status: string): string {
+  const classes: Record<string, string> = {
+    pending: "bg-yellow-600/20 text-yellow-400 border-yellow-600/30",
+    in_progress: "bg-blue-600/20 text-blue-400 border-blue-600/30",
+    completed: "bg-green-600/20 text-green-400 border-green-600/30",
+    exited: "bg-red-600/20 text-red-400 border-red-600/30",
+    rejected: "bg-gray-600/20 text-gray-400 border-gray-600/30",
   };
-  return icons[status];
-}
-
-function getStatusClass(status: DealStatus): string {
-  const classes: Record<DealStatus, string> = {
-    awaiting_payment: "bg-yellow-600/20 text-yellow-400 border-yellow-600/30",
-    locked: "bg-blue-600/20 text-blue-400 border-blue-600/30",
-    work_submitted: "bg-purple-600/20 text-purple-400 border-purple-600/30",
-    reviewing: "bg-indigo-600/20 text-indigo-400 border-indigo-600/30",
-    released: "bg-green-600/20 text-green-400 border-green-600/30",
-    disputed: "bg-red-600/20 text-red-400 border-red-600/30",
-    refunded: "bg-gray-600/20 text-gray-400 border-gray-600/30",
-  };
-  return classes[status];
-}
-
-function StatusTimeline({ deal }: { deal: DealView }) {
-  const steps = [
-    { key: "created", label: "Deal Created", time: deal.created_at, completed: true },
-    { key: "awaiting_payment", label: "Awaiting Payment", completed: deal.status !== "awaiting_payment" },
-    { key: "locked", label: "Funds Locked", completed: ["locked", "work_submitted", "reviewing", "released", "disputed"].includes(deal.status) },
-    { key: "work_submitted", label: "Work Submitted", completed: ["work_submitted", "reviewing", "released", "disputed"].includes(deal.status) },
-    { key: "reviewing", label: "Under Review", completed: ["reviewing", "released", "disputed"].includes(deal.status) },
-    { key: "released", label: "Released & Paid", completed: deal.status === "released" },
-    { key: "disputed", label: "Disputed", completed: deal.status === "disputed" },
-    { key: "refunded", label: "Refunded", completed: deal.status === "refunded" },
-  ];
-
-  return (
-    <div className="space-y-4">
-      {steps.map((step, i) => (
-        <div key={step.key} className="flex gap-3">
-          <div className="flex flex-col items-center">
-            <div className={`w-3 h-3 rounded-full border-2 ${step.completed ? "bg-gold-500 border-gold-500" : "border-vault-border bg-vault-bg"}`} />
-            {i < steps.length - 1 && (
-              <div className={`w-0.5 h-full ${step.completed ? "bg-gold-500" : "bg-vault-border"}`} />
-            )}
-          </div>
-          <div className="flex-1 pt-1">
-            <p className={`text-sm ${step.completed ? "text-ink-100" : "text-ink-500"}`}>{step.label}</p>
-            {step.time && step.completed && (
-              <p className="text-xs text-ink-500 font-mono">{new Date(step.time).toLocaleString()}</p>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+  return classes[status] || "bg-gray-600/20 text-gray-400 border-gray-600/30";
 }

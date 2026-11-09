@@ -39,6 +39,8 @@ type DealNotifier interface {
 	DealDisputed(ctx context.Context, deal *Deal)
 	DealReleased(ctx context.Context, deal *Deal)
 	DealRefunded(ctx context.Context, deal *Deal)
+	DealExited(ctx context.Context, deal *Deal) // client exited the deal
+	MilestoneMoved(ctx context.Context, deal *Deal, fromOrder, toOrder int) // client moved to next milestone
 }
 
 // maxDisputeReasonRunes caps how much the client can write when raising a
@@ -935,6 +937,18 @@ func (s *Service) notifyRefunded(deal *Deal) {
 	}
 }
 
+func (s *Service) notifyExited(deal *Deal) {
+	if s.notifier != nil {
+		s.notifier.DealExited(context.Background(), deal)
+	}
+}
+
+func (s *Service) notifyMilestoneMoved(deal *Deal, fromOrder, toOrder int) {
+	if s.notifier != nil {
+		s.notifier.MilestoneMoved(context.Background(), deal, fromOrder, toOrder)
+	}
+}
+
 // SweepExpiredHolds reconciles DB state with LNbits for old open deals.
 // When a hold invoice expires (or was never funded and is now UNPAID /
 // EXPIRED / CANCELLED), any committed funds have already returned to the
@@ -1419,6 +1433,24 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	if deal.CheckingID != "" && deal.Status == StatusAwaitingPayment {
 		_ = s.refreshPaymentStatus(ctx, deal)
 	}
+	ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	views := make([]MilestoneView, 0, len(ms))
+	for i := range ms {
+		var completed *string
+		if ms[i].CompletedAt.Valid {
+			s := ms[i].CompletedAt.Time.Format(time.RFC3339)
+			completed = &s
+		}
+		views = append(views, MilestoneView{
+			ID:          ms[i].ID,
+			Title:       ms[i].Title,
+			AmountSats:  ms[i].AmountSats,
+			Order:       ms[i].Order,
+			Status:      string(ms[i].Status),
+			CompletedAt: completed,
+			CreatedAt:   ms[i].CreatedAt,
+		})
+	}
 	return &PublicDeal{
 		Title:          deal.Title,
 		AmountSats:     deal.AmountSats,
@@ -1427,6 +1459,7 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 		Status:         deal.Status,
 		DisputeReason:  deal.DisputeReason,
 		CreatedAt:      deal.CreatedAt,
+		Milestones:     views,
 	}, nil
 }
 
@@ -1521,4 +1554,192 @@ func generateShareToken() (string, error) {
 func isValidEmail(s string) bool {
 	addr, err := mail.ParseAddress(s)
 	return err == nil && addr.Address == s && strings.Contains(s, "@")
+}
+
+// MilestoneService provides milestone-related operations for a deal.
+func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amountSats int64, order int) (*Milestone, error) {
+	milestone := &Milestone{
+		DealID:      dealID,
+		Title:       title,
+		AmountSats:  amountSats,
+		Order:       order,
+		Status:      MilestonePending,
+		CompletedAt: sql.NullTime{},
+	}
+	if err := s.repo.CreateMilestone(ctx, milestone); err != nil {
+		return nil, err
+	}
+	return milestone, nil
+}
+
+func (s *Service) GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error) {
+	milestones, err := s.repo.GetMilestonesByDeal(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	return milestones, nil
+}
+
+func (s *Service) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
+	milestone, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+	if err != nil {
+		return nil, err
+	}
+	return milestone, nil
+}
+
+func (s *Service) UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error {
+	return s.repo.UpdateMilestoneStatus(ctx, milestoneID, status, completedAt)
+}
+
+func (s *Service) ExitDeal(ctx context.Context, dealID string) error {
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return err
+	}
+	return s.exitDeal(ctx, deal)
+}
+
+func (s *Service) PublicExitDeal(ctx context.Context, shareToken string) (*PublicDeal, error) {
+	if shareToken == "" {
+		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
+	}
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.exitDeal(ctx, deal); err != nil {
+		return nil, err
+	}
+	return s.GetPublicDeal(ctx, shareToken)
+}
+
+func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
+	milestones, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	if err != nil {
+		return err
+	}
+
+	// Find current open milestone.
+	var open *Milestone
+	for i := range milestones {
+		if milestones[i].Status == MilestonePending || milestones[i].Status == MilestoneInProgress {
+			open = &milestones[i]
+			break
+		}
+	}
+	// Rule (agreed): mid-milestone exit when work is NOT submitted/approved => that
+	// milestone is not paid and its funds are refunded/cancelled. For the legacy
+	// single-hold deal (one escrow leg for the whole deal), exiting before any
+	// release means cancel/refund the hold if it may be funded.
+	if open != nil && open.Status != MilestoneCompleted {
+		// Best-effort cancel for legacy hold-funded deals; ignore if not cancellable.
+		_ = s.cancelEscrowHold(ctx, deal)
+	}
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	repo := s.repo.WithTx(tx)
+
+	now := time.Now().UTC()
+	if open != nil {
+		if err := repo.UpdateMilestoneStatus(ctx, open.ID, MilestoneExited, &now); err != nil {
+			return fmt.Errorf("update milestone status: %w", err)
+		}
+	}
+	// Mark remaining pending/in_progress milestones as exited too (client left).
+	for i := range milestones {
+		if open != nil && milestones[i].ID == open.ID {
+			continue
+		}
+		if milestones[i].Status == MilestonePending || milestones[i].Status == MilestoneInProgress {
+			if err := repo.UpdateMilestoneStatus(ctx, milestones[i].ID, MilestoneExited, &now); err != nil {
+				return fmt.Errorf("update milestone status: %w", err)
+			}
+		}
+	}
+
+	s.notifyExited(deal)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, milestoneID string) (*PublicDeal, error) {
+	if shareToken == "" {
+		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
+	}
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return nil, err
+	}
+	ms, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	if err != nil {
+		return nil, err
+	}
+	// Find target milestone and ensure it belongs to this deal; mark completed/accepted
+	// and move next to in_progress. Money settlement for sequential per-milestone
+	// invoices is wired separately (state/UX scaffolding now).
+	idx := -1
+	for i := range ms {
+		if ms[i].ID == milestoneID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, ErrMilestoneNotFound
+	}
+	now := time.Now().UTC()
+	if err := s.repo.UpdateMilestoneStatus(ctx, ms[idx].ID, MilestoneCompleted, &now); err != nil {
+		return nil, err
+	}
+	if idx+1 < len(ms) {
+		if err := s.repo.UpdateMilestoneStatus(ctx, ms[idx+1].ID, MilestoneInProgress, nil); err != nil {
+			return nil, err
+		}
+		s.notifyMilestoneMoved(deal, ms[idx].Order, ms[idx+1].Order)
+	}
+	return s.GetPublicDeal(ctx, shareToken)
+}
+
+func (s *Service) PublicRejectMilestone(ctx context.Context, shareToken, milestoneID, reason string) (*PublicDeal, error) {
+	if shareToken == "" {
+		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, fmt.Errorf("%w: reason is required", ErrInvalidInput)
+	}
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return nil, err
+	}
+	ms, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for i := range ms {
+		if ms[i].ID == milestoneID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, ErrMilestoneNotFound
+	}
+	// State scaffolding: mark rejected and notify. Money/dispute consequences depend
+	// on milestone escrow wiring (per-milestone invoices).
+	now := time.Now().UTC()
+	if err := s.repo.UpdateMilestoneStatus(ctx, milestoneID, MilestoneRejected, &now); err != nil {
+		return nil, err
+	}
+	deal.DisputeReason = reason
+	s.notifyDisputed(deal)
+	return s.GetPublicDeal(ctx, shareToken)
 }

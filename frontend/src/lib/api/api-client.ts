@@ -112,8 +112,24 @@ export const api = {
     return this.get<{ deal: PublicDeal }>(`/public/deals/${shareToken}`);
   },
 
+  getPublicMilestones(shareToken: string) {
+    return this.get<{ milestones: MilestoneView[] }>(`/public/deals/${shareToken}/milestones`);
+  },
+
   publicApproveDeal(shareToken: string) {
     return this.post<PublicApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
+  },
+
+  publicAcceptNextMilestone(shareToken: string, milestoneId: string) {
+    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/milestones/${milestoneId}/accept-next`, {});
+  },
+
+  publicRejectMilestone(shareToken: string, milestoneId: string, reason: string) {
+    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/milestones/${milestoneId}/reject`, { reason });
+  },
+
+  publicExitDeal(shareToken: string) {
+    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/exit`, {});
   },
 
   // Auth
@@ -141,6 +157,23 @@ export const api = {
 
   reconcileDeal(dealId: string, action: "confirm_payout" | "reset_payout", payoutCheckingId: string | undefined, token: string) {
     return this.post<{ deal: DealView }>(`/deals/${dealId}/reconcile`, { action, payout_checking_id: payoutCheckingId }, token);
+  },
+
+  // Milestones
+  createMilestone(dealId: string, title: string, amountSats: number, order: number, token: string) {
+    return this.post<{ milestone: MilestoneView }>(`/deals/${dealId}/milestones`, { title, amount_sats: amountSats, order }, token);
+  },
+
+  listMilestones(dealId: string, token: string) {
+    return this.get<{ milestones: MilestoneView[] }>(`/deals/${dealId}/milestones`, token);
+  },
+
+  updateMilestone(dealId: string, milestoneId: string, status: string, completedAt: string | undefined, token: string) {
+    return this.patch<{ milestone: MilestoneView }>(`/deals/${dealId}/milestones/${milestoneId}`, { status, completed_at: completedAt }, token);
+  },
+
+  exitDeal(dealId: string, token: string) {
+    return this.post<{ message: string }>(`/deals/${dealId}/exit`, {}, token);
   },
 };
 
@@ -255,6 +288,16 @@ export type RotateShareLinkResponse = {
   deal: DealView;
 };
 
+export type MilestoneView = {
+  id: string;
+  title: string;
+  amount_sats: number;
+  order: number;
+  status: string;
+  completed_at: string | null;
+  created_at: string;
+};
+
 export type PublicDeal = {
   title: string;
   amount_sats: number;
@@ -263,6 +306,7 @@ export type PublicDeal = {
   status: DealStatus;
   dispute_reason: string;
   created_at: string;
+  milestones?: MilestoneView[];
 };
 
 export type CVEntry = {

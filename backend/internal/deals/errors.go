@@ -10,6 +10,7 @@ var (
 	ErrVerificationNotFound = errors.New("verification not found")
 	ErrInvalidTransition    = errors.New("invalid status transition")
 	ErrNoCheckingID         = errors.New("deal has no checking id")
+	ErrMilestoneNotFound    = errors.New("milestone not found")
 	// ErrPayoutInFlight marks a payout whose outcome is unknown (an earlier
 	// attempt was recorded but never confirmed, or LNbits has not settled it
 	// either way). The deal needs manual reconciliation against LNbits

@@ -71,6 +71,22 @@ func (s *Service) DealRefunded(_ context.Context, deal *deals.Deal) {
 	})
 }
 
+// DealExited is sent when a client exits a deal.
+// Both freelancer and client are notified.
+func (s *Service) DealExited(_ context.Context, deal *deals.Deal) {
+	s.notifyBoth(deal, func(ctx context.Context, to, name string) error {
+		return s.SendDealExited(ctx, to, name, deal.Title, deal.ID)
+	})
+}
+
+// MilestoneMoved is sent when a client moves to the next milestone.
+// Both freelancer and client are notified.
+func (s *Service) MilestoneMoved(_ context.Context, deal *deals.Deal, fromOrder, toOrder int) {
+	s.notifyBoth(deal, func(ctx context.Context, to, name string) error {
+		return s.SendMilestoneMoved(ctx, to, name, deal.Title, deal.ID, fromOrder, toOrder)
+	})
+}
+
 // notifyBoth sends the notification to both freelancer and client.
 func (s *Service) notifyBoth(deal *deals.Deal, send func(context.Context, string, string) error) {
 	if !s.Enabled() || s.users == nil {
@@ -155,6 +171,32 @@ func (s *Service) SendDealRefunded(ctx context.Context, freelancerEmail, freelan
 	subject := fmt.Sprintf("❌ Deal Refunded — \"%s\"", dealTitle)
 	htmlBody := dealRefundedHTML(freelancerName, dealTitle, dealID, s.frontendURL())
 	textBody := dealRefundedText(freelancerName, dealTitle, dealID, s.frontendURL())
+
+	return s.send(ctx, freelancerEmail, subject, textBody, htmlBody)
+}
+
+// SendDealExited sends exit notification email to freelancer and client.
+func (s *Service) SendDealExited(ctx context.Context, freelancerEmail, freelancerName, dealTitle, dealID string) error {
+	if !s.Enabled() {
+		return nil
+	}
+
+	subject := fmt.Sprintf("🚪 Deal Exited — \"%s\"", dealTitle)
+	htmlBody := dealExitedHTML(freelancerName, dealTitle, dealID, s.frontendURL())
+	textBody := dealExitedText(freelancerName, dealTitle, dealID, s.frontendURL())
+
+	return s.send(ctx, freelancerEmail, subject, textBody, htmlBody)
+}
+
+// SendMilestoneMoved sends milestone move notification email to freelancer and client.
+func (s *Service) SendMilestoneMoved(ctx context.Context, freelancerEmail, freelancerName, dealTitle, dealID string, fromOrder, toOrder int) error {
+	if !s.Enabled() {
+		return nil
+	}
+
+	subject := fmt.Sprintf("📈 Milestone Moved — \"%s\" (Milestone %d → %d)", dealTitle, fromOrder, toOrder)
+	htmlBody := milestoneMovedHTML(freelancerName, dealTitle, dealID, s.frontendURL(), fromOrder, toOrder)
+	textBody := milestoneMovedText(freelancerName, dealTitle, dealID, s.frontendURL(), fromOrder, toOrder)
 
 	return s.send(ctx, freelancerEmail, subject, textBody, htmlBody)
 }
@@ -520,4 +562,106 @@ func FirstName(displayName string) string {
 		return parts[0]
 	}
 	return displayName
+}
+
+func dealExitedHTML(name, title, dealID, frontendURL string) string {
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+    <h1 style="color: white; margin: 0; font-size: 24px;">🚪 Deal Exited</h1>
+  </div>
+  <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 12px 12px; border: 1px solid #e5e7eb; border-top: none;">
+    <p>Hi {{.Name}},</p>
+    <p>Your client has exited the deal <strong>{{.Title}}</strong>.</p>
+    <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 20px 0;">
+      <p style="margin: 0;"><strong>Status:</strong> <span style="color: #f59e0b; font-weight: 600;">EXITED</span></p>
+    </div>
+    <p>The deal has been closed at the client's request. Any work completed will be kept.</p>
+    <p style="text-align: center; margin: 30px 0;">
+      <a href="{{.FrontendURL}}/deals/{{.DealID}}" style="background: #f59e0b; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">View Deal</a>
+    </p>
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+    <p style="font-size: 12px; color: #9ca3af;">Deal ID: {{.DealID}} • {{.Time}}</p>
+  </div>
+</body>
+</html>
+`
+	data := map[string]string{
+		"Name":        name,
+		"Title":       title,
+		"DealID":      dealID,
+		"FrontendURL": frontendURL,
+		"Time":        time.Now().Format("Jan 2, 2006 15:04 MST"),
+	}
+	return renderTemplate(tmpl, data)
+}
+
+func dealExitedText(name, title, dealID, frontendURL string) string {
+	return fmt.Sprintf(`Hi %s,
+
+Your client has exited the deal "%s".
+
+Status: EXITED
+
+The deal has been closed at the client's request. Any work completed will be kept.
+
+View deal: %s/deals/%s
+
+Deal ID: %s
+Time: %s
+`, name, title, frontendURL, dealID, dealID, time.Now().Format("Jan 2, 2006 15:04 MST"))
+}
+
+func milestoneMovedHTML(name, title, dealID, frontendURL string, fromOrder, toOrder int) string {
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+    <h1 style="color: white; margin: 0; font-size: 24px;">📈 Milestone Moved</h1>
+  </div>
+  <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 12px 12px; border: 1px solid #e5e7eb; border-top: none;">
+    <p>Hi {{.Name}},</p>
+    <p>The deal <strong>{{.Title}}</strong> moved from milestone #{{.FromOrder}} to #{{.ToOrder}}.</p>
+    <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #8b5cf6; margin: 20px 0;">
+      <p style="margin: 0;"><strong>Status:</strong> <span style="color: #8b5cf6; font-weight: 600;">IN PROGRESS</span></p>
+    </div>
+    <p>Please continue with the next milestone's work.</p>
+    <p style="text-align: center; margin: 30px 0;">
+      <a href="{{.FrontendURL}}/deals/{{.DealID}}" style="background: #8b5cf6; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">View Deal</a>
+    </p>
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+    <p style="font-size: 12px; color: #9ca3af;">Deal ID: {{.DealID}} • {{.Time}}</p>
+  </div>
+</body>
+</html>
+`
+	data := map[string]string{
+		"Name":        name,
+		"Title":       title,
+		"DealID":      dealID,
+		"FrontendURL": frontendURL,
+		"Time":        time.Now().Format("Jan 2, 2006 15:04 MST"),
+		"FromOrder":   fmt.Sprintf("%d", fromOrder),
+		"ToOrder":     fmt.Sprintf("%d", toOrder),
+	}
+	return renderTemplate(tmpl, data)
+}
+
+func milestoneMovedText(name, title, dealID, frontendURL string, fromOrder, toOrder int) string {
+	return fmt.Sprintf(`Hi %s,
+
+The deal "%s" moved from milestone #%d to #%d.
+
+Status: IN PROGRESS
+
+Please continue with the next milestone's work.
+
+View deal: %s/deals/%s
+
+Deal ID: %s
+Time: %s
+`, name, title, fromOrder, toOrder, frontendURL, dealID, dealID, time.Now().Format("Jan 2, 2006 15:04 MST"))
 }

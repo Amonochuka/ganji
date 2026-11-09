@@ -95,13 +95,18 @@ const (
 // of the response on purpose so a shared link never leaks the DB row handle
 // (rotation would otherwise be pointless if the UUID leaked inside the body).
 type PublicDeal struct {
-	Title          string    `json:"title"`
-	AmountSats     int64     `json:"amount_sats"`
-	SourcePlatform string    `json:"source_platform"`
-	Invoice        string    `json:"invoice"`
-	Status         Status    `json:"status"`
-	DisputeReason  string    `json:"dispute_reason"`
-	CreatedAt      time.Time `json:"created_at"`
+	Title          string          `json:"title"`
+	AmountSats     int64           `json:"amount_sats"`
+	SourcePlatform string          `json:"source_platform"`
+	Invoice        string          `json:"invoice"`
+	Status         Status          `json:"status"`
+	DisputeReason  string          `json:"dispute_reason"`
+	CreatedAt      time.Time       `json:"created_at"`
+	Milestones     []MilestoneView `json:"milestones,omitempty"`
+}
+
+type PublicMilestoneAction struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 // DealView is the safe authed view of a deal. It is what every authenticated
@@ -287,4 +292,54 @@ type Verification struct {
 	Status     VerificationStatus `json:"status"`
 	ExpiresAt  sql.NullTime       `json:"expires_at"`
 	CreatedAt  time.Time          `json:"created_at"`
+}
+
+// Milestone represents a single step within a deal. A deal may have one or
+// more milestones that break the work into step-by-step deliverables. The
+// client can review each milestone and decide to approve, exit, or reject
+// before moving to the next milestone or releasing the deal.
+type Milestone struct {
+	ID          string       `json:"id"`
+	DealID      string       `json:"deal_id"`
+	Title       string       `json:"title"`
+	AmountSats  int64        `json:"amount_sats"`
+	Order       int          `json:"order"`
+	Status      MilestoneStatus `json:"status"`
+	CompletedAt sql.NullTime `json:"completed_at,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+}
+
+// MilestoneStatus are the possible states a milestone can be in.
+type MilestoneStatus string
+
+const (
+	MilestonePending       MilestoneStatus = "pending"
+	MilestoneInProgress    MilestoneStatus = "in_progress"
+	MilestoneCompleted     MilestoneStatus = "completed"
+	MilestoneExited        MilestoneStatus = "exited"
+	MilestoneRejected      MilestoneStatus = "rejected"
+)
+
+// ValidMilestoneTransitions defines allowed milestone status transitions.
+var ValidMilestoneTransitions = map[MilestoneStatus][]MilestoneStatus{
+	MilestonePending:      {MilestoneInProgress, MilestoneExited, MilestoneRejected},
+	MilestoneInProgress:   {MilestoneCompleted, MilestoneExited, MilestoneRejected},
+	MilestoneCompleted:    {}, // terminal
+	MilestoneExited:       {}, // terminal
+	MilestoneRejected:     {}, // terminal
+}
+
+// CanMilestoneTransition checks whether moving from one milestone status to
+// another is allowed.
+func CanMilestoneTransition(from, to MilestoneStatus) bool {
+	allowed, ok := ValidMilestoneTransitions[from]
+	if !ok {
+		return false
+	}
+	for _, s := range allowed {
+		if s == to {
+			return true
+		}
+	}
+	return false
 }

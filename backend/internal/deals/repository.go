@@ -680,3 +680,126 @@ func (r *Repository) WithTx(tx *sql.Tx) DealRepository {
 func (r *Repository) BeginTx(ctx context.Context) (*sql.Tx, error) {
 	return r.db.BeginTx(ctx, nil)
 }
+
+func (r *Repository) GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error) {
+	query := `SELECT id, deal_id, title, amount_sats, "order", status, completed_at, created_at
+			  FROM milestones
+			  WHERE id = $1;`
+	row := r.q.QueryRowContext(ctx, query, milestoneID)
+	m := Milestone{}
+	err := row.Scan(
+		&m.ID,
+		&m.DealID,
+		&m.Title,
+		&m.AmountSats,
+		&m.Order,
+		&m.Status,
+		&m.CompletedAt,
+		&m.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMilestoneNotFound
+		}
+		return nil, fmt.Errorf("repository: get milestone by id: %w", err)
+	}
+	return &m, nil
+}
+
+func (r *Repository) GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error) {
+	query := `SELECT id, deal_id, title, amount_sats, "order", status, completed_at, created_at
+			  FROM milestones
+			  WHERE deal_id = $1
+			  ORDER BY "order" ASC;`
+	rows, err := r.q.QueryContext(ctx, query, dealID)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list milestones by deal: %w", err)
+	}
+	defer rows.Close()
+	var milestones []Milestone
+	for rows.Next() {
+		var m Milestone
+		err := rows.Scan(
+			&m.ID,
+			&m.DealID,
+			&m.Title,
+			&m.AmountSats,
+			&m.Order,
+			&m.Status,
+			&m.CompletedAt,
+			&m.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("repository: scan milestone: %w", err)
+		}
+		milestones = append(milestones, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate milestones: %w", err)
+	}
+	return milestones, nil
+}
+
+func (r *Repository) UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error {
+	var query string
+	var args []any
+	if completedAt != nil {
+		query = `
+			UPDATE milestones
+			SET status = $1, completed_at = $2
+			WHERE id = $3;`
+		args = []any{status, completedAt, milestoneID}
+	} else {
+		query = `
+			UPDATE milestones
+			SET status = $1
+			WHERE id = $3;`
+		args = []any{status, milestoneID}
+	}
+	result, err := r.q.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("repository: update milestone status: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: update milestone status rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrDealNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeleteMilestone(ctx context.Context, milestoneID string) error {
+	res, err := r.q.ExecContext(ctx, `DELETE FROM milestones WHERE id = $1;`, milestoneID)
+	if err != nil {
+		return fmt.Errorf("repository: delete milestone: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repository: delete milestone rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrDealNotFound
+	}
+	return nil
+}
+
+// CreateMilestone inserts a new milestone for a deal.
+func (r *Repository) CreateMilestone(ctx context.Context, milestone *Milestone) error {
+	query := `
+		INSERT INTO milestones (deal_id, title, amount_sats, "order", status)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, created_at;`
+	err := r.q.QueryRowContext(ctx, query,
+		milestone.DealID,
+		milestone.Title,
+		milestone.AmountSats,
+		milestone.Order,
+		milestone.Status,
+	).Scan(&milestone.ID, &milestone.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("repository: create milestone: %w", err)
+	}
+	return nil
+}

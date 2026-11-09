@@ -30,6 +30,13 @@ type DealRepository interface {
 	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)
 	ListDisputed(ctx context.Context) ([]Deal, error)
 
+	// Milestones
+	CreateMilestone(ctx context.Context, milestone *Milestone) error
+	GetMilestonesByDeal(ctx context.Context, dealID string) ([]Milestone, error)
+	GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error)
+	UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error
+	DeleteMilestone(ctx context.Context, milestoneID string) error
+
 	// Artifacts
 	CreateArtifact(ctx context.Context, artifact *Artifact) error
 	GetArtifactByID(ctx context.Context, id string) (*Artifact, error)
