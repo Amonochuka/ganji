@@ -287,10 +287,19 @@ func (f *fakeDealRepo) GetArtifactByID(ctx context.Context, id string) (*Artifac
 	return nil, ErrArtifactNotFound
 }
 
-func (f *fakeDealRepo) ListArtifactsByDeal(ctx context.Context, dealID string) ([]Artifact, error) {
-	out := make([]Artifact, 0, len(f.artifacts[dealID]))
-	artifacts := f.artifacts[dealID]
+func (f *fakeDealRepo) ListArtifactsByDeal(ctx context.Context, dealID string, milestoneID *string) ([]Artifact, error) {
+	artifacts, ok := f.artifacts[dealID]
+	if !ok {
+		return nil, nil
+	}
+	var out []Artifact
 	for _, a := range artifacts {
+		if milestoneID != nil && a.MilestoneID == nil {
+			continue
+		}
+		if milestoneID != nil && *milestoneID != *a.MilestoneID {
+			continue
+		}
 		out = append(out, a)
 	}
 	return out, nil

@@ -172,6 +172,10 @@ export const api = {
     return this.patch<{ milestone: MilestoneView }>(`/deals/${dealId}/milestones/${milestoneId}`, { status, completed_at: completedAt }, token);
   },
 
+  resolveMilestone(dealId: string, milestoneId: string, resolution: "release" | "refund", token: string) {
+    return this.post<{ message: string; deal: DealView }>(`/deals/${dealId}/milestones/${milestoneId}/resolve`, { resolution }, token);
+  },
+
   exitDeal(dealId: string, token: string) {
     return this.post<{ message: string }>(`/deals/${dealId}/exit`, {}, token);
   },

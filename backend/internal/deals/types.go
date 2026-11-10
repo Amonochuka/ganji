@@ -262,11 +262,12 @@ func CanTransition(from, to Status) bool {
 }
 
 type Artifact struct {
-	ID         string       `json:"id"`
-	DealID     string       `json:"deal_id"`
-	Kind       ArtifactKind `json:"kind"`
-	StorageKey string       `json:"storage_key"`
-	UploadedAt time.Time    `json:"uploaded_at"`
+	ID           string    `json:"id"`
+	DealID       string    `json:"deal_id"`
+	MilestoneID  *string   `json:"milestone_id,omitempty"`
+	Kind         ArtifactKind `json:"kind"`
+	StorageKey   string    `json:"storage_key"`
+	UploadedAt   time.Time `json:"uploaded_at"`
 }
 
 // Artifact types

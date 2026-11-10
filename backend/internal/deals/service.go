@@ -383,7 +383,7 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 		// artifacts) is a follow-up; the deal-level gate closes the current
 		// bypass so work cannot be submitted with zero artifacts. Artifacts
 		// are anchored to the freelancer's CV at deal release.
-		artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID)
+		artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID, nil)
 		if err != nil {
 			return nil, fmt.Errorf("checking submitted artifacts: %w", err)
 		}
@@ -398,17 +398,17 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 		return deal, nil
 	}
 
-	artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID)
-	if err != nil {
-		return nil, fmt.Errorf("checking submitted artifacts: %w", err)
-	}
-	if len(artifacts) == 0 {
-		return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
-	}
-	if !CanTransition(deal.Status, StatusWorkSubmitted) {
-		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusWorkSubmitted)
-	}
-	if err := s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted); err != nil {
+artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID, nil)
+		if err != nil {
+			return nil, fmt.Errorf("checking submitted artifacts: %w", err)
+		}
+		if len(artifacts) == 0 {
+			return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
+		}
+		if !CanTransition(deal.Status, StatusWorkSubmitted) {
+			return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusWorkSubmitted)
+		}
+		if err := s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted); err != nil {
 		return nil, fmt.Errorf("submitting work for deal %s: %w", dealID, err)
 	}
 	deal.Status = StatusWorkSubmitted
@@ -1511,7 +1511,7 @@ func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, email, dealID
 		return nil, ErrForbidden
 	}
 
-	return s.repo.ListArtifactsByDeal(ctx, dealID)
+	return s.repo.ListArtifactsByDeal(ctx, dealID, nil)
 }
 
 // Verifications

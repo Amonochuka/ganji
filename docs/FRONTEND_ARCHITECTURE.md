@@ -127,7 +127,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 
 - `listDisputes(token)` → `GET /disputes`
 - `resolveDispute(id, resolution, token)` → `POST /disputes/:id/resolve`
-- `resolveMilestone(dealId, milestoneId, resolution, token)` → `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve` (see redesign notes; frontend wiring for this resolver is still pending)
+- `resolveMilestone(dealId, milestoneId, resolution, token)` → `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve` (frontend wiring complete; operator resolves disputed/rejected milestone via release/refund)
 - `reconcileDeal(id, action, payoutCheckingId, token)` → `POST /deals/:id/reconcile`
 
 ### Types (selected)

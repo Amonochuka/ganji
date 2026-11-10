@@ -532,9 +532,10 @@ func (r *Repository) GetDealForUpdate(ctx context.Context, dealID string) (*Deal
 }
 
 func (r *Repository) CreateArtifact(ctx context.Context, artifact *Artifact) error {
-	query := `INSERT INTO artifacts (deal_id, kind, storage_key) VALUES ($1, $2, $3)
-		RETURNING id, uploaded_at;`
-	err := r.q.QueryRowContext(ctx, query, artifact.DealID, artifact.Kind, artifact.StorageKey).Scan(&artifact.ID, &artifact.UploadedAt)
+	query := `INSERT INTO artifacts (deal_id, milestone_id, kind, storage_key) VALUES ($1, $2, $3, $4)
+		RETURNING id, milestone_id, uploaded_at;`
+	args := []interface{}{artifact.DealID, artifact.MilestoneID, artifact.Kind, artifact.StorageKey}
+	err := r.q.QueryRowContext(ctx, query, args...).Scan(&artifact.ID, &artifact.MilestoneID, &artifact.UploadedAt)
 	if err != nil {
 		return fmt.Errorf("repository: create artifact: %w", err)
 	}
@@ -557,9 +558,9 @@ func (r *Repository) DeleteArtifact(ctx context.Context, id string) error {
 }
 
 func (r *Repository) GetArtifactByID(ctx context.Context, id string) (*Artifact, error) {
-	query := `SELECT id, deal_id, kind, storage_key, uploaded_at FROM artifacts WHERE id = $1;`
+	query := `SELECT id, deal_id, milestone_id, kind, storage_key, uploaded_at FROM artifacts WHERE id = $1;`
 	artifact := Artifact{}
-	err := r.q.QueryRowContext(ctx, query, id).Scan(&artifact.ID, &artifact.DealID, &artifact.Kind, &artifact.StorageKey, &artifact.UploadedAt)
+	err := r.q.QueryRowContext(ctx, query, id).Scan(&artifact.ID, &artifact.DealID, &artifact.MilestoneID, &artifact.Kind, &artifact.StorageKey, &artifact.UploadedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrArtifactNotFound
@@ -569,10 +570,15 @@ func (r *Repository) GetArtifactByID(ctx context.Context, id string) (*Artifact,
 	return &artifact, nil
 }
 
-func (r *Repository) ListArtifactsByDeal(ctx context.Context, dealID string) ([]Artifact, error) {
-	query := `SELECT id, deal_id, kind, storage_key, uploaded_at FROM artifacts WHERE deal_id = $1
-			ORDER BY uploaded_at ASC;`
-	rows, err := r.q.QueryContext(ctx, query, dealID)
+func (r *Repository) ListArtifactsByDeal(ctx context.Context, dealID string, milestoneID *string) ([]Artifact, error) {
+	query := `SELECT id, deal_id, milestone_id, kind, storage_key, uploaded_at FROM artifacts WHERE deal_id = $1`
+	args := []interface{}{dealID}
+	if milestoneID != nil {
+		query += ` AND milestone_id = $2`
+		args = append(args, milestoneID)
+	}
+	query += ` ORDER BY uploaded_at ASC;`
+	rows, err := r.q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("repository: list artifacts: %w", err)
 	}
@@ -580,8 +586,7 @@ func (r *Repository) ListArtifactsByDeal(ctx context.Context, dealID string) ([]
 	var artifacts []Artifact
 	for rows.Next() {
 		artifact := Artifact{}
-
-		err := rows.Scan(&artifact.ID, &artifact.DealID, &artifact.Kind, &artifact.StorageKey, &artifact.UploadedAt)
+		err := rows.Scan(&artifact.ID, &artifact.DealID, &artifact.MilestoneID, &artifact.Kind, &artifact.StorageKey, &artifact.UploadedAt)
 		if err != nil {
 			return nil, fmt.Errorf("repository: scan artifact: %w", err)
 		}

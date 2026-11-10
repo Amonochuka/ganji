@@ -66,9 +66,10 @@ api.publicExitDeal(shareToken)
 
 // Milestones (authed)
 api.createMilestone(dealId, title, amountSats, order, token)
-api.listMilestones(dealId, token)
-api.updateMilestone(dealId, milestoneId, status, completedAt, token)
-api.exitDeal(dealId, token)
+  api.listMilestones(dealId, token)
+  api.updateMilestone(dealId, milestoneId, status, completedAt, token)
+  api.resolveMilestone(dealId, milestoneId, resolution, token)
+  api.exitDeal(dealId, token)
 
 // Auth methods
 api.getMe(token)
