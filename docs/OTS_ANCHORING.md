@@ -119,7 +119,7 @@ needed; the schema is not yet in production):
 `s.cv.AnchorReleasedDeal(freelancerID, dealID)`. The two services are glued
 together in `backend/cmd/api/router.go` via `deals.WithCVAnchorer(cvService)`.
 
-In milestone mode the deal is `released` only when its final milestone is `released` (paid), so anchoring still happens once, at deal release, over the deal's artifacts. Per-milestone artifact anchoring is not implemented (milestone-mode submit currently bypasses the deal-level artifact gate — see `MILESTONE_REDESIGN_NOTES.md` Outstanding).
+In milestone mode the deal is `released` only when its final milestone is `released` (paid), so anchoring still happens once, at deal release, over the deal's artifacts. Per-milestone artifact anchoring is now possible via the `milestone_id` column on artifacts (`artifacts.milestone_id REFERENCES milestones(id) ON DELETE SET NULL`) — each artifact can be tagged to a specific milestone, and filtered via `ListArtifactsByDeal(dealID, milestoneID)`. Full CV-per-milestone anchoring (each milestone anchored to its own evidence) is a follow-up; the current anchoring happens over all deal artifacts at release.
 
 ### Step 2 — Hashing the files
 
