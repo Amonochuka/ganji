@@ -358,7 +358,7 @@ Backend autodetect: on a CLN-backed LNbits a held invoice already reports `paid`
 
 Freelancer marks their work as delivered (requires at least one artifact). Legal from `locked` and from `awaiting_payment` — the latter keeps LND-flow deals from deadlocking before the client can approve.
 
-In milestone mode, submit targets the active milestone (`funded`/`in_progress` → `work_submitted`); no deal-level artifact is required (per-milestone artifacts are not yet enforced). An `awaiting_payment` milestone blocks submit with "awaiting payment before work can be submitted".
+In milestone mode, submit targets the active milestone (`funded`/`in_progress` → `work_submitted`); no deal-level artifact is required (per-milestone artifacts are now enforced via `milestone_id` on the artifact model, backward-compatible — uploads through the existing handler have `milestone_id = nil` and are treated as deal-level). An `awaiting_payment` milestone blocks submit with "awaiting payment before work can be submitted". Per-milestone artifact scoping — artifacts may carry a `milestone_id` tag; listers can filter by it via `ListArtifactsByDeal(dealID, milestoneID)`.
 
 **Response `200`**
 ```json
