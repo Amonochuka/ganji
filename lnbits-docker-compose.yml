@@ -42,6 +42,31 @@ services:
       --restlisten=0.0.0.0:8080
       --tlsextraip=0.0.0.0
 
+  # Test-only second node used to PAY invoices (not needed in production)
+  lnd-payer:
+    image: lightninglabs/lnd:v0.21.6-beta
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./password.txt:/root/.lnd/password.txt:ro
+      - lnd-payer-data:/root/.lnd
+    depends_on:
+      - bitcoind
+    command: >-
+      --bitcoin.regtest
+      --bitcoin.active
+      --bitcoin.node=bitcoind
+      --bitcoind.rpchost=bitcoind:18443
+      --bitcoind.rpcuser=user
+      --bitcoind.rpcpass=pass
+      --bitcoind.zmqpubrawblock=tcp://bitcoind:28332
+      --bitcoind.zmqpubrawtx=tcp://bitcoind:28333
+      --restlisten=0.0.0.0:8080
+      --rpclisten=0.0.0.0:10009
+      --wallet-unlock-password-file=/root/.lnd/password.txt
+      --wallet-unlock-allow-create
+      --tlsextraip=0.0.0.0
+
   lnbits:
     image: lnbits/lnbits:latest
     ports:
@@ -52,8 +77,14 @@ services:
       - LND_REST_ENDPOINT=https://lnd:8080
       - LND_REST_CERT=/root/.lnd/tls.cert
       - LND_REST_MACAROON=/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
+      - LNBITS_DATA_FOLDER=/data
       - LNBITS_ADMIN_UI=true
       - LNBITS_ALLOW_PUBLIC_ACCOUNT_CREATION=true
+      # dev only: let LNbits call webhooks on the host (Gan-ji backend)
+      - LNBITS_CALLBACK_URL_RULES=[]
+      - LNBITS_CALLBACK_ALLOW_PRIVATE_IPS=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - lnbits-data:/data
       - ./password.txt:/root/.lnd/password.txt:ro
@@ -65,3 +96,4 @@ volumes:
   bitcoind-data:
   lnd-data:
   lnbits-data:
+  lnd-payer-data:
