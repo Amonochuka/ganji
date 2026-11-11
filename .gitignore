@@ -12,3 +12,15 @@
 
 # OS
 .DS_Store
+
+# Build artifacts / binaries
+backend/ganji-api
+backend/dbtest
+backend/bin/
+
+# Local dev secrets & scratch files
+password.txt
+cookies.txt
+
+# Node dependencies (install with npm install)
+node_modules/

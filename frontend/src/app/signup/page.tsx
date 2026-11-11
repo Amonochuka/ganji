@@ -80,7 +80,7 @@ export default function SignupPage() {
           label="Email"
           type="email"
           name="email"
-          autoComplete="email"
+          autoComplete="off"
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}
