@@ -72,6 +72,88 @@ Each package's purpose is documented in [`docs/ARCHITECTURE.md`](./docs/ARCHITEC
 
 ---
 
+## Pivot: Offline work and non-software jobs
+
+Ganji does not need to stay limited to software gigs. The same escrow + milestone model can be repurposed for any job where trust is needed, the outcome is visible, and a client wants proof before releasing funds.
+
+### Why this is a natural sideways pivot
+
+The current system already models the right primitives:
+
+- A client pays into escrow and funds stay locked until approval.
+- A freelancer/client deal can be split into milestones.
+- Each milestone can have artifacts: files, images, notes, receipts, checklists, before/after shots.
+- A public history of completed work becomes an anchored reputation layer.
+
+That is enough for jobs such as:
+
+- Construction and renovation work
+- Plumbing, electrical, HVAC, repairs, painting
+- Delivery, sourcing, and supply runs
+- Photography, filming, and event coverage
+- Cleaning, moving, and home setup services
+- Furniture assembly, installation, and custom fabrication
+
+### Example: image-backed milestone workflow
+
+A home renovation deal could look like this:
+
+1. Client and contractor agree on a total contract.
+2. Deal creates a hold invoice for the full amount or for the first milestone.
+3. Milestone 1: "Demo + site prep".
+   - Contractor uploads 3–5 photos of the site before/after
+   - A short note records the exact work done
+   - Client approves after reviewing the evidence
+4. Milestone 2: "Plumbing + electrical rough-in".
+   - Photos + invoice/proof of materials
+   - Funds unlock only after client accepts the checkpoint
+5. Final milestone: "Final finish + handover".
+   - Before/after images, final checklist, and completion notes
+   - Final payout settles after approval
+
+This keeps the trust model intact while shifting the subject matter from code to physical, visible work.
+
+### How the product should evolve for offline jobs
+
+The current architecture already supports the key behaviors; it mostly needs broader job metadata and artifact handling:
+
+- `title` and `description` remain the same, but add categories like `construction`, `supply`, `installation`, `delivery`, `repair`
+- Add a milestone content model with:
+  - `title`
+  - `amount_sats`
+  - `deliverable_summary`
+  - `proof_images[]`
+  - `completion_note`
+  - `location` or `site_address` (optional)
+- Allow uploaded image evidence instead of just text or code-submission artifacts
+- Allow client acceptance based on visual proof, not only a software “done” state
+- Keep the dispute path: if the client says the milestone is not complete, the hold remains frozen for review
+- Keep the public CV or work history, but attach asset proof to the record instead of just text summaries
+
+### Product framing
+
+The product should be positioned as a wider trust layer for work that is hard to verify remotely:
+
+- not just software delivery
+- not just remote freelancers
+- but any job where progress is visible and money should only move as proof appears
+
+In other words, Ganji becomes a generic escrow marketplace for real-world work, while the software market remains the most obvious initial wedge.
+
+### Compatibility with the current stack
+
+This fits the existing app without a full rewrite:
+
+- The same deals and milestones model still works
+- Artifact uploads already exist in the storage layer
+- The hold-invoice escrow pattern still applies
+- The approval and dispute workflow remains valid
+- The public reputation layer can show completed jobs plus proof snapshots and hashes
+
+The main differences are not on the money side; they are in the evidence model. For software, the proof is a commit or ticket closure. For offline work, the proof is a photo, a checklist, a delivery receipt, or a before/after completion record.
+
+---
+
 ## Local Development
 
 ### Backend

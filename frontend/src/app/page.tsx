@@ -13,8 +13,8 @@ export default function Home() {
     <main className="flex min-h-screen flex-col bg-vault-bg">
       <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-          <Link href="/" className="logo-gnj-sm" aria-label="Ganji Home">
-            GNJ
+          <Link href="/" className="brand-wordmark" aria-label="Ganji Home">
+            ganji
           </Link>
           <button
             className="md:hidden flex items-center gap-2 p-2 rounded-lg bg-vault-raised text-ink-300 hover:bg-vault-border"
@@ -33,7 +33,7 @@ export default function Home() {
       <section className="flex-1 flex flex-col items-center justify-center gap-12 px-6 py-20 md:py-32">
         <div className="mx-auto max-w-4xl text-center">
           <div className="mb-8 flex items-center justify-center gap-3">
-            <span className="logo-gnj">GNJ</span>
+            <span className="logo-gnj">ganji</span>
           </div>
 
           <h1 className="mb-6 font-display text-4xl md:text-5xl lg:text-6xl font-semibold hero-gradient leading-tight">

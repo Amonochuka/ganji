@@ -139,15 +139,33 @@ body {
   letter-spacing: 0.15em;
 }
 
-/* GNJ Logo - stopwatch style */
+.brand-wordmark {
+  font-family: var(--font-space-grotesk), var(--font-orbitron), sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.08em;
+  line-height: 1;
+  text-transform: lowercase;
+  color: var(--color-gold-500);
+  text-shadow: 0 0 16px rgba(196, 150, 50, 0.28);
+}
+
 .logo-gnj {
   @apply font-digital text-4xl md:text-5xl lg:text-6xl font-bold tracking-widest text-gold-500;
   text-shadow: 0 0 30px rgba(196, 150, 50, 0.4), 0 0 60px rgba(196, 150, 50, 0.2);
+  text-transform: lowercase;
 }
 
-.logo-gnj-sm {
-  @apply font-digital text-xl md:text-2xl font-bold tracking-wider text-gold-500;
-  text-shadow: 0 0 20px rgba(196, 150, 50, 0.3);
+.brand-mark,
+.logo-gnj-sm,
+.logo-gnj-sm::before,
+.logo-gnj-sm::after {
+  font-size: 0.9rem !important;
+  width: 0.72em !important;
+  height: 0.72em !important;
+  line-height: 1 !important;
+  letter-spacing: -0.12em !important;
+  transform: none !important;
 }
 
 .logo-gnj-svg {

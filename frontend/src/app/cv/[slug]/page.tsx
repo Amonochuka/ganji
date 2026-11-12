@@ -20,7 +20,18 @@ export default function CVProfilePage() {
         setIsLoading(true);
         const res = await api.getCVProfile(slug);
         setProfile(res.profile);
+        setError(null);
       } catch (err) {
+        if (err instanceof Error && "status" in err && typeof (err as { status?: number }).status === "number" && (err as { status: number }).status === 404) {
+          setProfile({
+            display_name: "Your CV",
+            slug,
+            trust_score: 0,
+            entries: [],
+          });
+          setError(null);
+          return;
+        }
         setError(err instanceof Error ? err.message : "Failed to load CV");
       } finally {
         setIsLoading(false);
@@ -39,21 +50,12 @@ export default function CVProfilePage() {
     );
   }
 
-  if (!profile || error) {
-    return (
-      <main className="flex min-h-screen flex-col bg-vault-bg">
-        <Header />
-        <div className="flex-1 flex items-center justify-center px-6">
-          <div className="text-center">
-            <p className="text-ink-500 mb-4">{error || "CV not found"}</p>
-            <Link href="/">
-              <Button variant="ghost">Home</Button>
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  const currentProfile = profile ?? {
+    display_name: "Your CV",
+    slug,
+    trust_score: 0,
+    entries: [] as CVEntry[],
+  };
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
@@ -63,23 +65,37 @@ export default function CVProfilePage() {
           <div className="vault-card p-8 vault-seam mb-8">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
-                <h1 className="font-display text-3xl font-semibold text-ink-100">{profile.display_name}</h1>
-                <p className="text-sm text-ink-500 font-mono mt-1">@{profile.slug}</p>
+                <h1 className="font-display text-3xl font-semibold text-ink-100">{currentProfile.display_name}</h1>
+                <p className="text-sm text-ink-500 font-mono mt-1">@{currentProfile.slug}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-ink-500 uppercase tracking-wide">Trust Score</p>
-                <p className="font-digital text-3xl text-gold-400">{profile.trust_score}</p>
+                <p className="font-digital text-3xl text-gold-400">{currentProfile.trust_score}</p>
               </div>
             </div>
           </div>
 
+          {error && !profile && (
+            <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+              {error}
+            </div>
+          )}
+
           <h2 className="font-display text-xl font-semibold text-ink-100 mb-4">Verified Work</h2>
-          {profile.entries.length === 0 ? (
-            <div className="vault-card p-8 text-center text-ink-500">No verified entries yet.</div>
+          {currentProfile.entries.length === 0 ? (
+            <div className="vault-card p-12 text-center">
+              <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-vault-raised flex items-center justify-center text-3xl">
+                🧾
+              </div>
+              <h3 className="font-display text-xl font-semibold text-ink-100 mb-2">No verified work yet</h3>
+              <p className="text-ink-500 max-w-md mx-auto">
+                Your CV is empty until a deal is completed and anchored. Once a job is approved, it will appear here.
+              </p>
+            </div>
           ) : (
             <div className="space-y-4">
-              {profile.entries.map((e) => (
-                <EntryCard key={e.id} entry={e} slug={profile.slug} />
+              {currentProfile.entries.map((e) => (
+                <EntryCard key={e.id} entry={e} slug={currentProfile.slug} />
               ))}
             </div>
           )}
