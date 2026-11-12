@@ -16,6 +16,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -60,13 +61,35 @@ export default function LoginPage() {
         />
         <Input
           label="Password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           name="password"
           autoComplete="current-password"
           required
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
+        <button
+          type="button"
+          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+          onClick={e => {
+            e.stopPropagation()
+            setShowPassword(prev => !prev)
+          }}
+          aria-label={showPassword ? "Hide password" : "Show password"}
+        >
+          <svg
+            className="h-4 w-4 text-gray-400"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              d="M13.586 8.414a2 2 0 1 1 2.828 2.828l-1.414 1.414-3.066 3.066 1.414 1.414L9 12.828l6.293-6.293a2 2 0 0 1 0 2.828z"
+            />
+            <path
+              d="M1 4.293a2 2 0 0 1 2.828-2.828l8.596 8.596a2 2 0 0 1-2.828 2.828L11 8.828H3a2 2 0 0 1-2-2V4.293z"
+            />
+          </svg>
+        </button>
         <Button type="submit" isLoading={isSubmitting} size="lg">
           Log in
         </Button>
