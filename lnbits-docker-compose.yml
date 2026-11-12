@@ -1,4 +1,5 @@
-# File: /home/amonoff/Projects/ganji/lnbits-docker-compose.yml
+version: '3.7'
+
 services:
   bitcoind:
     image: ruimarinho/bitcoin-core:28
@@ -10,62 +11,23 @@ services:
     command: >
       -regtest -fallbackfee=0.0001 -server
       -rpcuser=user -rpcpassword=pass
-      -rpcallowip=0.0.0.0/0 -rpcbind=0.0.0.0
+      -rpcallowip=0.0.0.0/0
       -zmqpubrawblock=tcp://0.0.0.0:28332
       -zmqpubrawtx=tcp://0.0.0.0:28333
 
   lnd:
-    # <-- official LND image (now supports wallet‑unlock flags)
-    image: lightninglabs/lnd:v0.21.6-beta
+    image: lightninglabs/lnd:v0.20.5-beta.rc1
     ports:
       - "10009:10009"
       - "8081:8080"
     volumes:
-      - ./password.txt:/root/.lnd/password.txt:ro
-      - lnd-data:/root/.lnd
-      - ./lnd.conf:/root/.lnd/lnd.conf:ro
+      - lnd-data:/lnd
+      - ./lnd.conf:/etc/lnd/lnd.conf
     depends_on:
       - bitcoind
     environment:
       - LND_NETWORK=regtest
-    command: >-
-      --bitcoin.regtest
-      --bitcoin.active
-      --bitcoin.node=bitcoind
-      --bitcoind.rpchost=bitcoind:18443
-      --bitcoind.rpcuser=user
-      --bitcoind.rpcpass=pass
-      --bitcoind.zmqpubrawblock=tcp://bitcoind:28332
-      --bitcoind.zmqpubrawtx=tcp://bitcoind:28333
-      --debuglevel=info
-      --rpclisten=0.0.0.0:10009
-      --restlisten=0.0.0.0:8080
-      --tlsextraip=0.0.0.0
-
-  # Test-only second node used to PAY invoices (not needed in production)
-  lnd-payer:
-    image: lightninglabs/lnd:v0.21.6-beta
-    ports:
-      - "8082:8080"
-    volumes:
-      - ./password.txt:/root/.lnd/password.txt:ro
-      - lnd-payer-data:/root/.lnd
-    depends_on:
-      - bitcoind
-    command: >-
-      --bitcoin.regtest
-      --bitcoin.active
-      --bitcoin.node=bitcoind
-      --bitcoind.rpchost=bitcoind:18443
-      --bitcoind.rpcuser=user
-      --bitcoind.rpcpass=pass
-      --bitcoind.zmqpubrawblock=tcp://bitcoind:28332
-      --bitcoind.zmqpubrawtx=tcp://bitcoind:28333
-      --restlisten=0.0.0.0:8080
-      --rpclisten=0.0.0.0:10009
-      --wallet-unlock-password-file=/root/.lnd/password.txt
-      --wallet-unlock-allow-create
-      --tlsextraip=0.0.0.0
+    command: --bitcoin.regtest --bitcoin.active --bitcoin.node=bitcoind --bitcoind.rpchost=bitcoind:18443 --bitcoind.rpcuser=user --bitcoind.rpcpass=pass --bitcoind.zmqpubrawblock=tcp://bitcoind:28332 --bitcoind.zmqpubrawtx=tcp://bitcoind:28333 --debuglevel=info --rpclisten=0.0.0.0:10009 --restlisten=0.0.0.0:8080 --tlsextraip=0.0.0.0
 
   lnbits:
     image: lnbits/lnbits:latest
@@ -74,21 +36,14 @@ services:
     environment:
       - LNBITS_NETWORK=regtest
       - LNBITS_BACKEND_WALLET_CLASS=LndRestWallet
-      - LND_REST_ENDPOINT=https://lnd:8080
-      - LND_REST_CERT=/root/.lnd/tls.cert
-      - LND_REST_MACAROON=/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
-      - LNBITS_DATA_FOLDER=/data
+      - LND_REST_ENDPOINT=http://lnd:8080
+      - LND_REST_CERT=/lnd/tls.cert
+      - LND_REST_MACAROON=/lnd/admin.macaroon
       - LNBITS_ADMIN_UI=true
       - LNBITS_ALLOW_PUBLIC_ACCOUNT_CREATION=true
-      # dev only: let LNbits call webhooks on the host (Gan-ji backend)
-      - LNBITS_CALLBACK_URL_RULES=[]
-      - LNBITS_CALLBACK_ALLOW_PRIVATE_IPS=true
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - lnbits-data:/data
-      - ./password.txt:/root/.lnd/password.txt:ro
-      - lnd-data:/root/.lnd:ro
+      - lnd-data:/lnd:ro
     depends_on:
       - lnd
 
@@ -96,4 +51,3 @@ volumes:
   bitcoind-data:
   lnd-data:
   lnbits-data:
-  lnd-payer-data:
