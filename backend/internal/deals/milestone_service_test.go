@@ -17,17 +17,18 @@ import (
 // tests. Handlers are keyed by path; `status` per checking_id is logged
 // via `checkStatus` map, payout counting via counters.
 type milestoneLN struct {
-	t                   *testing.T
-	settleCount         int32
-	payCount            int32
-	cancelCount         int32
-	createHoldCount     int32
-	payoutStatusByID    map[string]string // payout checking_id -> status
-	holdStatusByID      map[string]string // hold checking_id -> status (default HOLD)
+	t                    *testing.T
+	settleCount          int32
+	payCount             int32
+	cancelCount          int32
+	createHoldCount      int32
+	createHoldErr        error
+	payoutStatusByID     map[string]string // payout checking_id -> status
+	holdStatusByID       map[string]string // hold checking_id -> status (default HOLD)
 	settleAlreadySettled bool              // settle calls always return already-settled error
-	payErr              error             // forced PayInvoice error (e.g. refused vs ambiguous)
-	cancelErr           error             // forced CancelHold error
-	overridden          bool
+	payErr               error             // forced PayInvoice error (e.g. refused vs ambiguous)
+	cancelErr            error             // forced CancelHold error
+	overridden           bool
 }
 
 func newMilestoneLN(t *testing.T) *milestoneLN {
@@ -45,6 +46,11 @@ func (m *milestoneLN) handler() http.Handler {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		out, _ := body["out"].(bool)
 		if !out {
+			if m.createHoldErr != nil {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(`{"ok":false,"error_message":"` + m.createHoldErr.Error() + `"}`))
+				return
+			}
 			atomic.AddInt32(&m.createHoldCount, 1)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"checking_id":"chk-hold-` + fmt.Sprint(atomic.LoadInt32(&m.createHoldCount)) + `","payment_hash":"hash","payment_request":"lnbc-hold"}`))
@@ -115,17 +121,17 @@ func newMilestoneService(t *testing.T, repo *fakeDealRepo, ln *milestoneLN) (*Se
 // escrowMilestone builds a funded submitted milestone for release tests.
 func escrowMilestone(dealID, id string, order int, status MilestoneStatus) *Milestone {
 	return &Milestone{
-		ID:            id,
-		DealID:        dealID,
-		Title:         fmt.Sprintf("M%d", order),
-		AmountSats:    1000,
-		Order:         order,
-		Status:        status,
-		Preimage:      "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44",
-		PreimageHash:  "hash-" + id,
-		PayeeInvoice:  "lnbc-payee",
-		Invoice:       "lnbc-hold",
-		CheckingID:    "chk-hold-" + id,
+		ID:           id,
+		DealID:       dealID,
+		Title:        fmt.Sprintf("M%d", order),
+		AmountSats:   1000,
+		Order:        order,
+		Status:       status,
+		Preimage:     "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44",
+		PreimageHash: "hash-" + id,
+		PayeeInvoice: "lnbc-payee",
+		Invoice:      "lnbc-hold",
+		CheckingID:   "chk-hold-" + id,
 	}
 }
 
@@ -172,6 +178,61 @@ func TestCreateDealWithMilestonesFundsM1Only(t *testing.T) {
 	}
 	if atomic.LoadInt32(&ln.createHoldCount) != 1 {
 		t.Fatalf("expected exactly 1 hold invoice (M1), got %d", atomic.LoadInt32(&ln.createHoldCount))
+	}
+}
+
+func TestCreateDealWithMilestonesDoesNotPersistOnHoldFailure(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	ln.createHoldErr = errors.New("lnbits down")
+	service, _ := newMilestoneService(t, repo, ln)
+
+	deal := &Deal{
+		FreelancerID:   "freelancer-1",
+		ClientEmail:    "client@example.com",
+		Title:          "Build a site",
+		SourcePlatform: "telegram",
+		PayeeInvoice:   "lnbc-payee",
+	}
+	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
+
+	if err := service.CreateDealWithMilestones(context.Background(), deal, ms); err == nil {
+		t.Fatal("expected create deal to fail when the first milestone hold invoice creation fails")
+	}
+	if len(repo.deals) != 0 {
+		t.Fatalf("expected no stored deal after funding failure, got %d", len(repo.deals))
+	}
+	if len(repo.milestones) != 0 {
+		t.Fatalf("expected no stored milestones after funding failure, got %d", len(repo.milestones))
+	}
+}
+
+func TestCreateDealWithMilestonesCancelsFirstHoldOnDBFailure(t *testing.T) {
+	repo := newFakeDealRepo()
+	repo.createErr = errors.New("db down")
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+
+	deal := &Deal{
+		FreelancerID:   "freelancer-1",
+		ClientEmail:    "client@example.com",
+		Title:          "Build a site",
+		SourcePlatform: "telegram",
+		PayeeInvoice:   "lnbc-payee",
+	}
+	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
+
+	if err := service.CreateDealWithMilestones(context.Background(), deal, ms); err == nil {
+		t.Fatal("expected create deal to fail when the DB insert fails after the first hold is created")
+	}
+	if len(repo.deals) != 0 {
+		t.Fatalf("expected no stored deal after db failure, got %d", len(repo.deals))
+	}
+	if len(repo.milestones) != 0 {
+		t.Fatalf("expected no stored milestones after db failure, got %d", len(repo.milestones))
+	}
+	if atomic.LoadInt32(&ln.cancelCount) != 1 {
+		t.Fatalf("expected first hold to be cancelled on db failure, got %d cancel calls", atomic.LoadInt32(&ln.cancelCount))
 	}
 }
 

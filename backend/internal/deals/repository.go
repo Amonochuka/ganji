@@ -15,15 +15,15 @@ type DBTX interface {
 }
 
 type Repository struct {
-	db           *sql.DB
-	q            DBTX
+	db          *sql.DB
+	q           DBTX
 	preimageKey []byte
 }
 
 func NewRepository(db *sql.DB, preimageSecret string) *Repository {
 	return &Repository{
-		db:           db,
-		q:            db,
+		db:          db,
+		q:           db,
 		preimageKey: preimageKey(preimageSecret),
 	}
 }
@@ -104,6 +104,7 @@ const dealColumns = `
 
 func (r *Repository) scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, error) {
 	var (
+		preimageHash sql.NullString
 		preimage     sql.NullString
 		payeeInvoice sql.NullString
 		checkingID   sql.NullString
@@ -118,7 +119,7 @@ func (r *Repository) scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, 
 		&deal.Title,
 		&deal.AmountSats,
 		&deal.SourcePlatform,
-		&deal.PreimageHash,
+		&preimageHash,
 		&preimage,
 		&payeeInvoice,
 		&deal.Invoice,
@@ -136,6 +137,7 @@ func (r *Repository) scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, 
 	); err != nil {
 		return nil, err
 	}
+	deal.PreimageHash = preimageHash.String
 	decrypted, err := decryptPreimage(r.preimageKey, preimage.String)
 	if err != nil {
 		return nil, err
@@ -676,9 +678,9 @@ func (r *Repository) ListVerificationsByArtifact(ctx context.Context, artifactID
 
 func (r *Repository) WithTx(tx *sql.Tx) DealRepository {
 	return &Repository{
-		db:           r.db,
-		q:            tx,
-		preimageKey:  r.preimageKey,
+		db:          r.db,
+		q:           tx,
+		preimageKey: r.preimageKey,
 	}
 }
 

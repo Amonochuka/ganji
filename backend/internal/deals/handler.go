@@ -394,7 +394,6 @@ func (h *Handler) ResolveDispute(c *gin.Context) {
 // RegisterArbitrationRoutes mounts the operator-only arbitration endpoints.
 // Callers must already attach middleware.OperatorRequired to the router.
 
-
 func (h *Handler) ResolveMilestone(c *gin.Context) {
 	operatorEmail := c.GetString("email")
 	dealID := c.Param("dealID")
@@ -599,9 +598,9 @@ func (h *Handler) RotateShareLink(c *gin.Context) {
 }
 
 type createMilestoneRequest struct {
-	Title       string `json:"title" binding:"required"`
-	AmountSats  int64  `json:"amount_sats" binding:"required"`
-	Order       int    `json:"order" binding:"required,min=1"`
+	Title      string `json:"title" binding:"required"`
+	AmountSats int64  `json:"amount_sats" binding:"required"`
+	Order      int    `json:"order" binding:"required,min=1"`
 }
 
 type listMilestonesResponse struct {
@@ -662,12 +661,12 @@ func (h *Handler) CreateMilestone(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "milestone created",
 		"milestone": milestoneView{
-			ID:        milestone.ID,
-			Title:     milestone.Title,
+			ID:         milestone.ID,
+			Title:      milestone.Title,
 			AmountSats: milestone.AmountSats,
-			Order:     milestone.Order,
-			Status:    string(milestone.Status),
-			CreatedAt: milestone.CreatedAt,
+			Order:      milestone.Order,
+			Status:     string(milestone.Status),
+			CreatedAt:  milestone.CreatedAt,
 		},
 	})
 }
@@ -678,7 +677,7 @@ type milestoneStatusUpdateRequest struct {
 }
 
 type updateMilestoneResponse struct {
-	Message string          `json:"message"`
+	Message   string        `json:"message"`
 	Milestone milestoneView `json:"milestone"`
 }
 
@@ -725,13 +724,13 @@ func (h *Handler) ListMilestones(c *gin.Context) {
 			completedAtStr = milestones[i].CompletedAt.Time.Format(time.RFC3339)
 		}
 		views = append(views, MilestoneView{
-			ID:         milestones[i].ID,
-			Title:      milestones[i].Title,
-			AmountSats: milestones[i].AmountSats,
-			Order:      milestones[i].Order,
-			Status:     string(milestones[i].Status),
+			ID:          milestones[i].ID,
+			Title:       milestones[i].Title,
+			AmountSats:  milestones[i].AmountSats,
+			Order:       milestones[i].Order,
+			Status:      string(milestones[i].Status),
 			CompletedAt: &completedAtStr,
-			CreatedAt:  milestones[i].CreatedAt,
+			CreatedAt:   milestones[i].CreatedAt,
 		})
 	}
 
@@ -806,8 +805,6 @@ func (h *Handler) UpdateMilestone(c *gin.Context) {
 		"message": "milestone updated",
 	})
 }
-
-type exitDealRequest struct{}
 
 func (h *Handler) ExitDeal(c *gin.Context) {
 	userID := c.GetString("userID")

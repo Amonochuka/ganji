@@ -23,6 +23,83 @@ func mockID() string {
 	return fmt.Sprintf("mock-%d", mockIDCounter)
 }
 
+type fakeScanRow struct {
+	values []any
+}
+
+func (f *fakeScanRow) Scan(dest ...any) error {
+	for i, d := range dest {
+		if i >= len(f.values) {
+			return nil
+		}
+		switch v := f.values[i].(type) {
+		case nil:
+			switch d := d.(type) {
+			case *sql.NullString:
+				d.Valid = false
+			case *string:
+				*d = ""
+			}
+		case string:
+			switch d := d.(type) {
+			case *sql.NullString:
+				d.String = v
+				d.Valid = true
+			case *string:
+				*d = v
+			}
+		case int64:
+			switch d := d.(type) {
+			case *int64:
+				*d = v
+			}
+		case time.Time:
+			switch d := d.(type) {
+			case *time.Time:
+				*d = v
+			}
+		}
+	}
+	return nil
+}
+
+func TestRepositoryScanDealAllowsNullPreimageHash(t *testing.T) {
+	repo := &Repository{preimageKey: preimageKey("dev-secret")}
+	row := &fakeScanRow{values: []any{
+		"deal-1",
+		"freelancer-1",
+		"client@example.com",
+		"Title",
+		int64(1000),
+		"telegram",
+		nil,
+		nil,
+		nil,
+		"lnbc-invoice",
+		nil,
+		nil,
+		sql.NullTime{},
+		"share-1",
+		StatusAwaitingPayment,
+		"",
+		sql.NullTime{},
+		sql.NullTime{},
+		nil,
+		time.Now(),
+		sql.NullTime{},
+	}}
+	deal, err := repo.scanDeal(row)
+	if err != nil {
+		t.Fatalf("scanDeal should accept NULL preimage_hash: %v", err)
+	}
+	if deal.PreimageHash != "" {
+		t.Fatalf("expected empty preimage hash for null DB value, got %q", deal.PreimageHash)
+	}
+	if deal.Invoice != "lnbc-invoice" {
+		t.Fatalf("expected invoice retained, got %q", deal.Invoice)
+	}
+}
+
 // noopConnector hands back a real *sql.DB whose transactions commit/rollback
 // as no-ops. The fake repo doesn't execute SQL, so this is only needed so
 // Service.CreateDeal's BeginTx/Commit/Rollback flow works in unit tests.

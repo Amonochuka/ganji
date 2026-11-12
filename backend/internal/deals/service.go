@@ -39,7 +39,7 @@ type DealNotifier interface {
 	DealDisputed(ctx context.Context, deal *Deal)
 	DealReleased(ctx context.Context, deal *Deal)
 	DealRefunded(ctx context.Context, deal *Deal)
-	DealExited(ctx context.Context, deal *Deal) // client exited the deal
+	DealExited(ctx context.Context, deal *Deal)                             // client exited the deal
 	MilestoneMoved(ctx context.Context, deal *Deal, fromOrder, toOrder int) // client moved to next milestone
 }
 
@@ -147,7 +147,21 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	}
 	deal.ShareToken = shareToken
 
-	if !milestoneMode {
+	var first *Milestone
+	if milestoneMode && len(milestones) > 0 {
+		first = &Milestone{
+			Title:      milestones[0].Title,
+			AmountSats: milestones[0].AmountSats,
+			Order:      1,
+			Status:     MilestonePending,
+		}
+		if err := s.prepareMilestoneHold(ctx, deal, first); err != nil {
+			return err
+		}
+		deal.Invoice = first.Invoice
+		deal.CheckingID = first.CheckingID
+		deal.Status = StatusAwaitingPayment
+	} else if !milestoneMode {
 		preimage := make([]byte, 32)
 		if _, err := rand.Read(preimage); err != nil {
 			return fmt.Errorf("generating escrow preimage: %w", err)
@@ -168,6 +182,9 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
+		if first != nil && first.PreimageHash != "" {
+			s.cancelOrphanHold(ctx, first.PreimageHash)
+		}
 		if deal.PreimageHash != "" {
 			s.cancelOrphanHold(ctx, deal.PreimageHash)
 		}
@@ -177,24 +194,38 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	repo := s.repo.WithTx(tx)
 
 	if err := repo.CreateDeal(ctx, deal); err != nil {
+		if first != nil && first.PreimageHash != "" {
+			s.cancelOrphanHold(ctx, first.PreimageHash)
+		}
 		if deal.PreimageHash != "" {
 			s.cancelOrphanHold(ctx, deal.PreimageHash)
 		}
 		return err
 	}
 
-	var first *Milestone
 	for i, mi := range milestones {
 		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, Order: i + 1, Status: MilestonePending}
+		if i == 0 && first != nil {
+			*m = *first
+			m.DealID = deal.ID
+		}
 		if err := repo.CreateMilestone(ctx, m); err != nil {
+			if m.PreimageHash != "" {
+				s.cancelOrphanHold(ctx, m.PreimageHash)
+			}
 			if deal.PreimageHash != "" {
 				s.cancelOrphanHold(ctx, deal.PreimageHash)
 			}
 			return err
 		}
 		if i == 0 {
-			copyM := *m
-			first = &copyM
+			if err := repo.UpdateMilestoneEscrow(ctx, m); err != nil {
+				s.cancelOrphanHold(ctx, m.PreimageHash)
+				if deal.PreimageHash != "" {
+					s.cancelOrphanHold(ctx, deal.PreimageHash)
+				}
+				return err
+			}
 		}
 	}
 
@@ -202,14 +233,13 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		if deal.PreimageHash != "" {
 			s.cancelOrphanHold(ctx, deal.PreimageHash)
 		}
+		if first != nil && first.PreimageHash != "" {
+			s.cancelOrphanHold(ctx, first.PreimageHash)
+		}
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 
-	// Sequential per-milestone holds: fund M1 on demand after deal+milestones exist.
 	if first != nil {
-		if err := s.FundMilestone(ctx, deal, first); err != nil {
-			return err
-		}
 		deal.Invoice = first.Invoice
 		deal.CheckingID = first.CheckingID
 		deal.Status = StatusAwaitingPayment
@@ -398,17 +428,17 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 		return deal, nil
 	}
 
-artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID, nil)
-		if err != nil {
-			return nil, fmt.Errorf("checking submitted artifacts: %w", err)
-		}
-		if len(artifacts) == 0 {
-			return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
-		}
-		if !CanTransition(deal.Status, StatusWorkSubmitted) {
-			return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusWorkSubmitted)
-		}
-		if err := s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted); err != nil {
+	artifacts, err := s.repo.ListArtifactsByDeal(ctx, dealID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("checking submitted artifacts: %w", err)
+	}
+	if len(artifacts) == 0 {
+		return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
+	}
+	if !CanTransition(deal.Status, StatusWorkSubmitted) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusWorkSubmitted)
+	}
+	if err := s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted); err != nil {
 		return nil, fmt.Errorf("submitting work for deal %s: %w", dealID, err)
 	}
 	deal.Status = StatusWorkSubmitted
@@ -1984,9 +2014,7 @@ func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
 	return nil
 }
 
-// FundMilestone creates a hold invoice (escrow leg) for a milestone and stores it.
-// Sequential per-milestone holds: client pays this invoice to fund the milestone.
-func (s *Service) FundMilestone(ctx context.Context, deal *Deal, m *Milestone) error {
+func (s *Service) prepareMilestoneHold(ctx context.Context, deal *Deal, m *Milestone) error {
 	if m.AmountSats <= 0 {
 		m.AmountSats = deal.AmountSats // fallback (legacy/single)
 	}
@@ -2011,6 +2039,15 @@ func (s *Service) FundMilestone(ctx context.Context, deal *Deal, m *Milestone) e
 	m.Invoice = hold.PaymentRequest
 	m.CheckingID = hold.CheckingID
 	m.Status = MilestoneAwaitingPayment
+	return nil
+}
+
+// FundMilestone creates a hold invoice (escrow leg) for a milestone and stores it.
+// Sequential per-milestone holds: client pays this invoice to fund the milestone.
+func (s *Service) FundMilestone(ctx context.Context, deal *Deal, m *Milestone) error {
+	if err := s.prepareMilestoneHold(ctx, deal, m); err != nil {
+		return err
+	}
 	if err := s.repo.UpdateMilestoneEscrow(ctx, m); err != nil {
 		// best-effort cancel orphan
 		_, _ = s.lnbits.CancelHold(ctx, m.PreimageHash)
