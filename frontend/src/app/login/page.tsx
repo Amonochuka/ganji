@@ -59,37 +59,36 @@ export default function LoginPage() {
           value={email}
           onChange={(event) => setEmail(event.target.value)}
         />
-        <Input
-          label="Password"
-          type={showPassword ? "text" : "password"}
-          name="password"
-          autoComplete="current-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        <button
-          type="button"
-          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
-          onClick={e => {
-            e.stopPropagation()
-            setShowPassword(prev => !prev)
-          }}
-          aria-label={showPassword ? "Hide password" : "Show password"}
-        >
-          <svg
-            className="h-4 w-4 text-gray-400"
-            viewBox="0 0 20 20"
-            fill="currentColor"
+        <div className="relative">
+          <Input
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            name="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            className="pr-10"
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <button
+            type="button"
+            className="absolute right-3 top-[2.7rem] -translate-y-1/2 rounded-md p-1.5 text-ink-400 transition hover:bg-vault-raised hover:text-ink-100 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:ring-offset-2 focus:ring-offset-vault-bg disabled:pointer-events-none disabled:opacity-50"
+            onClick={e => {
+              e.stopPropagation();
+              setShowPassword(prev => !prev);
+            }}
+            aria-label={showPassword ? "Hide password" : "Show password"}
           >
-            <path
-              d="M13.586 8.414a2 2 0 1 1 2.828 2.828l-1.414 1.414-3.066 3.066 1.414 1.414L9 12.828l6.293-6.293a2 2 0 0 1 0 2.828z"
-            />
-            <path
-              d="M1 4.293a2 2 0 0 1 2.828-2.828l8.596 8.596a2 2 0 0 1-2.828 2.828L11 8.828H3a2 2 0 0 1-2-2V4.293z"
-            />
-          </svg>
-        </button>
+            <svg
+              className="h-4 w-4"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M10 3.5c4.05 0 7.45 2.42 9 6.5-1.55 4.08-5.95 6.5-9 6.5S2.55 14.08 1 10c1.55-4.08 5.95-6.5 9-6.5Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm0 2a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
+            </svg>
+          </button>
+        </div>
         <Button type="submit" isLoading={isSubmitting} size="lg">
           Log in
         </Button>
