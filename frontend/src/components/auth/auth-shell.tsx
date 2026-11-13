@@ -10,15 +10,18 @@ interface AuthShellProps {
   subtitle: string;
   children: ReactNode;
   footer?: ReactNode;
+  showLogo?: boolean;
 }
 
-export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthShellProps) {
+export function AuthShell({ eyebrow, title, subtitle, children, footer, showLogo = true }: AuthShellProps) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-vault-bg px-6 py-12">
       <header className="w-full max-w-md">
-        <Link href="/" className="logo-gnj-sm block text-center mb-8" aria-label="Ganji Home">
-          GNJ
-        </Link>
+        {showLogo && (
+          <Link href="/" className="logo-gnj-sm block text-center mb-8" aria-label="Ganji Home">
+            GNJ
+          </Link>
+        )}
         <div className="text-center">
           <p className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-gold-500">{eyebrow}</p>
           <h1 className="mb-3 font-display text-3xl font-semibold text-ink-100">{title}</h1>

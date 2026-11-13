@@ -39,6 +39,7 @@ export default function LoginPage() {
       eyebrow="Welcome back"
       title="Log in to Ganji"
       subtitle="Pick up your deals where you left them."
+      showLogo={false}
       footer={
         <>
           Don&apos;t have an account?{" "}
