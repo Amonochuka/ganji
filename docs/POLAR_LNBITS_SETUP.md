@@ -43,16 +43,21 @@ This guide explains how our local Lightning Network test environment works: **Po
 │  │                          │ blockchain data                   │    │
 │  │          ┌───────────────┴───────────────┐                   │    │
 │  │          ▼                               ▼                   │    │
-│  │  ┌──────────────┐            ┌──────────────┐               │    │
-│  │  │ LND "alice"  │◀──────────▶│ LND "bob"    │               │    │
-│  │  │ port 8081    │   p2p      │ port 8082    │               │    │
-│  │  │ ~0.1 BTC     │            │ ~5000 sats   │               │    │
-│  │  └──────────────┘            └──────────────┘               │    │
+│  │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │    │
+│  │  │ LND "Cl"     │──▶│ LND "Es"     │──▶│ LND "Pay"    │    │    │
+│  │  │ port 8083    │   │ port 8082    │   │ port 8084    │    │    │
+│  │  └──────────────┘   └──────┬───────┘   └──────┬───────┘    │    │
+│  │                           │                  │             │    │
+│  │                           │                  ▼             │    │
+│  │                           │          ┌──────────────┐     │    │
+│  │                           └─────────▶│ LND "Fre"    │     │    │
+│  │                                      │ port 8085    │     │    │
+│  │                                      └──────────────┘     │    │
 │  └──────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**The flow:** User pays a Lightning invoice → LNbits creates it via Alice's LND → the sats are held in escrow → Ganji releases or refunds them via LNbits API calls.
+**The flow:** User pays a Lightning invoice → LNbits creates it via Es LND → the sats are held in escrow → Ganji releases or refunds them via LNbits API calls.
 
 ---
 
@@ -63,7 +68,7 @@ This guide explains how our local Lightning Network test environment works: **Po
 Ganji is a freelancer escrow platform. When a client pays for work, the money must be **held** until the work is approved, then **released** to the freelancer (or **refunded** if something goes wrong). This is possible because of **hold invoices** — a special Lightning feature that LNbits exposes through LND.
 
 ```
-Ganji Backend (Go)                 LNbits                    LND (alice)
+Ganji Backend (Go)                 LNbits                    LND (Es)
      │                               │                            │
      │ POST /api/v1/payments         │                            │
      │ (with preimage_hash)          │ addholdinvoice             │
@@ -88,7 +93,7 @@ With our **LND-backed LNbits**, a paid hold invoice does **not** become `paid: t
 { "paid": false, "status": "pending", "details": { "extra": { "hold_invoice": true } } }
 ```
 
-until Ganji calls `/api/v1/payments/settle` with the preimage. The funds are already locked in an HTLC at Alice (`state: ACCEPTED` in LND), but LNbits/CLN-style `paid` detection cannot see it.
+until Ganji calls `/api/v1/payments/settle` with the preimage. The funds are already locked in an HTLC at Es (`state: ACCEPTED` in LND), but LNbits/CLN-style `paid` detection cannot see it.
 
 Consequences:
 - The LNbits webhook does not fire on payment acceptance; there is nothing to deliver yet.
@@ -101,11 +106,11 @@ This is by design in `backend/internal/deals/service.go` (`CheckPayment` comment
 
 | Network | Purpose | Who's on it |
 |---------|---------|-------------|
-| `polar-network-3_default` | Docker network Polar created for its containers | `polar-n3-backend1`, `polar-n3-alice`, `polar-n3-bob`, **our `lnbits`** |
+| `polar-network-3_default` | Docker network Polar created for its containers | `polar-n3-backend1`, `polar-n3-Cl`, `polar-n3-Es`, `polar-n3-Pay`, `polar-n3-Fre`, **our `lnbits`** |
 | Host (localhost) | Where our app runs | Frontend (3000), Backend (8080), browser |
 | LNbits REST API | Bridge between our backend and Lightning | Backend → `localhost:5000` |
 
-**Important:** LNbits runs *inside* Polar's Docker network so it can reach `polar-n3-alice:8080` using the container name as a hostname. From the host machine, we talk to LNbits at `localhost:5000`.
+**Important:** LNbits runs *inside* Polar's Docker network so it can reach `polar-n3-Es:8080` using the container name as a hostname. From the host machine, we talk to LNbits at `localhost:5000`.
 
 ---
 
@@ -116,25 +121,29 @@ This is by design in `backend/internal/deals/service.go` (`CheckPayment` comment
 - **Where its config lives:** `~/.polar/networks/3/docker-compose.yml`
 - **Where its data lives:** `~/.polar/networks/3/volumes/`
 
-Polar created a network with 3 containers:
+Polar created a network with five containers:
 
 | Container | Role | Host Ports |
 |-----------|------|------------|
 | `polar-n3-backend1` | bitcoind (fake Bitcoin blockchain) | 18446 (RPC), 19444 (P2P) |
-| `polar-n3-alice` | LND node — **our escrow wallet** | 8081 (REST), 10001 (gRPC), 9735 (P2P) |
-| `polar-n3-bob` | LND node — spare for testing | 8082 (REST), 10002 (gRPC), 9736 (P2P) |
+| `polar-n3-Cl` | LND node — client/demo payer | 8083 (REST), 10003 (gRPC), 9737 (P2P) |
+| `polar-n3-Es` | LND node — **our escrow wallet** | 8082 (REST), 10002 (gRPC), 9736 (P2P) |
+| `polar-n3-Pay` | LND node — payout relay | 8084 (REST), 10004 (gRPC), 9738 (P2P) |
+| `polar-n3-Fre` | LND node — freelancer receiving node | 8085 (REST), 10005 (gRPC), 9739 (P2P) |
 
-### Why "Alice" and "Bob"?
+### Why "Cl", "Es", "Pay", and "Fre"?
 
-Crypto tutorials traditionally use "Alice and Bob" as placeholder names (like "John Doe" in examples). Polar names its nodes that way by default. In our setup:
-- **Alice** = the node LNbits uses → holds our escrow money
-- **Bob** = spare node for testing payments between nodes
+These are role names, not tutorial placeholders:
+- **Cl** = client/demo payer
+- **Es** = escrow node backing LNbits; holds client funds until release or refund
+- **Pay** = payout relay used during final release
+- **Fre** = freelancer receiving node
 
 ---
 
 ## What Is LNbits?
 
-**LNbits** is a Lightning wallet/server with a REST API. Our Go backend doesn't talk to LND directly — it talks to LNbits, and LNbits forwards requests to Alice's LND node.
+**LNbits** is a Lightning wallet/server with a REST API. Our Go backend doesn't talk to LND directly — it talks to LNbits, and LNbits forwards requests to Es's LND node.
 
 - **Runs on:** `http://localhost:5000`
 - **API keys** (in `backend/.env`): `LNBITS_API_KEY` (create invoices) and `LNBITS_ADMIN_KEY` (settle/cancel holds)
@@ -159,7 +168,7 @@ LNbits gives us:
 docker compose -f ~/.polar/networks/3/docker-compose.yml up -d
 ```
 
-**2. Start LNbits** (wired to Polar's Alice):
+**2. Start LNbits** (wired to Polar's Es):
 
 ```bash
 docker compose -f lnbits-docker-compose.yml up -d
@@ -174,7 +183,7 @@ networks:
     external: true   # ← Polar created it; we just join it
 ```
 
-This is why LNbits can reach `https://polar-n3-alice:8080` — Docker's DNS resolves the container name to its IP within the network.
+This is why LNbits can reach `https://polar-n3-Es:8080` — Docker's DNS resolves the container name to its IP within the network.
 
 ### TLS Certificates
 
@@ -182,11 +191,11 @@ LND REST API uses HTTPS with a self-signed certificate. We mount Polar's cert an
 
 ```yaml
 volumes:
-  - /home/amonoff/.polar/networks/3/volumes/lnd/alice/tls.cert:/certs/tls.cert:ro
-  - /home/amonoff/.polar/networks/3/volumes/lnd/alice/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+  - /home/amonoff/.polar/networks/3/volumes/lnd/Es/tls.cert:/certs/tls.cert:ro
+  - /home/amonoff/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
 ```
 
-The cert includes `DNS:polar-n3-alice` in its SANs, so TLS verification succeeds.
+The cert includes `DNS:polar-n3-Es` in its SANs, so TLS verification succeeds.
 
 ---
 
@@ -228,10 +237,10 @@ Phoenixd (ACINQ's wallet) settles all invoices automatically — there's no "hol
 docker compose -f ~/.polar/networks/3/docker-compose.yml up -d
 ```
 
-**2. Verify Alice is healthy:**
+**2. Verify Es is healthy:**
 ```bash
 docker ps | grep polar
-# All three containers should say "Up"
+# All five Polar containers should say "Up"
 ```
 
 **3. Mine a fresh block only if needed** (LND won't sync if the chain tip is older than ~1 hour). Polar GUI actions such as `Deposit` and `Open Channel` mine automatically; skip this for a GUI setup unless `synced_to_chain: false`:
@@ -240,9 +249,9 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 1
 ```
 
-**4. Verify Alice is synced:**
+**4. Verify Es is synced:**
 ```bash
-docker exec polar-n3-alice lncli \
+docker exec polar-n3-Es lncli \
   --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
@@ -286,16 +295,16 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 getnewaddress
 ```
 
-### LND (Alice)
+### LND (Es)
 
 ```bash
 # Shortcut — set this in your shell to avoid typing paths
 LND="lncli --network=regtest --tlscertpath=/home/lnd/.lnd/tls.cert --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon"
 
-docker exec polar-n3-alice sh -c "$LND getinfo"           # Node status
-docker exec polar-n3-alice sh -c "$LND walletbalance"     # Balance in sats
-docker exec polar-n3-alice sh -c "$LND listinvoices"      # All invoices
-docker exec polar-n3-alice sh -c "$LND lookupinvoice HASH" # Specific hold
+docker exec polar-n3-Es sh -c "$LND getinfo"           # Node status
+docker exec polar-n3-Es sh -c "$LND walletbalance"     # Balance in sats
+docker exec polar-n3-Es sh -c "$LND listinvoices"      # All invoices
+docker exec polar-n3-Es sh -c "$LND lookupinvoice HASH" # Specific hold
 ```
 
 ### LNbits
@@ -332,7 +341,7 @@ docker run --rm -v ganji_lnbits-data:/data python:3-alpine python3 -c "
 import sqlite3,json
 c=sqlite3.connect('/data/database.sqlite3')
 updates = {
-  'lnd_rest_endpoint': json.dumps('https://polar-n3-alice:8080'),
+  'lnd_rest_endpoint': json.dumps('https://polar-n3-Es:8080'),
   'lnd_rest_cert': json.dumps('/certs/tls.cert'),
   'lnd_rest_macaroon': json.dumps('/certs/admin.macaroon'),
 }
@@ -400,14 +409,14 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
 ```
 Wait ~5-10 seconds, then check `getinfo` again.
 
-### `polar-n3-alice` is crash-looping: "parse address alice failed"
+### `polar-n3-Es` is crash-looping: "parse address Es failed"
 
 **Cause:** The container wasn't attached to Polar's Docker network (happens if Polar was closed and containers were orphaned).
 
 **Fix:** Recreate it:
 ```bash
-docker rm -f polar-n3-alice
-docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice
+docker rm -f polar-n3-Es
+docker compose -f ~/.polar/networks/3/docker-compose.yml up -d Es
 ```
 
 ### LNbits returns 520 "unexpected backend error" on invoice creation
@@ -431,9 +440,9 @@ docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice
 
 | File | Purpose |
 |------|---------|
-| `~/.polar/networks/3/docker-compose.yml` | Polar's own config (bitcoind, alice, bob) |
-| `~/.polar/networks/3/volumes/lnd/alice/tls.cert` | Alice's TLS certificate |
-| `~/.polar/networks/3/volumes/lnd/alice/data/chain/bitcoin/regtest/admin.macaroon` | Alice's admin macaroon |
+| `~/.polar/networks/3/docker-compose.yml` | Polar's own config (bitcoind, Cl, Es, Pay, Fre) |
+| `~/.polar/networks/3/volumes/lnd/Es/tls.cert` | Es's TLS certificate |
+| `~/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon` | Es's admin macaroon |
 | `lnbits-docker-compose.yml` | Our LNbits container setup (wired to Polar) |
 | `backend/.env` | LNbits URL + API keys, hold invoice settings |
 | `backend/internal/lnbits/client.go` | Hold invoice API calls |
@@ -450,9 +459,9 @@ Polar network:          ~/.polar/networks/3/docker-compose.yml
 LNbits compose:         lnbits-docker-compose.yml (this repo)
 Backend LNbits URL:     http://localhost:5000
 LNbits in Docker:       polar-network-3_default network
-Escrow node:            polar-n3-alice (LND REST :8080 in network, :8081 on host)
+Escrow node:            polar-n3-Es (LND REST :8080 in network, :8082 on host)
 Bitcoin RPC:            polar-n3-backend1:18443 (host :18446)
-Wallet balance:         ~9,989,795 sats on Alice
+Wallet balance:         check `walletbalance` on polar-n3-Es
 Hold invoices:          Required for escrow — Phoenixd doesn't support them
 
 LNbits v1.7.1 gotchas:

@@ -31,7 +31,7 @@ You mine blocks **only at setup**, not per deal. Polar's GUI handles regtest min
 
 | UI | URL / App | Login | Notes |
 |----|-----------|-------|-------|
-| **LNbits** | `http://localhost:5000` | `admin` / `lnbits_local_dev_2026` | This is Ganji's escrow wallet, backed by Polar's Alice node. Local demo only. |
+| **LNbits** | `http://localhost:5000` | `admin` / `lnbits_local_dev_2026` | This is Ganji's escrow wallet, backed by Polar's Es node. Local demo only. |
 | **Polar** | Polar desktop app | No login/password by default | It is a local desktop app. If you set a password, use your own; nothing is stored in this repo. |
 | **Ganji frontend** | `http://localhost:3000` | Signup/login with a local test user | Demo deal uses freelancer `polar@test.com` and client `local@test.com`. |
 
@@ -67,12 +67,12 @@ These are the containers created by this repo's Compose files. The backend and f
 
 | Container | Service | Compose file | Port / storage | Purpose |
 |-----------|---------|--------------|----------------|---------|
-| `ganji-lnbits-1` | `lnbits` | `lnbits-docker-compose.yml` | `5000:5000`, volume `ganji_lnbits-data` | Ganji escrow wallet, backed by Polar's Alice node. |
+| `ganji-lnbits-1` | `lnbits` | `lnbits-docker-compose.yml` | `5000:5000`, volume `ganji_lnbits-data` | Ganji escrow wallet, backed by Polar's Es node. |
 | `ganji-db-1` | `db` | `docker-compose.yml` | `5432:5432`, volume `ganji_pgdata` | Ganji Postgres. Defined locally; currently not created. |
 | `ganji-api-1` | `api` | `docker-compose.yml` | `8080:8080`, volume `ganji_uploads` | Ganji Go API. Defined locally; currently not created. |
 | `ganji-frontend-1` | `frontend` | `docker-compose.yml` | `3000:3000` | Ganji Next.js frontend. Defined locally; currently not created. |
 
-Polar network 3 is an external dependency, not created by Ganji: `polar-n3-backend1` (regtest Bitcoin), `polar-n3-alice` (escrow LND node), and `polar-n3-bob` (demo client node). Ganji's LNbits joins `polar-network-3_default` and mounts Alice's TLS cert and admin macaroon read-only.
+Polar network 3 is an external dependency, not created by Ganji: `polar-n3-backend1` (regtest Bitcoin), `polar-n3-Cl` (client), `polar-n3-Es` (escrow LND node), `polar-n3-Pay` (payout relay), and `polar-n3-Fre` (freelancer). Ganji's LNbits joins `polar-network-3_default` and mounts Es's TLS cert and admin macaroon read-only.
 
 List all Ganji-owned containers:
 
@@ -94,15 +94,15 @@ Both Compose files share the project name `ganji`. Avoid `docker compose -f dock
 
 **Polar UI** (Polar desktop app):
 1. Select network **3**.
-2. Click the **alice** node (`polar-n3-alice` — this is the escrow vault backing LNbits).
+2. Click the **Es** node (`polar-n3-Es` — this is the escrow vault backing LNbits).
 3. Open **Invoices** and find the 50,000-sat invoice with hash prefix `94cc8d6f`.
 4. While held, it should show `ACCEPTED` (not `SETTLED`) and `settle_date: 0`.
-5. Open **Channels** and select Bob's 500,000-sat channel with Alice; look for the pending incoming HTLC of **50,000 sats**.
+5. Open **Channels** and select Cl's channel with Es; look for the pending incoming HTLC.
 
 CLI equivalent (authoritative):
 
 ```bash
-docker exec polar-n3-alice lncli --network=regtest \
+docker exec polar-n3-Es lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   listinvoices
@@ -112,19 +112,19 @@ docker exec polar-n3-alice lncli --network=regtest \
 
 ## Part 1 — Start Everything (Terminal)
 
-### 1.1 Start Polar (bitcoind + Alice + Bob)
+### 1.1 Start Polar (bitcoind + Cl + Es + Pay + Fre)
 
 ```bash
 docker compose -f ~/.polar/networks/3/docker-compose.yml up -d
 docker ps --format '{{.Names}}\t{{.Status}}'
 ```
 
-Expect: `polar-n3-backend1`, `polar-n3-alice`, `polar-n3-bob` all **Up**.
+Expect: `polar-n3-backend1`, `polar-n3-Cl`, `polar-n3-Es`, `polar-n3-Pay`, `polar-n3-Fre` all **Up**.
 
-> If `polar-n3-alice` is crash-looping ("parse address alice failed"):
+> If `polar-n3-Es` is crash-looping ("parse address Es failed"):
 > ```bash
-> docker rm -f polar-n3-alice
-> docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice
+> docker rm -f polar-n3-Es
+> docker compose -f ~/.polar/networks/3/docker-compose.yml up -d Es
 > ```
 
 ### 1.2 Mine a fresh block only if needed (so LND syncs)
@@ -136,10 +136,10 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 1
 ```
 
-Verify Alice is synced (wait ~10s after mining):
+Verify Es is synced (wait ~10s after mining):
 
 ```bash
-docker exec polar-n3-alice lncli --network=regtest \
+docker exec polar-n3-Es lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   getinfo | grep synced
@@ -187,7 +187,7 @@ Bob currently has ~5,000 sats. We give him a big budget once.
 ### 2.1 Get Bob's Bitcoin address
 
 ```bash
-docker exec polar-n3-bob lncli --network=regtest \
+docker exec polar-n3-Cl lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   newaddress p2wkh
@@ -196,7 +196,7 @@ Copy the `address` value.
 
 ### 2.2 Fund Bob (Polar GUI auto-mines; CLI steps mine manually)
 
-**Polar GUI path (recommended):** click `bob` → **Deposit**. Polar mines and matures the regtest coins automatically; skip the manual mining below and just verify `walletbalance`.
+**Polar GUI path (recommended):** click `Cl` → **Deposit**. Polar mines and matures the regtest coins automatically; skip the manual mining below and just verify `walletbalance`.
 
 **CLI path:** use the commands below.
 
@@ -253,7 +253,7 @@ Mined 100 more blocks
 Wait ~10s, then check Bob's balance:
 
 ```bash
-docker exec polar-n3-bob lncli --network=regtest \
+docker exec polar-n3-Cl lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   walletbalance
@@ -265,7 +265,7 @@ Expect: `total_balance` around 500,000,000,000 sats (500 BTC).
 Get Alice's pubkey:
 
 ```bash
-docker exec polar-n3-alice lncli --network=regtest \
+docker exec polar-n3-Es lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   getinfo | grep identity_pubkey
@@ -274,7 +274,7 @@ docker exec polar-n3-alice lncli --network=regtest \
 **CLI path** — open channel from Bob (replace `ALICE_PUBKEY`):
 
 ```bash
-docker exec polar-n3-bob lncli --network=regtest \
+docker exec polar-n3-Cl lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   openchannel ALICE_PUBKEY 500000
@@ -286,7 +286,7 @@ Mine 6 confirmations **only for the CLI path** so the channel becomes active:
 docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 6
 sleep 10
-docker exec polar-n3-bob lncli --network=regtest \
+docker exec polar-n3-Cl lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   listchannels
@@ -321,7 +321,7 @@ Open `http://localhost:3000`:
   - **Client Email**: `client@example.com`
   - **Your Payee Invoice**: generate one from Bob's node (he'll be paid back):
     ```bash
-    docker exec polar-n3-bob lncli --network=regtest \
+    docker exec polar-n3-Cl lncli --network=regtest \
       --tlscertpath=/home/lnd/.lnd/tls.cert \
       --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
       addinvoice --amt=50000 --memo="freelancer payout"
@@ -341,7 +341,7 @@ Open `http://localhost:3000`:
 **CLI check (from Alice's node):**
 
 ```bash
-docker exec polar-n3-alice lncli --network=regtest \
+docker exec polar-n3-Es lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   listinvoices
@@ -355,7 +355,7 @@ Look for the invoice with `amt: 50000` and `state: OPEN` (hold invoice accepted 
 Copy the **hold invoice** (`lnbcrt...`) from the Ganji deal page, then:
 
 ```bash
-docker exec polar-n3-bob lncli --network=regtest \
+docker exec polar-n3-Cl lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   payinvoice <paste_hold_invoice_here>
@@ -383,7 +383,7 @@ The sats are now **held at Alice** — not settled yet. Bob's channel balance dr
 **Verify Alice is holding it (this is the definitive check):**
 
 ```bash
-docker exec polar-n3-alice lncli --network=regtest \
+docker exec polar-n3-Es lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   listinvoices | grep -A 8 '"r_hash": "94cc8d6f'
@@ -434,7 +434,7 @@ Behind the scenes:
 Verify:
 
 ```bash
-docker exec polar-n3-alice lncli --network=regtest \
+docker exec polar-n3-Es lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   listinvoices
@@ -463,30 +463,27 @@ This mode gives a clean, realistic escrow demo: **Bob pays, Alice holds, Carol r
 1. Open the Polar desktop app
 2. Select network 3
 3. Click **"Add Node"** → choose **LND**
-4. Name it `carol`
+4. Name it `Fre`
 5. Connect it to the existing bitcoind backend (`polar-n3-backend1`)
 6. Click **Start**
 
-**Or via CLI** — add a `carol` service to Polar's compose file:
+The `Fre` node is already part of the four-node topology used by this runbook. Start it with the rest of the Polar network:
 
 ```bash
-# See the existing alice/bob services in ~/.polar/networks/3/docker-compose.yml
-# Copy the bob service block, rename: bob → carol, ports 8082→8083, 10002→10003, 9736→9737
-# Then:
-docker compose -f ~/.polar/networks/3/docker-compose.yml up -d carol
+docker compose -f ~/.polar/networks/3/docker-compose.yml up -d Fre
 ```
 
 > ⚠️ Editing Polar's compose file while Polar GUI is open may cause conflicts. Prefer the GUI method.
 
 ### 6.3 Fund Carol (Polar GUI auto-mines; CLI steps mine manually)
 
-**Polar GUI path (recommended):** click `carol` → **Deposit**. Polar mines and matures the regtest coins automatically; skip the manual mining below and just verify `walletbalance`.
+**Polar GUI path (recommended):** click `Fre` → **Deposit**. Polar mines and matures the regtest coins automatically; skip the manual mining below and just verify `walletbalance`.
 
 **CLI path:** use the commands below.
 
 ```bash
 # Get Carol's address
-docker exec polar-n3-carol lncli --network=regtest \
+docker exec polar-n3-Fre lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   newaddress p2wkh
@@ -508,13 +505,13 @@ Bob→Alice channel already exists (Part 2.3). Now we need **Alice→Carol** so 
 
 ```bash
 # Get Carol's pubkey
-CAROL_PUBKEY=$(docker exec polar-n3-carol lncli --network=regtest \
+CAROL_PUBKEY=$(docker exec polar-n3-Fre lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   getinfo | grep identity_pubkey | cut -d'"' -f4)
 
 # Open channel Alice → Carol (Alice has plenty of funds) — CLI path
-docker exec polar-n3-alice lncli --network=regtest \
+docker exec polar-n3-Es lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   openchannel "$CAROL_PUBKEY" 500000
@@ -524,14 +521,14 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 6
 ```
 
-**Polar GUI path (recommended):** click `alice` → **Open Channel** → select `carol`. Polar mines the confirmation blocks automatically; do not run `-generate 6`. Verify with `listchannels` on Alice that the channel is `active: true`.
+**Polar GUI path (recommended):** click `Es` → **Open Channel** → select `Pay`, then `Pay` → **Open Channel** → select `Fre`. Polar mines the confirmation blocks automatically; do not run `-generate 6`. Verify with `listchannels` that each channel is `active: true`.
 
 **Go/no-go:** `active: true` on both Bob↔Alice and Alice↔Carol. If a UI-created channel is still pending after a few seconds, mine 6 blocks via `backend1` → **Actions** → **Mine**.
 
 ### 6.5 Generate the Payee Invoice from Carol
 
 ```bash
-docker exec polar-n3-carol lncli --network=regtest \
+docker exec polar-n3-Fre lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   addinvoice --amt=50000 --memo="freelancer payout to Carol"
@@ -545,7 +542,7 @@ Copy the `payment_request` (starts `lnbcrt...`) — paste this into Ganji's `pay
 3. **Approve** in Ganji → escrow settles → Alice pays Carol's invoice
 4. **Verify Carol received:**
 ```bash
-docker exec polar-n3-carol lncli --network=regtest \
+docker exec polar-n3-Fre lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   listinvoices | grep -A 5 "settled"
@@ -615,7 +612,7 @@ scripts/
 
 | Symptom | Fix |
 |---------|-----|
-| Alice crash-loops | `docker rm -f polar-n3-alice && docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice` |
+| Es crash-loops | `docker rm -f polar-n3-Es && docker compose -f ~/.polar/networks/3/docker-compose.yml up -d Es` |
 | `synced_to_chain: false` | CLI/stale chain only: mine 1 fresh block (Part 1.2). Polar GUI actions normally auto-mine. |
 | LNbits says VoidWallet | See doc → "Troubleshooting" — DB settings override env |
 | `/first_install` redirect | See doc → "Troubleshooting" |
@@ -628,7 +625,7 @@ scripts/
 | Approve returns `cannot be approved from status awaiting_payment` | Run Part 5.1 first (`SubmitWork` moves it to `work_submitted`) |
 | Approve says `You must reserve at least ...` | Set LNbits Admin → Server Settings reserve min/percent to `0`, or update `system_settings` in `ganji_lnbits-data`, then restart LNbits. Env vars alone do not override saved admin settings. |
 | Reset button disappeared after approve failed | Expected when LNbits definitively refused (`status: "failed"`): the marker auto-clears so no reset is needed. Fix the reserve, then approve again. |
-| Carol can't receive payout | Need Alice→Carol `active: true`, and Carol's payee invoice amount must be ≤ Alice's local balance on that channel. If pending, mine 6 blocks or wait for Polar UI auto-mining. |
+| Fre can't receive payout | Need Es→Pay and Pay→Fre `active: true`, and Fre's payee invoice amount must be payable by Pay. If pending, mine 6 blocks or wait for Polar UI auto-mining. |
 
 ---
 
@@ -638,11 +635,11 @@ To avoid typing the long flags every time, set a shell variable first:
 
 ```bash
 BOB="lncli --network=regtest --tlscertpath=/home/lnd/.lnd/tls.cert --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon"
-docker exec polar-n3-bob sh -c "$BOB walletbalance"
-docker exec polar-n3-bob sh -c "$BOB payinvoice <bolt11>"
+docker exec polar-n3-Cl sh -c "$BOB walletbalance"
+docker exec polar-n3-Cl sh -c "$BOB payinvoice <bolt11>"
 ```
 
-Same works for `polar-n3-alice` by swapping the container name.
+Same works for `polar-n3-Es` by swapping the container name.
 
 ---
 
