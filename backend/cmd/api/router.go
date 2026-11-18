@@ -124,6 +124,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	publicDeals.Use(middleware.RateLimitByIP(60, time.Minute))
 	publicDeals.GET("/deals/:shareToken", dealHandler.GetPublicDeal)
 	publicDeals.GET("/deals/:shareToken/milestones", dealHandler.PublicListMilestones)
+	publicDeals.POST("/deals/:shareToken/fund", dealHandler.FundDeal)
 	publicDeals.POST("/deals/:shareToken/approve", dealHandler.PublicApproveDeal)
 	publicDeals.POST("/deals/:shareToken/payout/reset", dealHandler.PublicResetPayout)
 	publicDeals.POST("/deals/:shareToken/milestones/:milestoneID/accept-next", dealHandler.PublicAcceptNextMilestone)
@@ -138,6 +139,9 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	deals.RegisterArbitrationRoutes(operator, dealHandler)
 
 	webhookService := webhook.NewService(webhook.DealReader(dealRepo), lnbitsClient, emailSvc)
+	if acceptedHoldChecker != nil {
+		webhookService.SetAcceptedHoldChecker(acceptedHoldChecker)
+	}
 	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret)
 	webhookGroup := router.Group("/webhooks")
 	webhookGroup.Use(middleware.RateLimitByIP(100, time.Minute))

@@ -267,3 +267,70 @@ func TestHandlePaymentReturnsLNbitsError(t *testing.T) {
 		t.Fatalf("expected no deal update, got %q", dealReader.updatedDealID)
 	}
 }
+
+type fakeAcceptedHoldChecker struct {
+	accepted    bool
+	err         error
+	calls       int
+	paymentHash string
+	amountSats  int64
+}
+
+func (f *fakeAcceptedHoldChecker) IsAcceptedHold(_ context.Context, paymentHash string, amountSats int64) (bool, error) {
+	f.calls++
+	f.paymentHash = paymentHash
+	f.amountSats = amountSats
+	return f.accepted, f.err
+}
+
+func TestHandlePaymentLocksOnlyAcceptedHold(t *testing.T) {
+	paymentChecker := &fakePaymentChecker{
+		payment: &lnbits.CheckPaymentResponse{Paid: true},
+	}
+	dealReader := &fakeDealReader{
+		deal: &deals.Deal{
+			ID:           "deal-123",
+			Status:       deals.StatusAwaitingPayment,
+			PreimageHash: "hash-1",
+			AmountSats:   5000,
+		},
+	}
+	checker := &fakeAcceptedHoldChecker{accepted: true}
+	service := NewService(dealReader, paymentChecker)
+	service.SetAcceptedHoldChecker(checker)
+
+	err := service.HandlePayment(context.Background(), &PaymentNotification{CheckingID: "checking-123"})
+	if err != nil {
+		t.Fatalf("expected accepted hold to be confirmed, got %v", err)
+	}
+	if dealReader.updatedStatus != deals.StatusLocked {
+		t.Fatalf("expected deal to lock, got %s", dealReader.updatedStatus)
+	}
+	if checker.calls != 1 || checker.paymentHash != "hash-1" || checker.amountSats != 5000 {
+		t.Fatalf("unexpected checker call: %+v", checker)
+	}
+}
+
+func TestHandlePaymentRejectsPaidButUnacceptedHold(t *testing.T) {
+	paymentChecker := &fakePaymentChecker{
+		payment: &lnbits.CheckPaymentResponse{Paid: true},
+	}
+	dealReader := &fakeDealReader{
+		deal: &deals.Deal{
+			ID:           "deal-123",
+			Status:       deals.StatusAwaitingPayment,
+			PreimageHash: "hash-1",
+			AmountSats:   5000,
+		},
+	}
+	service := NewService(dealReader, paymentChecker)
+	service.SetAcceptedHoldChecker(&fakeAcceptedHoldChecker{})
+
+	err := service.HandlePayment(context.Background(), &PaymentNotification{CheckingID: "checking-123"})
+	if !errors.Is(err, ErrPaymentFailed) {
+		t.Fatalf("expected unaccepted hold to be rejected, got %v", err)
+	}
+	if dealReader.updatedDealID != "" {
+		t.Fatalf("expected no deal update, got %q", dealReader.updatedDealID)
+	}
+}

@@ -41,6 +41,19 @@ type milestoneInput struct {
 	AmountSats int64  `json:"amount_sats" binding:"required"`
 }
 
+type fundDealRequest struct {
+	WalletURL   string `json:"wallet_url" binding:"required"`
+	WalletKey   string `json:"wallet_key" binding:"required"`
+	MilestoneID string `json:"milestone_id,omitempty"`
+}
+
+type generateInvoiceRequest struct {
+	WalletURL  string `json:"wallet_url" binding:"required"`
+	WalletKey  string `json:"wallet_key" binding:"required"`
+	AmountSats int64  `json:"amount_sats" binding:"required"`
+	Memo       string `json:"memo,omitempty"`
+}
+
 type createDealRequest struct {
 	Title          string           `json:"title" binding:"required"`
 	AmountSats     int64            `json:"amount_sats"` // required for legacy single-hold; derived from milestones when provided
@@ -166,6 +179,7 @@ func RegisterRoutes(router gin.IRouter, h *Handler) {
 	group.GET("/:dealID/milestones", h.ListMilestones)
 	group.PATCH("/:dealID/milestones/:milestoneID", h.UpdateMilestone)
 	group.POST("/:dealID/exit", h.ExitDeal)
+	group.POST("/wallet/invoice", h.GenerateInvoice)
 }
 
 // RegisterPublicRoutes registers the public (unauthenticated) deal routes.
@@ -174,6 +188,7 @@ func RegisterPublicRoutes(router gin.IRouter, h *Handler) {
 	public := router.Group("/public")
 	public.GET("/deals/:shareToken", h.GetPublicDeal)
 	public.GET("/deals/:shareToken/milestones", h.PublicListMilestones)
+	public.POST("/deals/:shareToken/fund", h.FundDeal)
 	public.POST("/deals/:shareToken/approve", h.PublicApproveDeal)
 	public.POST("/deals/:shareToken/payout/reset", h.PublicResetPayout)
 	public.POST("/deals/:shareToken/milestones/:milestoneID/accept-next", h.PublicAcceptNextMilestone)
@@ -516,6 +531,67 @@ func (h *Handler) UpdatePayeeInvoice(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "payee invoice updated",
 		"deal":    deal.View(),
+	})
+}
+
+func (h *Handler) GenerateInvoice(c *gin.Context) {
+	var req generateInvoiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	invoice, err := h.service.GenerateInvoice(c.Request.Context(), req.WalletURL, req.WalletKey, req.AmountSats, req.Memo)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			log.Printf("generate invoice failed: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": "could not generate invoice with linked wallet"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"invoice": gin.H{
+			"bolt11":       invoice.PaymentRequest,
+			"payment_hash": invoice.PaymentHash,
+			"checking_id":  invoice.CheckingID,
+		},
+	})
+}
+
+func (h *Handler) FundDeal(c *gin.Context) {
+	var req fundDealRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "wallet URL and key are required"})
+		return
+	}
+
+	deal, err := h.service.FundDeal(c.Request.Context(), c.Param("shareToken"), req.MilestoneID, req.WalletURL, req.WalletKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition),
+			errors.Is(err, ErrNoCheckingID):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrMilestoneNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrVerificationUnavailable):
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "escrow verification is not configured"})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			log.Printf("public funding failed: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": "funding failed; check the deal status before retrying"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "escrow funded and held",
+		"deal":    deal,
 	})
 }
 

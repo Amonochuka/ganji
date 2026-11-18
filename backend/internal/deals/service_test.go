@@ -434,6 +434,24 @@ func (f *fakeAcceptedHoldChecker) IsAcceptedHold(_ context.Context, paymentHash 
 	return f.accepted, f.err
 }
 
+type sequenceAcceptedHoldChecker struct {
+	results     []bool
+	calls       int
+	paymentHash string
+	amountSats  int64
+}
+
+func (f *sequenceAcceptedHoldChecker) IsAcceptedHold(_ context.Context, paymentHash string, amountSats int64) (bool, error) {
+	result := false
+	if f.calls < len(f.results) {
+		result = f.results[f.calls]
+	}
+	f.calls++
+	f.paymentHash = paymentHash
+	f.amountSats = amountSats
+	return result, nil
+}
+
 func TestCreateDealCreatesHoldInvoice(t *testing.T) {
 	var received struct {
 		paymentHash string
@@ -622,7 +640,7 @@ func TestSubmitWorkRejectsNonOwner(t *testing.T) {
 	}
 }
 
-func TestSubmitWorkFromAwaitingPayment(t *testing.T) {
+func TestSubmitWorkRequiresFundedDeal(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -630,13 +648,11 @@ func TestSubmitWorkFromAwaitingPayment(t *testing.T) {
 
 	service := newTestService(repo)
 
-	updated, err := service.SubmitWork(context.Background(), "freelancer-1", deal.ID)
-	if err != nil {
-		t.Fatalf("expected submit to be allowed from awaiting_payment, got %v", err)
+	if _, err := service.SubmitWork(context.Background(), "freelancer-1", deal.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected unfunded deal to reject submit, got %v", err)
 	}
-
-	if updated.Status != StatusWorkSubmitted {
-		t.Fatalf("expected status work_submitted, got %s", updated.Status)
+	if deal.Status != StatusAwaitingPayment {
+		t.Fatalf("unfunded deal must stay awaiting_payment, got %s", deal.Status)
 	}
 }
 
@@ -2218,4 +2234,137 @@ func (f *fakeDealRepo) DeleteMilestone(ctx context.Context, milestoneID string) 
 	}
 	delete(f.milestones, milestoneID)
 	return nil
+}
+
+func TestFundDealLocksAfterAcceptedHold(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.Invoice = "lnbc-hold"
+	deal.PreimageHash = "aa"
+	deal.AmountSats = 5000
+
+	escrow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer escrow.Close()
+
+	const walletKey = "wallet-admin-key"
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/payments" {
+			t.Errorf("unexpected wallet request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Api-Key"); got != walletKey {
+			t.Errorf("wallet key was not sent as admin key")
+		}
+		var body struct {
+			Out    bool   `json:"out"`
+			Bolt11 string `json:"bolt11"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode wallet request: %v", err)
+		}
+		if !body.Out || body.Bolt11 != deal.Invoice {
+			t.Errorf("unexpected wallet payment request: %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"checking_id":"out-1"}`))
+	}))
+	defer wallet.Close()
+
+	checker := &sequenceAcceptedHoldChecker{results: []bool{false, true}}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: escrow.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(checker))
+
+	publicDeal, err := service.FundDeal(context.Background(), deal.ShareToken, "", wallet.URL, walletKey)
+	if err != nil {
+		t.Fatalf("expected funding to succeed, got %v", err)
+	}
+	if publicDeal.Status != StatusLocked || repo.deals[deal.ID].Status != StatusLocked {
+		t.Fatalf("expected accepted hold to lock deal, got public=%s stored=%s", publicDeal.Status, repo.deals[deal.ID].Status)
+	}
+	if checker.calls != 2 || checker.paymentHash != deal.PreimageHash || checker.amountSats != deal.AmountSats {
+		t.Fatalf("unexpected checker calls: %+v", checker)
+	}
+}
+
+func TestFundDealRefusesUnacceptedHold(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.Invoice = "lnbc-hold"
+	deal.PreimageHash = "aa"
+	deal.AmountSats = 5000
+
+	escrow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer escrow.Close()
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"checking_id":"out-1"}`))
+	}))
+	defer wallet.Close()
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: escrow.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(&fakeAcceptedHoldChecker{}))
+
+	if _, err := service.FundDeal(context.Background(), deal.ShareToken, "", wallet.URL, "wallet-admin-key"); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected unaccepted hold to be rejected, got %v", err)
+	}
+	if deal.Status != StatusAwaitingPayment {
+		t.Fatalf("unaccepted hold must leave deal awaiting_payment, got %s", deal.Status)
+	}
+}
+
+func TestFundDealRequiresAcceptedHoldChecker(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.Invoice = "lnbc-hold"
+	deal.PreimageHash = "aa"
+	deal.AmountSats = 5000
+
+	service := newTestService(repo)
+	if _, err := service.FundDeal(context.Background(), deal.ShareToken, "", "http://localhost:5000", "key"); !errors.Is(err, ErrVerificationUnavailable) {
+		t.Fatalf("expected verification error, got %v", err)
+	}
+}
+
+func TestGenerateInvoiceUsesLinkedWallet(t *testing.T) {
+	var body struct {
+		Amount int64  `json:"amount"`
+		Memo   string `json:"memo"`
+		Unit   string `json:"unit"`
+	}
+	const invoiceKey = "invoice-key"
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/payments" {
+			t.Errorf("unexpected wallet request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Api-Key"); got != invoiceKey {
+			t.Errorf("wallet key was not sent as invoice key")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode invoice request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"payment_request":"lnbc-payout","payment_hash":"hash-1","checking_id":"checking-1"}`))
+	}))
+	defer wallet.Close()
+
+	service := newTestService(newFakeDealRepo())
+	invoice, err := service.GenerateInvoice(context.Background(), wallet.URL, invoiceKey, 1500, "payout")
+	if err != nil {
+		t.Fatalf("expected invoice generation to succeed, got %v", err)
+	}
+	if invoice.PaymentRequest != "lnbc-payout" || invoice.PaymentHash != "hash-1" || invoice.CheckingID != "checking-1" {
+		t.Fatalf("unexpected invoice response: %+v", invoice)
+	}
+	if body.Amount != 1500 || body.Memo != "payout" || body.Unit != "sat" {
+		t.Fatalf("unexpected invoice request: %+v", body)
+	}
 }

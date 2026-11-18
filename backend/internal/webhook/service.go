@@ -33,9 +33,10 @@ type EmailSender interface {
 }
 
 type Service struct {
-	repo   DealReader
-	lnbits PaymentChecker
-	email  EmailSender
+	repo          DealReader
+	lnbits        PaymentChecker
+	email         EmailSender
+	acceptedHolds deals.AcceptedHoldChecker
 }
 
 func NewService(repo DealReader, lnbitsClient PaymentChecker, emailSvcs ...EmailSender) *Service {
@@ -47,6 +48,10 @@ func NewService(repo DealReader, lnbitsClient PaymentChecker, emailSvcs ...Email
 		s.email = emailSvcs[0]
 	}
 	return s
+}
+
+func (s *Service) SetAcceptedHoldChecker(checker deals.AcceptedHoldChecker) {
+	s.acceptedHolds = checker
 }
 
 // HandlePayment processes an LNbits payment notification and transitions
@@ -72,6 +77,16 @@ func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotifi
 		}
 
 		return fmt.Errorf("lookup deal by checking_id: %w", err)
+	}
+
+	if s.acceptedHolds != nil {
+		accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
+		if err != nil {
+			return fmt.Errorf("verify accepted hold with escrow node: %w", err)
+		}
+		if !accepted {
+			return fmt.Errorf("%w: escrow node has not accepted the hold", ErrPaymentFailed)
+		}
 	}
 
 	transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, deals.StatusAwaitingPayment, deals.StatusLocked)

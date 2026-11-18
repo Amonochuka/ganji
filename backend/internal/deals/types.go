@@ -220,10 +220,9 @@ func dealsView(deals []Deal) []DealView {
 // example, and released is a terminal state with no transitions out.
 //
 // Network-as-escrow notes:
-//   - awaiting_payment -> work_submitted is allowed so LND-backed hold
-//     invoices (which never report "paid" while held) cannot deadlock:
-//     the freelancer submits, the client approves, and settle atomically
-//     proves the funds were held all along.
+//   - work can only be submitted after the backend proves funds are held.
+//     An accepted LND hold is the proof for LND-backed escrow; a freelancer
+//     cannot skip the funded state.
 //   - dispute freezes the money: a client who disputes sends the deal to
 //     'disputed' (funds stay held on the network, awaiting arbitration),
 //     it does NOT refund. The client-facing states have no direct path to
@@ -233,7 +232,7 @@ func dealsView(deals []Deal) []DealView {
 //   - a client who changes their mind after disputing can still approve:
 //     disputed -> released settles the hold and pays the freelancer.
 var ValidTransitions = map[Status][]Status{
-	StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusRefunded},
+	StatusAwaitingPayment: {StatusLocked, StatusRefunded},
 	// refunded stays reachable from awaiting_payment for the hold-expiry
 	// sweep (expired/cancelled/unfunded holds). Clients cannot reach it.
 	// disputed removed: client cannot dispute an unpaid deal.

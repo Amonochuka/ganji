@@ -151,6 +151,21 @@ func (c *Client) CreateHoldInvoice(ctx context.Context, req CreateHoldInvoiceReq
 	}, nil
 }
 
+func (c *Client) CreateInvoice(ctx context.Context, req CreateInvoiceRequest) (*Invoice, error) {
+	if req.Unit == "" {
+		req.Unit = "sat"
+	}
+	var resp CreateInvoiceResponse
+	if err := c.postJSON(ctx, "/api/v1/payments", c.apiKey, req, &resp); err != nil {
+		return nil, fmt.Errorf("create invoice: %w", err)
+	}
+	return &Invoice{
+		PaymentRequest: resp.PaymentRequest,
+		PaymentHash:    resp.PaymentHash,
+		CheckingID:     resp.CheckingID,
+	}, nil
+}
+
 // SettleHold completes a held payment by revealing the preimage. Requires
 // the wallet admin key — this is the network-level release of escrow. LNbits
 // answers with `ok:false` + an error_message for refused settles (e.g.

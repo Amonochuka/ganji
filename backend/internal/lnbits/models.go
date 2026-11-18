@@ -19,6 +19,12 @@ type CreateHoldInvoiceRequest struct {
 	Unit        string `json:"unit,omitempty"`
 }
 
+type CreateInvoiceRequest struct {
+	Amount int64  `json:"amount"`
+	Memo   string `json:"memo"`
+	Unit   string `json:"unit,omitempty"`
+}
+
 // SettleHoldRequest is the body for POST /api/v1/payments/settle. LNbits
 // verifies the preimage against the payment hash and completes the held
 // payment, releasing the funds to the wallet.
