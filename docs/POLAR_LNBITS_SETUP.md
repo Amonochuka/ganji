@@ -234,7 +234,7 @@ docker ps | grep polar
 # All three containers should say "Up"
 ```
 
-**3. Mine a fresh block** (LND won't sync if the chain tip is older than ~1 hour):
+**3. Mine a fresh block only if needed** (LND won't sync if the chain tip is older than ~1 hour). Polar GUI actions such as `Deposit` and `Open Channel` mine automatically; skip this for a GUI setup unless `synced_to_chain: false`:
 ```bash
 docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 1
@@ -393,7 +393,7 @@ curl -s -X POST -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
 
 **Cause:** The regtest chain tip is old (bitcoin-cli `getblockchaininfo` shows a timestamp from days ago). LND won't sync to a stale tip.
 
-**Fix:** Mine one fresh block:
+**Fix:** For CLI setup or a stale chain, mine one fresh block (Polar GUI actions normally auto-mine):
 ```bash
 docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 1

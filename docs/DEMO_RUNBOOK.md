@@ -17,7 +17,7 @@ Carol  = fake FREELANCER (receives the payout — gets sats in)
 - **Simple mode** (Parts 1–5): Bob plays BOTH client and freelancer — he pays in, then gets paid back. Fine for proving escrow works, but the money just returns to the same wallet.
 - **Realistic mode** (Part 6): Add a third node **Carol** as the freelancer, so the flow is truly `Bob → Alice → Carol` with three separate wallets.
 
-You mine blocks **only at setup**, not per deal. In production nobody mines — clients bring their own funded wallets.
+You mine blocks **only at setup**, not per deal. Polar's GUI handles regtest mining automatically for `Deposit` and `Open Channel`; with CLI `bitcoin-cli`/`lncli`, mine manually when the runbook says to. The source of truth is `walletbalance` and `active: true`, not a fixed manual step. In production nobody mines — clients bring their own funded wallets.
 
 > 🎯 **Long-term goal:** automate this whole demo (spin up Polar, mine, fund, open channels, create deal, pay, settle) with a single script. See [Part 7 — Automation](#part-7--automation-roadmap).
 >
@@ -127,7 +127,9 @@ Expect: `polar-n3-backend1`, `polar-n3-alice`, `polar-n3-bob` all **Up**.
 > docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice
 > ```
 
-### 1.2 Mine a fresh block (so LND syncs)
+### 1.2 Mine a fresh block only if needed (so LND syncs)
+
+Polar GUI actions normally mine automatically. Use this command only for CLI setup or if LND reports `synced_to_chain: false`.
 
 ```bash
 docker exec polar-n3-backend1 bitcoin-cli -regtest \
@@ -192,7 +194,11 @@ docker exec polar-n3-bob lncli --network=regtest \
 ```
 Copy the `address` value.
 
-### 2.2 Mine blocks to Bob (fund him with fake sats)
+### 2.2 Fund Bob (Polar GUI auto-mines; CLI steps mine manually)
+
+**Polar GUI path (recommended):** click `bob` → **Deposit**. Polar mines and matures the regtest coins automatically; skip the manual mining below and just verify `walletbalance`.
+
+**CLI path:** use the commands below.
 
 ```bash
 BOB_ADDRESS="paste_the_address_here"
@@ -238,8 +244,8 @@ Mined 100 more blocks
 
 **Key insight:** `bitcoin-cli` shows the blocks exist, but LND's `walletbalance` only counts **mature, spendable** UTXOs. Immature coinbase outputs are excluded.
 
-**Alternatives to mining 100 blocks:**
-- Use Polar GUI's "Deposit" button — it handles this automatically
+**Alternatives to mining 100 blocks (CLI path):**
+- Use Polar GUI's "Deposit" button — it handles mining and maturity automatically
 - Get coins from Alice (she has mature funds) via `sendtoaddress` — no maturity wait
 
 </details>
@@ -265,7 +271,7 @@ docker exec polar-n3-alice lncli --network=regtest \
   getinfo | grep identity_pubkey
 ```
 
-Open channel from Bob (replace `ALICE_PUBKEY`):
+**CLI path** — open channel from Bob (replace `ALICE_PUBKEY`):
 
 ```bash
 docker exec polar-n3-bob lncli --network=regtest \
@@ -274,7 +280,7 @@ docker exec polar-n3-bob lncli --network=regtest \
   openchannel ALICE_PUBKEY 500000
 ```
 
-Mine 6 confirmations so the channel becomes active:
+Mine 6 confirmations **only for the CLI path** so the channel becomes active:
 
 ```bash
 docker exec polar-n3-backend1 bitcoin-cli -regtest \
@@ -287,9 +293,13 @@ docker exec polar-n3-bob lncli --network=regtest \
 ```
 Expect the channel with `active: true`.
 
-> **Alternative (easier):** do steps 2.1–2.3 in the **Polar desktop GUI**:
-> - Click `bob` → **Deposit** to fund
-> - Click `bob` → **Open Channel** → select `alice`
+**Polar GUI path (recommended):** do steps 2.1–2.3 in the **Polar desktop GUI**:
+- Click `bob` → **Deposit** to fund (Polar mines and matures automatically)
+- Click `bob` → **Open Channel** → select `alice`
+
+Polar mines the confirmation blocks automatically; **do not run the `-generate 6` step** for a UI-created channel. Verified in this environment: channels opened from the Polar UI were `active: true` with no manual mining.
+
+**Go/no-go:** `active: true`. If a UI-created channel is still pending after a few seconds, mine 6 blocks via `backend1` → **Actions** → **Mine** (or the CLI command above).
 
 ---
 
@@ -468,7 +478,11 @@ docker compose -f ~/.polar/networks/3/docker-compose.yml up -d carol
 
 > ⚠️ Editing Polar's compose file while Polar GUI is open may cause conflicts. Prefer the GUI method.
 
-### 6.3 Fund Carol (same maturity rules apply!)
+### 6.3 Fund Carol (Polar GUI auto-mines; CLI steps mine manually)
+
+**Polar GUI path (recommended):** click `carol` → **Deposit**. Polar mines and matures the regtest coins automatically; skip the manual mining below and just verify `walletbalance`.
+
+**CLI path:** use the commands below.
 
 ```bash
 # Get Carol's address
@@ -488,7 +502,7 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 100
 ```
 
-### 6.4 Open a channel Carol → Alice (so Alice can pay Carol)
+### 6.4 Open a channel Alice → Carol (so Alice can pay Carol)
 
 Bob→Alice channel already exists (Part 2.3). Now we need **Alice→Carol** so escrow can pay out:
 
@@ -499,16 +513,20 @@ CAROL_PUBKEY=$(docker exec polar-n3-carol lncli --network=regtest \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   getinfo | grep identity_pubkey | cut -d'"' -f4)
 
-# Open channel Alice → Carol (Alice has plenty of funds)
+# Open channel Alice → Carol (Alice has plenty of funds) — CLI path
 docker exec polar-n3-alice lncli --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   openchannel "$CAROL_PUBKEY" 500000
 
-# Mine 6 confirmations
+# Mine 6 confirmations only for the CLI path
 docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 6
 ```
+
+**Polar GUI path (recommended):** click `alice` → **Open Channel** → select `carol`. Polar mines the confirmation blocks automatically; do not run `-generate 6`. Verify with `listchannels` on Alice that the channel is `active: true`.
+
+**Go/no-go:** `active: true` on both Bob↔Alice and Alice↔Carol. If a UI-created channel is still pending after a few seconds, mine 6 blocks via `backend1` → **Actions** → **Mine**.
 
 ### 6.5 Generate the Payee Invoice from Carol
 
@@ -551,12 +569,12 @@ make demo          # or: ./scripts/demo-full-flow.sh
 |------|---------------|--------------|
 | 1. Start Polar | `docker compose -f ~/.polar/networks/3/docker-compose.yml up -d` | ✅ |
 | 2. Wait for LND sync | Poll `getinfo` until `synced_to_chain: true` | ✅ |
-| 3. Mine fresh block | `bitcoin-cli -generate 1` | ✅ |
+| 3. Mine fresh block only if needed | CLI/stale chain: `bitcoin-cli -generate 1`; Polar GUI normally auto-mines | ✅ |
 | 4. Start LNbits | `docker compose -f lnbits-docker-compose.yml up -d` | ✅ |
 | 5. Start backend | `go run ./cmd/api &` + poll `/health` | ✅ |
 | 6. Start frontend | `npm run dev &` + poll port 3000 | ✅ |
-| 7. Fund Bob | `newaddress` → `generatetoaddress` → mine 100 → check balance | ✅ |
-| 8. Open channels | `openchannel` Bob→Alice, Alice→Carol → mine 6 | ✅ |
+| 7. Fund Bob | Polar GUI `Deposit` (auto-mines/matures), or CLI: `newaddress` → `generatetoaddress` → mine 100 → check balance | ✅ |
+| 8. Open channels | `openchannel` Bob→Alice, Alice→Carol; CLI: mine 6 until `active: true` (Polar GUI auto-mines) | ✅ |
 | 9. Create deal via API | `curl POST /auth/signup` + `curl POST /deals` | ✅ |
 | 10. Parse hold invoice | `jq` the response | ✅ |
 | 11. Pay from Bob | `lncli payinvoice` | ✅ |
@@ -598,18 +616,19 @@ scripts/
 | Symptom | Fix |
 |---------|-----|
 | Alice crash-loops | `docker rm -f polar-n3-alice && docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice` |
-| `synced_to_chain: false` | Mine 1 fresh block (Part 1.2) |
+| `synced_to_chain: false` | CLI/stale chain only: mine 1 fresh block (Part 1.2). Polar GUI actions normally auto-mine. |
 | LNbits says VoidWallet | See doc → "Troubleshooting" — DB settings override env |
 | `/first_install` redirect | See doc → "Troubleshooting" |
 | `Wallet not found` | Check API keys in DB match `backend/.env` |
 | `Invoice key required` | Backend sends `out: false`; manual curls must too |
-| Bob can't pay | Check channel active (`listchannels`) and Bob has sats (`walletbalance`) |
-| Bob funded but balance unchanged | Coinbase maturity — mine 100 more blocks (see Part 2.2 explanation) |
+| Bob can't pay | Check `listchannels` shows `active: true` and `walletbalance` has sats. If pending, mine 6 blocks (CLI or `backend1` → **Actions** → **Mine**). |
+| Channel created in Polar UI shows pending | Wait a few seconds; Polar auto-mines. If still pending, mine 6 blocks via `backend1` → **Actions** → **Mine**; `active: true` is the go/no-go |
+| Bob funded but balance unchanged | Coinbase maturity — CLI path: mine 100 more blocks (see Part 2.2 explanation). GUI `Deposit` auto-mines/matures. |
 | Deal still `awaiting_payment` after Bob paid | Expected on LND: hold stays `paid:false`. Check Alice invoice `ACCEPTED`; then freelancer submits work, client approves (Part 5.0–5.2) |
 | Approve returns `cannot be approved from status awaiting_payment` | Run Part 5.1 first (`SubmitWork` moves it to `work_submitted`) |
 | Approve says `You must reserve at least ...` | Set LNbits Admin → Server Settings reserve min/percent to `0`, or update `system_settings` in `ganji_lnbits-data`, then restart LNbits. Env vars alone do not override saved admin settings. |
 | Reset button disappeared after approve failed | Expected when LNbits definitively refused (`status: "failed"`): the marker auto-clears so no reset is needed. Fix the reserve, then approve again. |
-| Carol can't receive payout | Need Alice→Carol channel active, and Carol's payee invoice amount must be ≤ channel capacity |
+| Carol can't receive payout | Need Alice→Carol `active: true`, and Carol's payee invoice amount must be ≤ Alice's local balance on that channel. If pending, mine 6 blocks or wait for Polar UI auto-mining. |
 
 ---
 
