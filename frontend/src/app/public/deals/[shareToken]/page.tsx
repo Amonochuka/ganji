@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { WalletLinkDialog } from "@/components/deals/wallet-link-dialog";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { api, type PublicDeal, type DealStatus, type MilestoneView } from "@/lib/api/api-client";
 import { formatCurrency } from "@/lib/utils/format";
@@ -348,37 +349,21 @@ export default function PublicDealPage() {
         </div>
       </div>
 
-      {fundTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6" onMouseDown={closeFundDialog}>
-          <div className="vault-card w-full max-w-md p-6 vault-seam" onMouseDown={(event) => event.stopPropagation()}>
-            <h2 className="font-display text-xl font-semibold text-ink-100 mb-2">Link wallet to fund {fundTarget.label}</h2>
-            <p className="text-xs text-ink-500 mb-5">
-              Enter your LNbits wallet URL and admin key. Ganji uses them only for this payment and does not store them.
-            </p>
-            <label className="block text-sm font-medium text-ink-300 mb-1.5">Wallet URL</label>
-            <input
-              type="url"
-              value={walletURL}
-              onChange={(event) => setWalletURL(event.target.value)}
-              placeholder="http://localhost:5000"
-              className="mb-4 w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30"
-            />
-            <label className="block text-sm font-medium text-ink-300 mb-1.5">Wallet admin key</label>
-            <input
-              type="password"
-              value={walletKey}
-              onChange={(event) => setWalletKey(event.target.value)}
-              placeholder="LNbits admin key"
-              className="w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30"
-            />
-            {walletError && <p className="mt-3 text-sm text-red-400">{walletError}</p>}
-            <div className="mt-6 flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={closeFundDialog} disabled={!!actionLoading}>Cancel</Button>
-              <Button className="flex-1" onClick={handleFund} isLoading={!!actionLoading} disabled={!!actionLoading}>Pay hold invoice</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <WalletLinkDialog
+        open={!!fundTarget}
+        title={`Link wallet to fund ${fundTarget?.label ?? "this deal"}`}
+        walletURL={walletURL}
+        walletKey={walletKey}
+        keyLabel="Wallet admin key"
+        keyPlaceholder="LNbits admin key"
+        submitLabel="Pay hold invoice"
+        error={walletError}
+        isSubmitting={!!actionLoading}
+        onClose={closeFundDialog}
+        onWalletURLChange={setWalletURL}
+        onWalletKeyChange={setWalletKey}
+        onSubmit={handleFund}
+      />
     </main>
   );
 }

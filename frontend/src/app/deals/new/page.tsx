@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { WalletLinkDialog } from "@/components/deals/wallet-link-dialog";
 import { Input } from "@/components/ui/input";
 import { FormBanner } from "@/components/ui/form-banner";
 import { api, type CreateDealRequest } from "@/lib/api/api-client";
@@ -24,6 +25,7 @@ export default function CreateDealPage() {
   const [walletURL, setWalletURL] = useState("");
   const [walletKey, setWalletKey] = useState("");
   const [invoiceNotice, setInvoiceNotice] = useState<string | null>(null);
+  const [isWalletDialogOpen, setIsWalletDialogOpen] = useState(false);
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,6 +49,20 @@ export default function CreateDealPage() {
   }
   function removeMilestone(i: number) {
     setMilestones((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+  }
+
+  function openWalletDialog() {
+    setError(null);
+    setInvoiceNotice(null);
+    setWalletURL("");
+    setWalletKey("");
+    setIsWalletDialogOpen(true);
+  }
+
+  function closeWalletDialog() {
+    setIsWalletDialogOpen(false);
+    setWalletKey("");
+    setError(null);
   }
 
   async function handleGenerateInvoice() {
@@ -73,7 +89,7 @@ export default function CreateDealPage() {
         tokens!.access_token
       );
       setPayeeInvoice(res.invoice.bolt11);
-      setWalletKey("");
+      closeWalletDialog();
       setInvoiceNotice("Payout invoice generated and filled in below.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate invoice. Try again.");
@@ -202,17 +218,8 @@ export default function CreateDealPage() {
 
               <div className="rounded-lg border border-vault-border p-4 space-y-3">
                 <p className="text-sm font-medium text-ink-200">Generate payout invoice with LNbits</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-ink-500 mb-1.5">Wallet URL</label>
-                    <input type="url" value={walletURL} onChange={(e) => setWalletURL(e.target.value)} placeholder="http://localhost:5000" className="w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-ink-500 mb-1.5">Wallet invoice key</label>
-                    <input type="password" value={walletKey} onChange={(e) => setWalletKey(e.target.value)} placeholder="LNbits invoice key" className="w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30" />
-                  </div>
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={handleGenerateInvoice} isLoading={isGeneratingInvoice} disabled={isSubmitting}>
+                <p className="text-xs text-ink-500">Link your wallet when you are ready; Ganji creates the Lightning invoice and fills the field below.</p>
+                <Button type="button" variant="outline" size="sm" onClick={openWalletDialog} disabled={isSubmitting}>
                   Generate payout invoice
                 </Button>
                 {invoiceNotice && <p className="text-xs text-green-400">{invoiceNotice}</p>}
@@ -225,6 +232,22 @@ export default function CreateDealPage() {
           <p className="mt-6 text-center text-xs text-ink-700">Single-step deals use one hold invoice and appear as one final milestone. In milestone mode, M1 gets a hold invoice after creation and later milestones are funded sequentially.</p>
         </div>
       </div>
+
+      <WalletLinkDialog
+        open={isWalletDialogOpen}
+        title="Link wallet to generate payout invoice"
+        walletURL={walletURL}
+        walletKey={walletKey}
+        keyLabel="Wallet invoice key"
+        keyPlaceholder="LNbits invoice key"
+        submitLabel="Generate invoice"
+        error={error}
+        isSubmitting={isGeneratingInvoice}
+        onClose={closeWalletDialog}
+        onWalletURLChange={setWalletURL}
+        onWalletKeyChange={setWalletKey}
+        onSubmit={handleGenerateInvoice}
+      />
     </main>
   );
 }
