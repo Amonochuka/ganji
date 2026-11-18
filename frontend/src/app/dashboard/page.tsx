@@ -111,10 +111,10 @@ function DashboardHeader({ user, onLogout }: { user: { display_name: string; slu
   return (
     <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-        <Link href="/dashboard" className="logo-gnj-sm" aria-label="Ganji Dashboard">
-          GNJ
+        <Link href="/dashboard" className="brand-wordmark" aria-label="Ganji Dashboard">
+          ganji
         </Link>
-        <nav className="flex items-center gap-2">
+        <nav className="flex items-center gap-5">
           {user?.slug && (
             <Link href={`/cv/${user.slug}`} className="text-sm text-ink-300 hover:text-gold-400">
               My CV
@@ -128,11 +128,11 @@ function DashboardHeader({ user, onLogout }: { user: { display_name: string; slu
               Disputes
             </Link>
           )}
-          <span className="text-sm text-ink-300">
+          <span className="border-l border-vault-border pl-5 text-sm text-ink-300">
             {user?.display_name}
           </span>
           {onLogout && (
-            <Button variant="ghost" className="h-10 px-4" onClick={onLogout}>
+            <Button variant="ghost" className="ml-1 h-10 px-4" onClick={onLogout}>
               Log out
             </Button>
           )}

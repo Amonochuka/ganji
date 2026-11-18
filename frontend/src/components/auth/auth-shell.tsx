@@ -13,15 +13,15 @@ interface AuthShellProps {
   showLogo?: boolean;
 }
 
-export function AuthShell({ eyebrow, title, subtitle, children, footer, showLogo = true }: AuthShellProps) {
+export function AuthShell({ eyebrow, title, subtitle, children, footer }: AuthShellProps) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-vault-bg px-6 py-12">
+    <div className="relative flex min-h-screen flex-col items-center justify-center gap-8 bg-vault-bg px-6 py-12">
+      <div className="absolute inset-x-0 top-0 h-16 border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm">
+        <div className="mx-auto flex h-full max-w-7xl items-center px-6">
+          <Link href="/" className="brand-wordmark" aria-label="Ganji Home">ganji</Link>
+        </div>
+      </div>
       <header className="w-full max-w-md">
-        {showLogo && (
-          <Link href="/" className="logo-gnj-sm block text-center mb-8" aria-label="Ganji Home">
-            GNJ
-          </Link>
-        )}
         <div className="text-center">
           <p className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-gold-500">{eyebrow}</p>
           <h1 className="mb-3 font-display text-3xl font-semibold text-ink-100">{title}</h1>

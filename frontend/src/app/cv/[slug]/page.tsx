@@ -150,7 +150,10 @@ function Header() {
   return (
     <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/" className="logo-gnj-sm" aria-label="Ganji Home">GNJ</Link>
+        <Link href="/" className="brand-wordmark" aria-label="Ganji Home">ganji</Link>
+        <Link href="/dashboard" className="text-sm text-ink-300 transition hover:text-gold-400">
+          Dashboard
+        </Link>
       </div>
     </header>
   );

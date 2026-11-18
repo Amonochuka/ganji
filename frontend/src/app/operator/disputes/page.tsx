@@ -58,7 +58,7 @@ export default function OperatorDisputesPage() {
     <main className="flex min-h-screen flex-col bg-vault-bg">
       <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <Link href="/dashboard" className="logo-gnj-sm" aria-label="Ganji Dashboard">GNJ</Link>
+          <Link href="/dashboard" className="brand-wordmark" aria-label="Ganji Dashboard">ganji</Link>
           <nav className="flex items-center gap-4">
             <span className="text-sm text-ink-300 hidden sm:block">{user?.display_name}</span>
           </nav>

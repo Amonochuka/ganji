@@ -142,7 +142,7 @@ export default function PublicDealPage() {
     <main className="flex min-h-screen flex-col bg-vault-bg">
       <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-6">
-          <Link href="/" className="logo-gnj-sm" aria-label="Ganji Home">GNJ</Link>
+          <Link href="/" className="brand-wordmark" aria-label="Ganji Home">ganji</Link>
           <span className="text-xs text-ink-500">Client review (share link)</span>
         </div>
       </header>
