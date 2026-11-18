@@ -8,10 +8,12 @@
 
 - **Client** = just an email address. `deals.client_email` (lowercased) is
   captured at deal creation; the client needs **no account** to receive the
-  link, pay, and even approve delivery straight from it
-  (`POST /public/deals/:shareToken/approve` — the share token is the
-  authorization). Milestone accept/reject/exit are also share-token-only
-  (`POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`,
+  link, fund the hold with a transient linked wallet key, and even approve
+  delivery straight from it (`POST /public/deals/:shareToken/fund`,
+  `POST /public/deals/:shareToken/approve` — the share token is the
+  authorization). Payout-attempt reset and milestone accept/reject/exit are
+  also share-token-only (`POST /public/deals/:shareToken/payout/reset`,
+  `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`,
   `.../reject`, `POST /public/deals/:shareToken/exit`). Disputing still
   requires an account: they sign up with that same email; the JWT carries
   `email` (set by `middleware/auth.go`), and
@@ -31,6 +33,7 @@
 | `GET /deals` | ✓ | ✓ | ✓ |
 | `GET /deals/:id` | ✓ | ✓ | ✓ |
 | `GET /deals/:id/payment` | ✓ | ✗ | ✓ |
+| `POST /deals/wallet/invoice` | ✓ (any authenticated) | ✓ (any authenticated) | ✓ (any authenticated) |
 | `PATCH /deals/:id/status` | ✓ (non-money) | ✗ | ✓ |
 | `POST /deals/:id/submit` | ✓ | ✗ | ✗ |
 | `POST /deals/:id/approve` | ✗ | ✓ | ✗ |
@@ -40,7 +43,9 @@
 | `GET /auth/me` | ✓ (self) | ✓ (self) | ✓ (self) |
 | `GET /public/deals/:shareToken` | public (share token) | public (share token) | public (share token) |
 | `GET /public/deals/:shareToken/milestones` | public (share token) | public (share token) | public (share token) |
+| `POST /public/deals/:shareToken/fund` | public (share token) | public (share token) | public (share token) |
 | `POST /public/deals/:shareToken/approve` | public (share token) | public (share token) | public (share token) |
+| `POST /public/deals/:shareToken/payout/reset` | public (share token) | public (share token) | public (share token) |
 | `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` | public (share token) | public (share token) | public (share token) |
 | `POST /public/deals/:shareToken/milestones/:milestoneID/reject` | public (share token) | public (share token) | public (share token) |
 | `POST /public/deals/:shareToken/exit` | public (share token) | public (share token) | public (share token) |
@@ -66,11 +71,16 @@
 - Client authorization: `strings.EqualFold(deal.ClientEmail, email_from_token)` — case-insensitive
 - Freelancer authorization: `deal.FreelancerID == userID_from_token`
 - Public share link: no auth, `share_token` only
+- Linked-wallet endpoints (`POST /public/deals/:shareToken/fund`,
+  `POST /deals/wallet/invoice`): `wallet_url` must be `http`/`https` host only
+  (no userinfo/query/fragment, no allowlist); `wallet_key` is transient and is
+  never stored or logged. Funding still requires accepted-hold verification on
+  `polar-n3-Es`.
 
 ## Money-State Endpoints
 
 - **Client-scoped**: approve, dispute (must match `client_email`)
-- **Link-bearer-scoped**: public approve (`POST /public/deals/:shareToken/approve`) — share token authorizes the same settle+payout as authed approve; dispute is deliberately excluded. Public milestone accept-next/reject/exit are similarly share-token-only (reject/exit post-submission go to review, not a money move).
+- **Link-bearer-scoped**: public fund (`POST /public/deals/:shareToken/fund`) — share token plus a transient wallet key funds the hold; Es accepted-hold verification is required (`503` if the checker is unavailable). Public approve (`POST /public/deals/:shareToken/approve`) — share token authorizes the same reveal-`R`/pay-Fre flow as authed approve; dispute is deliberately excluded. Public milestone accept-next/reject/exit are similarly share-token-only (reject/exit post-submission go to review, not a money move).
 - **Freelancer-scoped**: submit, payee-invoice, share-link, milestone create/update (must be deal owner)
 - **Participant-scoped (exit)**: `POST /deals/:dealID/exit` accepts freelancer owner **or** client by email match (symmetric exit; pre-submission refunds, post-submission → dispute)
 - **Generic status PATCH**: freelancer-only but **blocked** from money states

@@ -1,7 +1,10 @@
 # Known Issues & Bugs
 
 Documented bugs and doc-vs-code mismatches, roughly ordered by severity.
-Fix these before relying on the docs' claims. (Audited 2026-09-26.)
+Fix these before relying on the docs' claims. (Originally audited 2026-09-26;
+**superseded** by the current accepted-hold verification and linked-wallet
+funding changes — several notes below are historical and reflect the older
+`paid=true`/`awaiting_payment` assumptions.)
 
 ## Fixed Issues ✅
 
@@ -71,9 +74,7 @@ Fixed: bounded by semaphore (capacity 10).
 - **Arbitration (next): operator workflow polish.** The endpoints exist but
   there is no request–response round between arbiter and parties (evidence,
   counter-claims), no notifications on dispute/resolution, and no audit
-  history beyond the single `resolved_by`/`resolved_at`. Also consider an
-  automated resolution for `awaiting_payment` disputes where nothing was ever
-  funded (the sweep already covers stale open deals).
+  history beyond the single `resolved_by`/`resolved_at`.
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
 - **Deletion endpoints.** There is no user-facing way to delete a deal, an
   artifact, or a verification — artifacts in particular accumulate forever.
@@ -88,9 +89,12 @@ Fixed: bounded by semaphore (capacity 10).
   (`c***@example.com`) outside approve/dispute contexts, or drop it from list
   views entirely.
 
-### Frontend (out of scope this session)
+### Frontend
 
 See [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md) for the full picture. The
-public-link page is wired to `POST /public/deals/:shareToken/approve` (client
-can pay and approve with no account). Settings (`/settings`, on `GET /auth/me`)
-and Live CV pages are not built.
+public-link page funds the hold through `POST /public/deals/:shareToken/fund`
+with a linked wallet and approves via `POST /public/deals/:shareToken/approve`;
+the client needs no Ganji account. A `locked` deal is labelled "Funds Held"
+(an LND-accepted hold, not a settled payment). Settings (`/settings`, on
+`GET /auth/me`) and Live CV pages are built. Status icons are inline SVGs from
+`components/ui/status-icon.tsx`, not an emoji map.

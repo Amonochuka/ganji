@@ -1,8 +1,12 @@
 # Money Flow: Network-as-Escrow (Hold Invoices)
 
 LNbits hold invoices make the Lightning Network the escrow: an incoming payment
-sits **held** under `payment_hash` until someone reveals the preimage
+sits **held** under `payment_hash` until someone reveals the preimage `R`
 (settle → to the freelancer) or tears it down (cancel → back to the client).
+
+Escrow node: `polar-n3-Es` (Alice1/Es). Client: Bob/`polar-n3-Cl`. Freelancer:
+`polar-n3-Fre`. `polar-n3-Pay`, if used, is a route-only hop Es → Fre — not a
+second Ganji wallet. The Alice2/relay workflow is reverted and is not current.
 
 ## LNbits Endpoints Ganji Uses
 
@@ -14,9 +18,14 @@ sits **held** under `payment_hash` until someone reveals the preimage
 | Cancel (refund) — `{payment_hash}` | `POST /api/v1/payments/cancel` | **admin key** |
 | Pay out — `out:true, bolt11` | `POST /api/v1/payments` | **admin key** |
 
-`Deal` stores both sides of the secret: `preimage` (raw hex — needed later to
-settle) and `preimage_hash = sha256(preimage)` (what LNbits locked the invoice
-to). The preimage and the freelancer's `payee_invoice` are persisted but never
+Not an LNbits endpoint: `internal/lnd.Client.IsAcceptedHold` queries the escrow
+node's LND REST API (`GET /v1/invoice/{payment_hash}` on Es, TLS cert +
+macaroon). It is the accepted-hold proof used before any deal is marked
+`locked` (**Funds Held**).
+
+`Deal` stores both sides of the secret: `preimage` (`R`, raw hex — revealed on
+settle) and `preimage_hash = sha256(R)` (what LNbits locked the invoice to).
+The preimage and the freelancer's `payee_invoice` are persisted but never
 serialized into API responses: **every** authenticated deal endpoint serves the
 redacted `DealView` (drops `preimage`, `payee_invoice`, and the payout-tracking
 fields), and the public share link serves `PublicDeal`. The raw `*Deal` stays
@@ -26,10 +35,10 @@ internal to the service layer.
 
 1. Validate + trim input; require a valid `client_email` and a `payee_invoice`
    (the freelancer's payout destination).
-2. Generate a 32-byte random **preimage**; store `preimage` + `preimage_hash`.
-3. Generate the shareable-link **`share_token`** (see SHARE_LINK.md).
-4. `lnbits.CreateHoldInvoice` → hold invoice + `checking_id`; `memo = title`
-   (hold expiry: `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS`, default 30 days).
+ 2. Generate a 32-byte random **preimage `R`**; store `preimage` + `preimage_hash`.
+ 3. Generate the shareable-link **`share_token`** (see SHARE_LINK.md).
+ 4. `lnbits.CreateHoldInvoice` on `polar-n3-Es` → hold invoice + `checking_id`;
+    `memo = title` (hold expiry: `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS`, default 30 days).
 5. Insert the deal (transaction, `status = awaiting_payment`).
 
 No money moves on creation.
@@ -61,20 +70,35 @@ can retry `CreateDeal` immediately with a fresh hold invoice.
 The hold-expiry sweep (every 6 h) remains the ultimate backstop: it reconciles any
 `UNPAID/EXPIRED/CANCELLED` holds to `refunded`.
 
-## Paid ⇒ Locked Detection — Autodetect, Backend Chooses
+## Accepted Hold ⇒ Locked — LND Verification on Es
 
-Whether LNbits reports a *held-but-unsettled* invoice as `paid` depends on its
-funding backend:
+LNbits `paid=true` is **not** proof that funds are locked. `CheckPayment` and the
+webhook re-query LNbits, then require `internal/lnd.Client.IsAcceptedHold`
+against `polar-n3-Es`: the invoice must match the deal's `payment_hash` and
+amount, report `State == ACCEPTED`, `settled == false`, and `settle_date == 0`.
+Only then does `awaiting_payment → locked` happen; `locked` is displayed as
+**Funds Held**. A missing checker returns `ErrVerificationUnavailable` — public
+funding (`POST /public/deals/:shareToken/fund`) maps this to HTTP `503`.
 
-- **CLN-backed LNbits** reports `paid=true` while held → deal locks the moment
-  the client pays (via webhook or poll).
-- **LND-backed LNbits** keeps `paid=false` until settled → the deal stays
-  `awaiting_payment`, and the **settle on approve** is what atomically proves
-  the funds were held.
+Work submission requires `locked`; `awaiting_payment → work_submitted` is not a
+legal transition. No CLN/LND autodetect heuristic is used.
 
-Hence the `awaiting_payment → work_submitted` edge (freelancer can submit
-before confirmed payment without deadlocking), and all locking logic is gated
-on LNbits actually reporting `paid`. No backend flags or hacks.
+## Client Wallet Funding (`POST /public/deals/:shareToken/fund`)
+
+Bob pays the hold invoice from his linked LNbits wallet (`polar-n3-Cl`). Body:
+`{wallet_url, wallet_key, milestone_id?}`. `wallet_url` must be `http`/`https`
+with a host; userinfo, query strings, and fragments are rejected, and there is
+no allowlist. `wallet_key` is transient — never stored or logged. `milestone_id`
+is optional; accepted-hold proof applies to milestone funding too, moving the
+milestone `awaiting_payment → funded → in_progress` (and the deal to `locked`)
+only after Es verification. Without it, the first unfunded milestone or the
+legacy deal-level hold is funded.
+
+## Payout Invoice Helper (`POST /deals/wallet/invoice`)
+
+Protected. Body: `{wallet_url, wallet_key, amount_sats, memo?}` (`memo` defaults
+to `Ganji payout`). Same transient-key and URL rules as public funding. Creates
+a regular invoice through the linked wallet; it does not move escrow funds.
 
 ## Paths That Move Money
 
@@ -82,42 +106,46 @@ on LNbits actually reporting `paid`. No backend flags or hacks.
 LNbits pings when an invoice is paid. The handler verifies the HMAC signature
 (`LNbits-Signature`, ±5 min replay window, skipped if `LNBITS_WEBHOOK_SECRET`
 is empty), then the service **re-queries LNbits** (the webhook body is never
-trusted) and transitions `awaiting_payment → locked`. Idempotent for
+trusted) and transitions `awaiting_payment → locked` only after the Es
+accepted-hold check succeeds. `paid=true` alone is ignored. Idempotent for
 already-locked deals.
 
 ### Poll (`GET /deals/:dealID/payment`, freelancer)
-Same reconciliation via the shared `refreshPaymentStatus`, so locking works
-even without webhooks.
+Same LNbits + Es accepted-hold reconciliation via the shared
+`refreshPaymentStatus`, so locking works even without webhooks.
 
 ### Approve (`POST /deals/:dealID/approve`, client-by-email)
-1. `SettleHold(preimage)` — reveals the preimage, funds land in Ganji's
-   LNbits wallet;
-2. `PayInvoice(payee_invoice)` — forwards to the freelancer;
+1. `SettleHold(R)` on Es — reveals the preimage, completing the held payment;
+2. `PayInvoice(payee_invoice)` — pays `polar-n3-Fre` directly (no Ganji
+   settlement wallet; `polar-n3-Pay`, if used, is route-only Es → Fre);
 3. Only then `status = released` (+ `verified_at NOW()`).
 
 Idempotent: a settle refused because it's *already settled* is treated as
 success (verified via `CheckPayment`), so a retry after a crash between the
 legs just pays out without double-settling. Payout is **never** attempted
-unless LNbits confirms the escrow is settled.
+unless LNbits confirms the escrow is settled on Es.
 
 ### Dispute (`POST /deals/:dealID/dispute`, client-by-email)
 **Moves no money.** The client must provide a written `reason` (trimmed, ≤ 2000 chars);
 the deal enters `disputed` with `dispute_reason` + `disputed_at` and the
 hold **stays held** on the network, frozen pending arbitration. Only an
-arbiter resolves it to `released` (settle + payout) or `refunded` (cancel
-hold). A client who changes their mind can still approve from `disputed`.
-This is the safeguard against pay → take the work → cancel: the funds can't
-be clawed back by the client alone.
+arbiter resolves it to `released` (reveal `R` + pay Fre) or `refunded` (cancel
+hold or expiry; no `R`). Rejecting work after submission does **not** reveal
+`R` and does **not** settle, cancel, or fail the HTLC. A client who changes
+their mind can still approve from `disputed`. This is the safeguard against
+pay → take the work → cancel: the funds can't be clawed back by the client
+alone.
 
 ### Arbitration (`GET /disputes`, `POST /disputes/:dealID/resolve`, operator-only)
-- `release` → same two network legs as approve (`settleAndPayEscrow`): settle
-  the hold, pay the freelancer, `released`. Anchors the CV like an approve.
-- `refund` → `CancelHold(preimage_hash)`, sats return to the client,
-  `refunded`. Idempotent: if the hold is already gone (retry, or already
-  cancelled/expired on the network) LNbits refuses the cancel, and we
-  confirm via `CheckPayment` that the funds are no longer committed
-  (`UNPAID`/`EXPIRED`/`CANCELLED`) before recording the refund. A hold still
-  committed that we cannot cancel stays `disputed` with an error.
+- `release` → `releaseEscrow`: the arbiter reveals `R` on Es and pays Fre
+  directly, `released`. Anchors the CV like an approve.
+- `refund` → `CancelHold(preimage_hash)`, sats return to Bob, `refunded` (or an
+  expired hold is swept back to Bob). `R` is never used for a refund.
+  Idempotent: if the hold is already gone (retry, or already cancelled/expired
+  on the network) LNbits refuses the cancel, and we confirm via `CheckPayment`
+  that the funds are no longer committed (`UNPAID`/`EXPIRED`/`CANCELLED`)
+  before recording the refund. A hold still committed that we cannot cancel
+  stays `disputed` with an error.
 - The deal must actually be `disputed` (else `ErrInvalidTransition`), and
   `resolved_by` + `resolved_at` are written **only after** the network leg
   succeeds — the DB never claims a money move the network did not make.
@@ -131,12 +159,12 @@ the original invoice expired mid-deal. Frozen after `released`/`refunded`.
 In milestone mode there is **no single upfront deal hold**. Each milestone is its own escrow leg:
 
 1. `CreateDealWithMilestones` — creates the deal + all milestones (`pending`), commits, then funds M1 only (`FundMilestone`: fresh preimage + `CreateHoldInvoice` for that milestone's amount). `deal.Invoice`/`deal.CheckingID` mirror M1 for compatibility. Later milestones stay `pending`/unfunded.
-2. Client pays the M1 invoice → `refreshMilestonePayment` (poll/refresh on `SubmitWork`/public views, not the webhook) moves `awaiting_payment → funded → in_progress`. Milestone holds have per-milestone `checking_id`/`preimage`/`payout_checking_id` columns (migration `000008`); the webhook reconciles deal-level holds only.
-3. Freelancer submits the active milestone (`funded`/`in_progress` → `work_submitted`, no deal-level artifact gate in milestone mode).
-4. Client approves (`POST /deals/:dealID/approve` or public accept-next) → `releaseMilestoneViaCanonicalPath` → `ReleaseMilestone` (see below) → `released` (paid), then funds the next milestone. Final milestone released → deal `released`.
-5. **Canonical payout (`ReleaseMilestone`)** — the only path to `released`/paid: 3 phases mirroring `releaseEscrow` (Phase 1 lock + durable `payout_attempted_at` commit; Phase 2 network legs outside the lock — `SettleHold` then `PayInvoice`; Phase 3 re-lock + record `payout_checking_id` + `released`). Policy: confirmed paid → release without re-pay; confirmed failed → clear + retry; ambiguous/in-flight/unknown → `ErrPayoutInFlight`. **Escrow mandatory:** no hold → "fund it first" error; never marked paid.
-6. **Reject → independent review:** public reject (only from `work_submitted`/`completed`) does **not** auto-refund. Milestone → `disputed`, hold stays. Operator `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve`: `release` → canonical `ReleaseMilestone` + advance sequence; `refund` → `CancelHold` + `refunded` (idempotent; does not auto-fund next).
-7. **Exit (symmetric):** pre-submission → cancel/refund the open hold(s), not paid; post-submission → no money move, milestone → `disputed` (hold stays) for review. Legacy single-hold deals follow the same rule.
+ 2. Client pays the M1 invoice — directly or via `POST /public/deals/:shareToken/fund` with optional `milestone_id` → accepted-hold verification on Es moves `awaiting_payment → funded → in_progress` (LNbits `paid=true` alone is not enough for public funding). `refreshMilestonePayment` runs on `SubmitWork`/public views, not the webhook. Milestone holds have per-milestone `checking_id`/`preimage`/`payout_checking_id` columns (migration `000008`); the webhook reconciles deal-level holds only.
+ 3. Freelancer submits the active milestone (`funded`/`in_progress` → `work_submitted`) with at least one deal-level artifact, same as the legacy flow; `awaiting_payment` blocks submit.
+ 4. Client approves (`POST /deals/:dealID/approve` or public accept-next; both refresh the accepted hold on Es first) → `releaseMilestoneViaCanonicalPath` → `ReleaseMilestone` (see below) → `released` (paid), then funds the next milestone. Final milestone released → deal `released`.
+ 5. **Canonical payout (`ReleaseMilestone`)** — the only path to `released`/paid: 3 phases mirroring `releaseEscrow` (Phase 1 lock + durable `payout_attempted_at` commit; Phase 2 network legs outside the lock — `SettleHold(R)` on Es then `PayInvoice` to Fre directly; Phase 3 re-lock + record `payout_checking_id` + `released`). Policy: confirmed paid → release without re-pay; confirmed failed → clear + retry; ambiguous/in-flight/unknown → `ErrPayoutInFlight`. **Escrow mandatory:** no hold → "fund it first" error; never marked paid.
+ 6. **Reject → independent review:** public reject (only from `work_submitted`/`completed`) does **not** reveal `R` and does **not** settle, cancel, or fail the HTLC; no auto-refund. Milestone → `disputed`, hold stays. Operator `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve`: `release` → canonical `ReleaseMilestone` (arbiter reveals `R`, pays Fre) + advance sequence; `refund` → `CancelHold` + `refunded` (idempotent, no `R`; does not auto-fund next).
+ 7. **Exit (symmetric):** pre-submission → cancel/refund the open hold(s) (or let expiry return them), not paid to Fre; post-submission → no money move, milestone → `disputed` (hold stays) for review. Refund never uses `R`. Legacy single-hold deals follow the same rule.
 
 `completed` (if used) = approved/payout-pending, never paid; only `released` means money moved (terminal).
 

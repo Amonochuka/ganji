@@ -2,6 +2,8 @@
 
 This guide explains how our local Lightning Network test environment works: **Polar** (our Bitcoin/Lightning sandbox) + **LNbits** (our payment API) + **Ganji** (our app).
 
+> **Current escrow model.** Holds live on `polar-n3-Es` (Alice1/Es); the client is Bob/`polar-n3-Cl`, the freelancer is `polar-n3-Fre`. `polar-n3-Pay` is route-only Es → Fre if needed, not a second Ganji wallet. The Alice2/relay workflow was reverted and is not current. `locked` (shown as **Funds Held**) requires accepted-hold verification on Es — LNbits `paid=true` alone is not proof of funds.
+
 ---
 
 ## Table of Contents
@@ -29,30 +31,22 @@ This guide explains how our local Lightning Network test environment works: **Po
 │  │   Browser    │    │   Backend    │    │    LNbits API         │  │
 │  │  (Next.js)   │───▶│   (Go API)   │───▶│   (port 5000)         │  │
 │  │  port 3000   │    │  port 8080   │    │                       │  │
-│  └──────────────┘    └──────────────┘    └──────────┬────────────┘  │
-│                                                       │               │
-│         ┌─────────────────────────────────────────────┘               │
-│         │  LNbits uses LND REST Wallet backend                       │
-│         ▼                                                             │
-│  ┌──────────────────────────────────────────────────────────────┐    │
-│  │              POLAR NETWORK (Docker)                           │    │
-│  │  ┌────────────────────────────────────────────────────────┐  │    │
-│  │  │  bitcoind (regtest)  —  the fake Bitcoin blockchain     │  │    │
-│  │  │  port 18446 (RPC)                                       │  │    │
-│  │  └───────────────────────┬────────────────────────────────┘  │    │
-│  │                          │ blockchain data                   │    │
-│  │          ┌───────────────┴───────────────┐                   │    │
-│  │          ▼                               ▼                   │    │
-│  │  ┌──────────────┐            ┌──────────────┐               │    │
-│  │  │ LND "alice"  │◀──────────▶│ LND "bob"    │               │    │
-│  │  │ port 8081    │   p2p      │ port 8082    │               │    │
-│  │  │ ~0.1 BTC     │            │ ~5000 sats   │               │    │
-│  │  └──────────────┘            └──────────────┘               │    │
-│  └──────────────────────────────────────────────────────────────┘    │
+│  └──────────────┘    └──────┬───────┘    └──────────┬────────────┘  │
+│                             │ LND REST checker       │ LND REST backend│
+│                             │ (accepted hold)        │ (hold/settle/pay)│
+└─────────────────────────────┼────────────────────────┼─────────────────┘
+                              ▼                        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      POLAR NETWORK (Docker)                          │
+│  bitcoind (regtest) — the fake Bitcoin blockchain                    │
+│                                                                       │
+│  polar-n3-Es (Alice1/Es) — escrow LND node (REST :8080 in network)    │
+│  polar-n3-Cl (Bob) — client wallet    polar-n3-Fre — freelancer      │
+│  polar-n3-Pay — route-only Es → Fre if needed, not a Ganji wallet    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**The flow:** User pays a Lightning invoice → LNbits creates it via Alice's LND → the sats are held in escrow → Ganji releases or refunds them via LNbits API calls.
+**The flow:** Client funds the hold from the linked wallet (Bob/`polar-n3-Cl`) → the backend pays the Es hold invoice transiently with that wallet's admin key → LND on Es reports an accepted hold → Ganji locks the deal (**Funds Held**). On approve, Ganji reveals `R` on Es and pays `polar-n3-Fre` directly.
 
 ---
 
@@ -60,52 +54,58 @@ This guide explains how our local Lightning Network test environment works: **Po
 
 ### Why This Architecture?
 
-Ganji is a freelancer escrow platform. When a client pays for work, the money must be **held** until the work is approved, then **released** to the freelancer (or **refunded** if something goes wrong). This is possible because of **hold invoices** — a special Lightning feature that LNbits exposes through LND.
+Ganji is a freelancer escrow platform. When a client funds work, the money must be **held** until the work is approved, then **released** to the freelancer (or **refunded** if something goes wrong). This is possible because of **hold invoices** — a special Lightning feature that LNbits exposes through LND.
 
 ```
-Ganji Backend (Go)                 LNbits                    LND (alice)
+Ganji Backend (Go)                 LNbits                LND Es (escrow)
      │                               │                            │
      │ POST /api/v1/payments         │                            │
-     │ (with preimage_hash)          │ addholdinvoice             │
+     │ (with payment_hash)           │ addholdinvoice             │
      │──────────────────────────────▶│───────────────────────────▶│
      │                               │                            │
-     │ ◀─────────────────────────────│◀───────────────────────────│
-     │   bolt11 invoice              │   invoice                  │
+     │ LND REST lookup on Es         │                            │
+     │ (accepted-hold checker)       │                            │
+     │───────────────────────────────────────────────────────────▶│
      │                               │                            │
-     │ Client pays invoice ─────────────────────────────────────▶│ (held!)
+     │ Client wallet (Cl/Bob) pays hold invoice ─────────────────▶│ (ACCEPTED)
      │                               │                            │
-     │ POST /api/v1/payments/settle  │ settle via preimage        │
+     │ verify hash+amount+ACCEPTED+unsettled → locked (Funds Held) │
+     │                               │                            │
+     │ approve: SettleHold(R) + PayInvoice(Fre)                   │
      │──────────────────────────────▶│───────────────────────────▶│
      │                               │                            │
-     │                    freelancer gets paid                    │
+     │                    freelancer (Fre) gets paid              │
 ```
 
-### LND hold semantics: why the deal stays `awaiting_payment`
+### LND hold semantics: why accepted-hold verification is required
 
-With our **LND-backed LNbits**, a paid hold invoice does **not** become `paid: true`. LNbits reports:
+With our **LND-backed LNbits**, a funded hold invoice does **not** become `paid: true`. LNbits reports:
 
 ```json
 { "paid": false, "status": "pending", "details": { "extra": { "hold_invoice": true } } }
 ```
 
-until Ganji calls `/api/v1/payments/settle` with the preimage. The funds are already locked in an HTLC at Alice (`state: ACCEPTED` in LND), but LNbits/CLN-style `paid` detection cannot see it.
+until Ganji settles it with `R`. The funds are already committed in an HTLC on Es, but LNbits `paid` detection cannot see it.
 
 Consequences:
-- The LNbits webhook does not fire on payment acceptance; there is nothing to deliver yet.
-- Deal status intentionally remains `awaiting_payment` after the client pays.
-- The freelancer then submits work (`awaiting_payment → work_submitted`), and the client approves. `SettleHold` reveals the preimage, atomically proving the funds were held, then Ganji pays the freelancer's invoice.
+- The LNbits webhook is best-effort and is not proof that funds are held.
+- `CheckPayment` and the webhook both ask Es directly through LND REST before locking a deal.
+- A hold counts only when LND reports a matching `payment_hash`/`r_hash`, the matching amount, `State == ACCEPTED`, `settled == false`, and `settle_date == 0`.
+- Only then does an `awaiting_payment` deal move to `locked` (**Funds Held**). Work submission requires `locked`; `awaiting_payment → work_submitted` is invalid.
+- If the checker is not configured, verification is unavailable and `FundDeal` returns `503`.
 
-This is by design in `backend/internal/deals/service.go` (`CheckPayment` comment) and `types.go` (`ValidTransitions`). Do not force `locked` from a pending hold — that would let an unpaid invoice look funded. Verify the hold at the LND layer instead (`ACCEPTED`, `amt_paid_sat`, `settle_date: 0`), as shown in `DEMO_RUNBOOK.md` Part 4.
+This is enforced in `backend/internal/lnd/client.go` (`IsAcceptedHold`), `backend/internal/deals/service.go` (`refreshPaymentStatus`/`FundDeal`), and `backend/internal/webhook/service.go`. Do not force `locked` from `paid=true` or a pending hold.
 
 ### Network Topology
 
 | Network | Purpose | Who's on it |
 |---------|---------|-------------|
-| `polar-network-3_default` | Docker network Polar created for its containers | `polar-n3-backend1`, `polar-n3-alice`, `polar-n3-bob`, **our `lnbits`** |
+| `polar-network-3_default` | Docker network Polar created for its containers | `polar-n3-backend1`, `polar-n3-Es`, `polar-n3-Cl`, `polar-n3-Fre`, `polar-n3-Pay`, **our `lnbits`** |
 | Host (localhost) | Where our app runs | Frontend (3000), Backend (8080), browser |
-| LNbits REST API | Bridge between our backend and Lightning | Backend → `localhost:5000` |
+| LNbits REST API | Bridge for money moves (hold/settle/cancel/pay) | Backend → `localhost:5000` |
+| LND REST on Es | Direct accepted-hold verification | Backend → `LND_REST_URL` (`https://localhost:8082` in `backend/.env.example`) |
 
-**Important:** LNbits runs *inside* Polar's Docker network so it can reach `polar-n3-alice:8080` using the container name as a hostname. From the host machine, we talk to LNbits at `localhost:5000`.
+**Important:** LNbits runs *inside* Polar's Docker network so it can reach `https://polar-n3-Es:8080` using the container name as a hostname. From the host machine, we talk to LNbits at `localhost:5000` and to Es directly via the `LND_REST_*` values in `backend/.env.example`.
 
 ---
 
@@ -116,36 +116,44 @@ This is by design in `backend/internal/deals/service.go` (`CheckPayment` comment
 - **Where its config lives:** `~/.polar/networks/3/docker-compose.yml`
 - **Where its data lives:** `~/.polar/networks/3/volumes/`
 
-Polar created a network with 3 containers:
+Polar network 3 contains the regtest backend and the LND nodes used by the current escrow flow:
 
 | Container | Role | Host Ports |
 |-----------|------|------------|
 | `polar-n3-backend1` | bitcoind (fake Bitcoin blockchain) | 18446 (RPC), 19444 (P2P) |
-| `polar-n3-alice` | LND node — **our escrow wallet** | 8081 (REST), 10001 (gRPC), 9735 (P2P) |
-| `polar-n3-bob` | LND node — spare for testing | 8082 (REST), 10002 (gRPC), 9736 (P2P) |
+| `polar-n3-Es` | LND node — **our escrow wallet (Alice1/Es)** | REST :8080 in network, host port from `backend/.env.example` (`:8082`) |
+| `polar-n3-Cl` | LND client node — **Bob, the client** | See Polar GUI |
+| `polar-n3-Fre` | LND node — **freelancer payout destination** | See Polar GUI |
+| `polar-n3-Pay` | Route-only hop Es → Fre if needed | See Polar GUI |
 
-### Why "Alice" and "Bob"?
+### Node roles
 
-Crypto tutorials traditionally use "Alice and Bob" as placeholder names (like "John Doe" in examples). Polar names its nodes that way by default. In our setup:
-- **Alice** = the node LNbits uses → holds our escrow money
-- **Bob** = spare node for testing payments between nodes
+- **Es (Alice1)** = the node LNbits uses and the node the backend verifies directly → holds escrow money
+- **Cl (Bob)** = the client; funds the hold from a linked wallet
+- **Fre** = the freelancer; generates the payout invoice Ganji pays after approval
+- **Pay** = route-only Es → Fre if needed, **not** a second Ganji wallet
+- **Alice2/relay** = reverted; do not describe it as part of the current setup
 
 ---
 
 ## What Is LNbits?
 
-**LNbits** is a Lightning wallet/server with a REST API. Our Go backend doesn't talk to LND directly — it talks to LNbits, and LNbits forwards requests to Alice's LND node.
+**LNbits** is a Lightning wallet/server with a REST API. Our Go backend uses it for money moves (create hold, settle, cancel, payout), and talks directly to Es LND REST for accepted-hold verification.
 
 - **Runs on:** `http://localhost:5000`
-- **API keys** (in `backend/.env`): `LNBITS_API_KEY` (create invoices) and `LNBITS_ADMIN_KEY` (settle/cancel holds)
+- **LNbits backend:** `LND_REST_ENDPOINT=https://polar-n3-Es:8080`
+- **API keys** (in `backend/.env`): `LNBITS_API_KEY` (create invoices) and `LNBITS_ADMIN_KEY` (settle/cancel holds, payouts)
+- **Backend checker** (in `backend/.env`): `LND_REST_URL` / `LND_REST_CERT_PATH` / `LND_REST_MACAROON_PATH` on Es
 - **Wallet data:** stored in Docker volume `ganji_lnbits-data`
 
-### Why not talk to LND directly?
+### Why LNbits plus a direct LND checker?
 
 LNbits gives us:
 - A simple HTTP API (`POST /api/v1/payments`, `/settle`, `/cancel`)
-- Webhook support (notifies our backend when a payment arrives)
+- Webhook support (best-effort notification, not proof of funds)
 - User-facing wallet UI for debugging (visit `http://localhost:5000`)
+
+LND REST on Es gives us the accepted-hold proof that `paid=true` cannot provide.
 
 ---
 
@@ -159,7 +167,7 @@ LNbits gives us:
 docker compose -f ~/.polar/networks/3/docker-compose.yml up -d
 ```
 
-**2. Start LNbits** (wired to Polar's Alice):
+**2. Start LNbits** (wired to Polar's Es):
 
 ```bash
 docker compose -f lnbits-docker-compose.yml up -d
@@ -174,7 +182,7 @@ networks:
     external: true   # ← Polar created it; we just join it
 ```
 
-This is why LNbits can reach `https://polar-n3-alice:8080` — Docker's DNS resolves the container name to its IP within the network.
+This is why LNbits can reach `https://polar-n3-Es:8080` — Docker's DNS resolves the container name to its IP within the network. The backend uses `LND_REST_URL=https://localhost:8082` with the Es cert/macaroon paths from `backend/.env.example`.
 
 ### TLS Certificates
 
@@ -182,11 +190,11 @@ LND REST API uses HTTPS with a self-signed certificate. We mount Polar's cert an
 
 ```yaml
 volumes:
-  - /home/amonoff/.polar/networks/3/volumes/lnd/alice/tls.cert:/certs/tls.cert:ro
-  - /home/amonoff/.polar/networks/3/volumes/lnd/alice/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+  - /home/amonoff/.polar/networks/3/volumes/lnd/Es/tls.cert:/certs/tls.cert:ro
+  - /home/amonoff/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
 ```
 
-The cert includes `DNS:polar-n3-alice` in its SANs, so TLS verification succeeds.
+The cert includes `DNS:polar-n3-Es` in its SANs, so TLS verification succeeds. Do not mount Alice2/relay credentials; that workflow was reverted.
 
 ---
 
@@ -197,12 +205,14 @@ This is the **core feature** Ganji depends on. A hold invoice is a BOLT11 Lightn
 ### The Lifecycle
 
 ```
-1. Ganji generates a random preimage (secret) and computes SHA256(preimage) = payment_hash
-2. Ganji asks LNbits: "create hold invoice for this payment_hash"
-3. Client pays the invoice → sats are LOCKED at LND (not yet settled)
-4. Freelancer does the work
-5a. Client approves → Ganji calls /settle with preimage → sats flow to escrow wallet
-5b. Client disputes → Ganji calls /cancel with payment_hash → sats returned to client
+1. Ganji generates a random preimage R and computes SHA256(R) = payment_hash
+2. Ganji asks LNbits (backed by Es): "create hold invoice for this payment_hash"
+3. Client funds from linked wallet; backend pays that hold invoice transiently with the wallet admin key
+4. LND on Es reports an ACCEPTED, unsettled hold → deal locks (Funds Held)
+5. Freelancer does the work (submission requires locked)
+6a. Client approves → Ganji reveals R on Es and pays polar-n3-Fre directly
+6b. Client disputes/rejects after submission → no R revealed; hold stays for the arbiter
+6c. Arbiter reveals R to pay Fre, or cancels/waits for expiry to refund Bob (no R)
 ```
 
 ### Backend Code Reference
@@ -210,8 +220,10 @@ This is the **core feature** Ganji depends on. A hold invoice is a BOLT11 Lightn
 | Function | File | What it does |
 |----------|------|--------------|
 | `CreateHoldInvoice` | `backend/internal/lnbits/client.go:131` | Creates the held payment via LNbits |
-| `SettleHold` | `backend/internal/lnbits/client.go:159` | Releases escrow (reveals preimage) |
-| `CancelHold` | `backend/internal/lnbits/client.go:175` | Refunds the client |
+| `SettleHold` | `backend/internal/lnbits/client.go:174` | Reveals R on Es and releases escrow |
+| `CancelHold` | `backend/internal/lnbits/client.go:190` | Cancels the hold to refund the client |
+| `IsAcceptedHold` | `backend/internal/lnd/client.go:88` | Verifies hash/amount/`ACCEPTED`/unsettled on Es |
+| `FundDeal` | `backend/internal/deals/service.go:1215` | Pays hold from linked wallet, verifies, locks |
 
 ### Why Phoenixd Won't Work
 
@@ -228,7 +240,7 @@ Phoenixd (ACINQ's wallet) settles all invoices automatically — there's no "hol
 docker compose -f ~/.polar/networks/3/docker-compose.yml up -d
 ```
 
-**2. Verify Alice is healthy:**
+**2. Verify Es is healthy:**
 ```bash
 docker ps | grep polar
 # All three containers should say "Up"
@@ -240,9 +252,9 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 1
 ```
 
-**4. Verify Alice is synced:**
+**4. Verify Es is synced:**
 ```bash
-docker exec polar-n3-alice lncli \
+docker exec polar-n3-Es lncli \
   --network=regtest \
   --tlscertpath=/home/lnd/.lnd/tls.cert \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
@@ -264,7 +276,7 @@ cd backend && go run ./cmd/api
 cd frontend && npm run dev
 ```
 
-**7. Test:** Sign up at `http://localhost:3000/signup`, then create a deal.
+**7. Test:** Sign up at `http://localhost:3000/signup`, generate the freelancer payout invoice, create a deal, and fund the hold from the client's linked wallet. The deal becomes `locked` (**Funds Held**) only after Es accepts the hold; work submission before that is invalid.
 
 ---
 
@@ -286,16 +298,16 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
   -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 getnewaddress
 ```
 
-### LND (Alice)
+### LND (Es / Alice1)
 
 ```bash
 # Shortcut — set this in your shell to avoid typing paths
 LND="lncli --network=regtest --tlscertpath=/home/lnd/.lnd/tls.cert --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon"
 
-docker exec polar-n3-alice sh -c "$LND getinfo"           # Node status
-docker exec polar-n3-alice sh -c "$LND walletbalance"     # Balance in sats
-docker exec polar-n3-alice sh -c "$LND listinvoices"      # All invoices
-docker exec polar-n3-alice sh -c "$LND lookupinvoice HASH" # Specific hold
+docker exec polar-n3-Es sh -c "$LND getinfo"           # Node status
+docker exec polar-n3-Es sh -c "$LND walletbalance"     # Balance in sats
+docker exec polar-n3-Es sh -c "$LND listinvoices"      # All invoices
+docker exec polar-n3-Es sh -c "$LND lookupinvoice HASH" # Specific hold
 ```
 
 ### LNbits
@@ -332,7 +344,7 @@ docker run --rm -v ganji_lnbits-data:/data python:3-alpine python3 -c "
 import sqlite3,json
 c=sqlite3.connect('/data/database.sqlite3')
 updates = {
-  'lnd_rest_endpoint': json.dumps('https://polar-n3-alice:8080'),
+  'lnd_rest_endpoint': json.dumps('https://polar-n3-Es:8080'),
   'lnd_rest_cert': json.dumps('/certs/tls.cert'),
   'lnd_rest_macaroon': json.dumps('/certs/admin.macaroon'),
 }
@@ -400,14 +412,14 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
 ```
 Wait ~5-10 seconds, then check `getinfo` again.
 
-### `polar-n3-alice` is crash-looping: "parse address alice failed"
+### `polar-n3-Es` is crash-looping: "parse address es failed"
 
 **Cause:** The container wasn't attached to Polar's Docker network (happens if Polar was closed and containers were orphaned).
 
 **Fix:** Recreate it:
 ```bash
-docker rm -f polar-n3-alice
-docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice
+docker rm -f polar-n3-Es
+docker compose -f ~/.polar/networks/3/docker-compose.yml up -d es
 ```
 
 ### LNbits returns 520 "unexpected backend error" on invoice creation
@@ -425,18 +437,40 @@ docker compose -f ~/.polar/networks/3/docker-compose.yml up -d alice
 
 **Fix:** Use `-generate N` instead of `generate N` (see commands above).
 
+### `FundDeal` returns `503` or the deal stays `awaiting_payment`
+
+**Cause:** The backend accepted-hold checker is not configured, or Es does not
+report a matching `ACCEPTED` hold. LNbits `paid=true` and webhooks are not proof
+of funds.
+
+**Fix:** Set all three `LND_REST_URL` / `LND_REST_CERT_PATH` /
+`LND_REST_MACAROON_PATH` values from `backend/.env.example`, then confirm with
+`lookupinvoice HASH` on `polar-n3-Es`: matching hash/amount, `state=ACCEPTED`,
+`settled=false`, `settle_date=0`.
+
+### Funding rejected as an invalid wallet URL or key
+
+**Cause:** Wallet URLs must be `http`/`https` with a host and no
+userinfo/query/fragment; there is no allowlist. The key must be non-empty and
+is used transiently (never stored or logged).
+
+**Fix:** Pass the linked wallet's URL and admin key in
+`POST /public/deals/:shareToken/fund` (or `POST /deals/wallet/invoice` for the
+freelancer payout invoice).
+
 ---
 
 ## File Reference
 
 | File | Purpose |
 |------|---------|
-| `~/.polar/networks/3/docker-compose.yml` | Polar's own config (bitcoind, alice, bob) |
-| `~/.polar/networks/3/volumes/lnd/alice/tls.cert` | Alice's TLS certificate |
-| `~/.polar/networks/3/volumes/lnd/alice/data/chain/bitcoin/regtest/admin.macaroon` | Alice's admin macaroon |
-| `lnbits-docker-compose.yml` | Our LNbits container setup (wired to Polar) |
-| `backend/.env` | LNbits URL + API keys, hold invoice settings |
-| `backend/internal/lnbits/client.go` | Hold invoice API calls |
+| `~/.polar/networks/3/docker-compose.yml` | Polar's own config (bitcoind, Es, Cl, Fre, Pay) |
+| `~/.polar/networks/3/volumes/lnd/Es/tls.cert` | Es TLS certificate |
+| `~/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon` | Es admin macaroon |
+| `lnbits-docker-compose.yml` | Our LNbits container setup (wired to Es) |
+| `backend/.env` | LNbits URL/keys, Es LND REST checker, hold invoice settings |
+| `backend/internal/lnbits/client.go` | Hold invoice money-move API calls |
+| `backend/internal/lnd/client.go` | Accepted-hold verification on Es |
 | `backend/internal/lnbits/models.go` | `CreateHoldInvoiceRequest` with `Out: false` |
 | `frontend/src/app/signup/page.tsx` | Signup form (with password eye toggle) |
 | `frontend/src/app/login/page.tsx` | Login form (with password eye toggle) |
@@ -450,9 +484,15 @@ Polar network:          ~/.polar/networks/3/docker-compose.yml
 LNbits compose:         lnbits-docker-compose.yml (this repo)
 Backend LNbits URL:     http://localhost:5000
 LNbits in Docker:       polar-network-3_default network
-Escrow node:            polar-n3-alice (LND REST :8080 in network, :8081 on host)
+LNbits LND backend:     https://polar-n3-Es:8080
+Backend LND checker:    LND_REST_URL=https://localhost:8082 + Es cert/macaroon paths
+Escrow node:            polar-n3-Es (Alice1/Es; REST :8080 in network)
+Client:                 polar-n3-Cl (Bob)
+Freelancer:             polar-n3-Fre
+Route-only:             polar-n3-Pay (Es → Fre if needed, not a Ganji wallet)
+Not current:            Alice2 / relay forwarding
 Bitcoin RPC:            polar-n3-backend1:18443 (host :18446)
-Wallet balance:         ~9,989,795 sats on Alice
+Locked status:          "Funds Held" — ACCEPTED hold on Es, not settled
 Hold invoices:          Required for escrow — Phoenixd doesn't support them
 
 LNbits v1.7.1 gotchas:

@@ -1,8 +1,8 @@
 # Ganji Frontend — Implementation Report
 
-**Last updated:** 2026-11-09  
+**Last updated:** 2026-11-18<br>
 **Branch:** main  
-**Commit:** post-`22c915b` (milestone redesign)
+**Commit:** post-`22c915b` (milestone redesign + accepted-hold funding)
 
 ---
 
@@ -14,9 +14,9 @@
 | **Login** | `/login` | Email/password auth, redirects to dashboard | `POST /auth/login` |
 | **Signup** | `/signup` | Registration with validation, redirects to dashboard | `POST /auth/signup` |
 | **Dashboard** | `/dashboard` | Authenticated deal list with status cards, empty state, create CTA | `GET /deals` |
-| **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title + sats each) | `POST /deals` (with `milestones[]`) |
+| **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title + sats each); generate the freelancer payout invoice from a linked wallet | `POST /deals` (with `milestones[]`), `POST /deals/wallet/invoice` |
 | **Deal Detail** | `/deals/[id]` | Full deal view, timeline, actions (submit/dispute/rotate), share link, verification status; milestone list + per-milestone actions incl. symmetric exit | `GET /deals/:id`, `POST /submit`, `POST /dispute`, `POST /share-link`, `POST /approve`, `POST /exit`, milestone endpoints |
-| **Public Deal** | `/public/deals/[shareToken]` | Client-facing view: invoice to pay, approve/reset/accept/reject/exit actions wired to public endpoints; milestone accept-next/reject/exit wired | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/payout/reset`, public milestone actions |
+| **Public Deal** | `frontend/src/app/public/deals/[shareToken]/page.tsx` | Client-facing view: fund buttons on the deal and each milestone using a linked wallet, invoice to pay, approve/reset/accept/reject/exit actions wired to public endpoints; `locked` shown as "Funds Held" | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/fund`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/payout/reset`, public milestone actions |
 
 ---
 
@@ -26,11 +26,14 @@
 |-----------|----------|---------|
 | `Button` | `components/ui/button.tsx` | Primary/ghost/outline/danger variants, sm/md/lg sizes, loading state |
 | `Input` | `components/ui/input.tsx` | Form input with label, error state, focus gold glow |
+| `PasswordInput` | `components/ui/password-input.tsx` | Password field with working show/hide toggle |
 | `FormBanner` | `components/ui/form-banner.tsx` | Error/success toast banner |
 | `AuthShell` | `components/auth/auth-shell.tsx` | Centered auth card with vault-seam styling |
 | `DealCard` | `components/deals/deal-card.tsx` | Dashboard deal row with status badge, amount, client, copy share link |
 | `DealDetailPage` | `app/deals/[dealId]/page.tsx` | Authed deal view with artifact deliverables panel and synthetic single-step milestone |
-| `PublicDealPage` | `app/public/deals/[shareToken]/page.tsx` | Client review link with approve/exit actions and synthetic single-step milestone |
+| `PublicDealPage` | `app/public/deals/[shareToken]/page.tsx` | Client fund/approve link with linked-wallet fund buttons and synthetic single-step milestone |
+| `StatusIcon` | `components/ui/status-icon.tsx` | Inline SVG icons per status (including "Funds Held" for `locked`); no emoji status map |
+| `WalletLinkDialog` | `components/deals/wallet-link-dialog.tsx` | Shared LNbits URL/key prompt used by client funding and freelancer payout invoice generation |
 | `format.ts` | `lib/utils/format.ts` | Currency (sats → ₿/k sats), relative time |
 
 ---
@@ -57,6 +60,8 @@
 - `rotateShareLink(id, token)` → `POST /deals/:id/share-link`
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
 - `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
+- `fundPublicDeal(shareToken, data)` → `POST /public/deals/:shareToken/fund` (no auth; `data` = `{wallet_url, wallet_key, milestone_id?}`)
+- `generateInvoice(data, token)` → `POST /deals/wallet/invoice` (protected; `data` = `{wallet_url, wallet_key, amount_sats, memo?}`)
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
 - `publicResetPayout(shareToken, milestoneId?)` → `POST /public/deals/:shareToken/payout/reset` (no auth)
 - `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)
@@ -69,7 +74,7 @@
 - `updateMilestone(id, milestoneId, status, completedAt, token)` → `PATCH /deals/:id/milestones/:milestoneID`
 - `exitDeal(id, token)` → `POST /deals/:id/exit` (symmetric participant exit)
 
-**Types:** Full TypeScript interfaces for all requests/responses (DealView, DealStatus, PublicDeal, MilestoneView, etc.). Labels: `released` = paid, `completed` = payout pending (not paid), `disputed`/`rejected` = under review (hold stays).
+**Types:** Full TypeScript interfaces for all requests/responses (DealView, DealStatus, PublicDeal, MilestoneView, FundDealRequest, GenerateInvoiceRequest, etc.). Labels: `locked` = **"Funds Held"** (LND-accepted hold on the escrow node, not settled), `released` = paid, `completed` = payout pending (not paid), `disputed`/`rejected` = under review (hold stays). Work submission requires `locked`; `awaiting_payment → work_submitted` is invalid.
 
 ---
 
@@ -100,28 +105,27 @@
 
 | Issue | Impact | Fix Needed |
 |-------|--------|------------|
-| **`GET /auth/me` not in api client** | Settings page can't fetch the current user | Backend endpoint live (2026-10-20): add the client method, then build Settings |
-| **No CV types in API client** | Live CV pages can't be typed | Add `Profile`, `CVEntry`, `VerificationResult` types + API methods |
-| **Payee invoice update not in Deal Detail** | Freelancer can't change payout destination after create | Add inline edit in Deal Detail (endpoint exists: `PATCH /deals/:id/payee-invoice`) |
+| **Payee invoice update not in Deal Detail** | Freelancer can't change the payout destination from the deal page | Settings already edits the default payee invoice; add inline edit in Deal Detail (`PATCH /deals/:id/payee-invoice`) |
+| **No dedicated funding-status UI test** | Fund/lock and "Funds Held" label regressions could slip through | Add frontend tests for `fundPublicDeal`, `generateInvoice`, and the status icon map |
 
 ---
 
-## 📋 Remaining Pages to Build
+## 📋 Additional Pages (built)
 
-| Priority | Page | Route | Backend Endpoint | Notes |
-|----------|------|-------|------------------|-------|
-| **High** | Live CV (Public Profile) | `/cv/[slug]` | `GET /cv/:slug` | Core differentiator — hash-verified reputation |
-| **High** | Verify Entry | `/cv/[slug]/verify/[entryId]` | `GET /cv/:slug/verify/:entryID` | Cryptographic proof viewer |
-| **Medium** | Settings / Profile | `/settings` | `GET /auth/me` (backend live) | Update display name, default payee invoice, password |
-| **Low** | Operator Dispute Queue | `/operator/disputes` | `GET /disputes`, `POST /disputes/:id/resolve` | Admin only |
-| **Low** | Operator Reconcile | `/operator/deals/[id]/reconcile` | `POST /deals/:id/reconcile` | Admin only |
+| Page | Route | Backend Endpoint | Notes |
+|------|-------|------------------|-------|
+| Live CV (Public Profile) | `/cv/[slug]` | `GET /cv/:slug` | Hash-verified reputation |
+| Verify Entry | `/cv/[slug]/verify/[entryId]` | `GET /cv/:slug/verify/:entryID` | Cryptographic proof viewer |
+| Settings / Profile | `/settings` | `GET /auth/me` | Display name, default payee invoice, password |
+| Operator Dispute Queue | `/operator/disputes` | `GET /disputes`, `POST /disputes/:id/resolve` | Admin only |
+| Operator Reconcile | `/operator/deals/[id]/reconcile` | `POST /deals/:id/reconcile` | Admin only |
 
 ---
 
 ## 🧪 Testing Checklist (Local)
 
 ```bash
-# Start backend (requires .env with DATABASE_URL, JWT_SECRET, LNBITS_*)
+# Start backend (requires .env with DATABASE_URL, JWT_SECRET, LNBITS_*, LND_REST_*)
 cd backend && go run ./cmd/api
 
 # Start frontend
@@ -131,10 +135,10 @@ cd frontend && npm run dev
 
 **Flows to verify:**
 1. **Signup → Login → Dashboard** — tokens persist in localStorage
-2. **Create Deal** — form validation (sats > 0, lnbc invoice), redirects to detail
-3. **Deal Detail (freelancer)** — Submit Work, Dispute, Rotate Link buttons work
-4. **Public Deal** — loads via share token, shows invoice, status updates after payment
-5. **Approve flow** — authed approve and public-link approve both wired
+2. **Create Deal** — form validation (sats > 0, lnbc invoice), optional payout invoice generation from a linked wallet, redirects to detail
+3. **Deal Detail (freelancer)** — Submit Work (only from `locked`), Dispute, Rotate Link buttons work
+4. **Public Deal** — loads via share token, fund button on the deal/milestones pays the hold via a linked wallet; status becomes "Funds Held" only after LND accepts the hold
+5. **Approve flow** — authed approve and public-link approve reveal R and pay the freelancer directly; reject after `work_submitted` leaves the hold untouched
 
 ---
 
@@ -158,7 +162,8 @@ frontend/
 │   │   ├── ui/
 │   │   │   ├── button.tsx              # Variants, sizes, loading
 │   │   │   ├── input.tsx
-│   │   │   └── form-banner.tsx
+│   │   │   ├── form-banner.tsx
+│   │   │   └── status-icon.tsx         # Inline SVG status icons (no emoji map)
 │   │   ├── auth/
 │   │   │   └── auth-shell.tsx          # NEW: Vault-styled auth card
 │   │   └── deals/
@@ -176,9 +181,10 @@ frontend/
 
 ## 📝 Documentation Updates Needed
 
-- [ ] `README.md` — Add frontend setup, env vars, page overview
+- [x] `docs/FRONTEND_ARCHITECTURE.md` — Routing, auth flow, state management, and fund/invoice endpoints are documented
+- [x] `docs/FRONTEND_REPORT.md` — This report is current with accepted-hold funding and status icons
+- [ ] `README.md` — Add frontend setup, env vars (including `LND_REST_*`), page overview
 - [ ] `frontend/README.md` — Component library, design tokens, API client usage
-- [ ] `docs/FRONTEND_ARCHITECTURE.md` — New file: routing, auth flow, state management
 - [ ] `docs/DEAL_LIFECYCLE.md` — Map UI states to backend status transitions
 - [ ] `AGENTS.md` — Update with new component patterns
 
@@ -187,8 +193,7 @@ frontend/
 ## 🚀 Next Steps (Suggested Order)
 
 1. ~~**Fix public approve**~~ — backend `POST /public/deals/:shareToken/approve` shipped 2026-10-20; frontend wired same day (`publicApproveDeal` + public page button)
-2. ~~**Add `GET /auth/me`**~~ — backend shipped 2026-10-20; add the api-client method and build the Settings page on it
-3. **Build Live CV** — `/cv/[slug]` + `/cv/[slug]/verify/[entryId]`
-4. **Settings page** — Profile, default payee invoice, password change
-5. **Operator pages** — Dispute queue, reconcile (if needed for MVP)
-6. **E2E test** — Full flow: signup → create deal → pay → submit → approve → verify on CV
+2. ~~**Add `GET /auth/me`**~~ — backend shipped 2026-10-20; `getMe` + Settings page are live
+3. ~~**Build Live CV / Settings / Operator pages**~~ — all routes are implemented
+4. **Accepted-hold funding E2E** — signup → create deal (optional linked-wallet payout invoice) → public `fundPublicDeal` → verify "Funds Held" only after LND accepts the hold → submit (requires `locked`) → approve reveals R and pays the freelancer → verify on CV
+5. **Frontend tests** — fund/invoice methods and status icon map

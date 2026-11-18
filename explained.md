@@ -30,22 +30,26 @@ Telegram, X, email) — Ganji just provides the escrow, the payment link, and a
 cryptographically anchored reputation layer (the **Live CV**).
 
 The escrow is **network-as-escrow**: instead of holding sats in a hot wallet,
-Ganji draws a Lightning **hold invoice** and the Lightning Network itself keeps
-the funds until the client approves. Nothing is custodial.
+Ganji draws a Lightning **hold invoice** on the escrow node Es and the Lightning
+Network itself keeps the funds until the client approves. Nothing is custodial.
 
 ```
-freelancer creates deal   ──►  Ganji draws a hold invoice for amount_sats
-                               (payment_hash = sha256(preimage Ganji holds))
+freelancer creates deal   ──►  Ganji generates R and a hold invoice for amount_sats
+                                (payment_hash = sha256(R), held by Ganji until approval)
 
-  client opens share link ──►  sees title, amount, bolt11 invoice, status
-  client pays invoice     ──►  sats HELD on the network (escrowed)
+  freelancer sets payout  ──►  generates an lnbc invoice from a linked LNbits wallet
+  client opens share link ──►  enters a linked wallet URL/key and funds the hold
+  Es LND accepts hold     ──►  Ganji marks the deal "Funds Held" (locked)
 
   freelancer submits work ──►  client views artifacts
-  client approves         ──►  settle (reveal preimage) → funds to Ganji wallet
-                               ──► pay freelancer's payee_invoice ──► released
+  client approves         ──►  Ganji reveals R on Es and pays the freelancer directly
   client disputes         ──►  deal freezes 'disputed', funds stay held
-                               ──► arbiter: released (pay) or refunded
+                                ──► arbiter: released (pay) or refunded
 ```
+
+LNbits `paid=true` is not proof that funds are held: locking requires an LND
+accepted hold on `polar-n3-Es` with matching hash/amount, `ACCEPTED`,
+`settled=false`, and `settle_date=0`. See [`docs/MONEY_FLOW.md`](./docs/MONEY_FLOW.md).
 
 Every released deal stamps `verified_at` and its artifacts become hash-verified
 lines on the freelancer's public **Live CV** (`GET /cv/:slug` + hash verification
@@ -64,7 +68,7 @@ reject/exit freezes the hold for independent review. See `docs/MILESTONE_REDESIG
 
 ```bash
 cd backend
-cp .env.example .env        # fill in DATABASE_URL, JWT secrets, LNBITS_* vars
+cp .env.example .env        # fill in DATABASE_URL, JWT secrets, LNBITS_* and LND_REST_* vars
 go mod download
 migrate -path migrations -database "$DATABASE_URL" up
 go run ./cmd/api
@@ -85,7 +89,7 @@ Frontend runs on `http://localhost:3000`.
 
 ## Status
 
-🚧 Pre-launch. See [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) for what's built
+🚧 Pre-launch. See [`BACKEND_STATUS.md`](./docs/BACKEND_STATUS.md) for what's built
 and [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) for workflow and team ownership.
 
 ---
@@ -94,8 +98,8 @@ and [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) for workflow and team owner
 
 | File | Purpose |
 |---|---|
-| [`API_REFERENCE.md`](./API_REFERENCE.md) | Every endpoint, request/response shapes, error codes |
-| [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) | Build status, what's done, what's not |
+| [`API_REFERENCE.md`](./docs/API_REFERENCE.md) | Every endpoint, request/response shapes, error codes |
+| [`BACKEND_STATUS.md`](./docs/BACKEND_STATUS.md) | Build status, what's done, what's not |
 | [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) | Team ownership, build order, git conventions |
 | [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) | OpenTimestamps pipeline breakdown |
 | [`README.md`](./README.md) | Repo overview and quick start |

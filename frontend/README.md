@@ -50,9 +50,12 @@ Next.js 16 (App Router) + TypeScript + Tailwind v4 frontend for the Ganji Lightn
 |---|---|---|
 | `Button` | `components/ui/button.tsx` | `variant: primary\|ghost\|outline\|danger`, `size: sm\|md\|lg`, `isLoading` |
 | `Input` | `components/ui/input.tsx` | `label`, `error`, standard HTML attrs |
+| `PasswordInput` | `components/ui/password-input.tsx` | `label`, `error`, password visibility toggle |
+| `StatusIcon` | `components/ui/status-icon.tsx` | `status`, `className?`, inline SVG deal/result icons |
 | `FormBanner` | `components/ui/form-banner.tsx` | `message`, `type: error\|success` |
 | `AuthShell` | `components/auth/auth-shell.tsx` | `eyebrow`, `title`, `subtitle`, `children`, `footer` |
 | `DealCard` | `components/deals/deal-card.tsx` | `deal: DealView`, `onClick?` |
+| `WalletLinkDialog` | `components/deals/wallet-link-dialog.tsx` | Shared LNbits URL/key prompt for funding and payout invoice generation |
 
 ## API Client
 
@@ -72,6 +75,8 @@ api.disputeDeal(id, reason, token)
 api.updatePayeeInvoice(id, data, token)
 api.rotateShareLink(id, token)
 api.getPublicDeal(shareToken)
+api.fundPublicDeal(shareToken, data)
+api.generateInvoice(data, token)
 api.publicApproveDeal(shareToken)
 api.publicResetPayout(shareToken, milestoneId?)
 ```
@@ -105,7 +110,7 @@ npm run build   # production build (Turbopack)
 ## Known Issues
 
 - **Operator WebSocket** — Real-time deal state updates not yet wired (see `docs/ARCHITECTURE.md` §9).
-- **E2E test suite** — Full flow test (signup → create deal → pay → submit → approve → verify on CV) not yet written.
+- **E2E test suite** — Full flow test (signup → generate payout invoice → create deal → fund accepted hold → submit → approve → verify on CV) not yet written.
 
 ## File Structure
 
@@ -132,9 +137,9 @@ frontend/
 │   │       └── deals/
 │   │           └── [dealId]/reconcile/page.tsx
 │   ├── components/
-│   │   ├── ui/                         # Button, Input, FormBanner
+│   │   ├── ui/                         # Button, Input, PasswordInput, StatusIcon, FormBanner
 │   │   ├── auth/                       # AuthShell
-│   │   └── deals/                      # DealCard
+│   │   └── deals/                      # DealCard, WalletLinkDialog
 │   └── lib/
 │       ├── api/api-client.ts           # API client + types
 │       ├── auth/auth-context.tsx       # AuthContext + useAuth
@@ -143,6 +148,6 @@ frontend/
 
 ## Documentation
 
-- [`FRONTEND_REPORT.md`](../FRONTEND_REPORT.md) — Full implementation status
+- [`FRONTEND_REPORT.md`](../docs/FRONTEND_REPORT.md) — Full implementation status
 - [`../README.md`](../README.md) — Project overview
 - [`../docs/`](../docs/) — Backend architecture, deal lifecycle, money flow, etc.

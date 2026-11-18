@@ -47,7 +47,7 @@ export function WalletLinkDialog({
       >
         <h2 className="font-display text-xl font-semibold text-ink-100 mb-2">{title}</h2>
         <p className="text-xs text-ink-500 mb-5">
-          Enter your LNbits wallet URL and {keyLabel.toLowerCase()} — not a wallet ID or Lightning address. Ganji uses them only for this request and does not store them.
+          Enter your LNbits wallet URL and {keyLabel.toLowerCase()} from your LNbits API keys screen — not a wallet ID, Lightning address, or exchange login. Ganji uses them only for this request and does not store them.
         </p>
         <div className="space-y-4">
           <Input

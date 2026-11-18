@@ -5,7 +5,7 @@ services:
       - "5000:5000"
     environment:
       - LNBITS_BACKEND_WALLET_CLASS=LndRestWallet
-      - LND_REST_ENDPOINT=https://polar-n3-alice:8080
+      - LND_REST_ENDPOINT=https://polar-n3-Es:8080
       - LND_REST_CERT=/certs/tls.cert
       - LND_REST_MACAROON=/certs/admin.macaroon
       - LNBITS_ADMIN_UI=true
@@ -15,8 +15,8 @@ services:
       - LNBITS_RESERVE_FEE_PERCENT=0
     volumes:
       - lnbits-data:/data
-      - /home/amonoff/.polar/networks/3/volumes/lnd/alice/tls.cert:/certs/tls.cert:ro
-      - /home/amonoff/.polar/networks/3/volumes/lnd/alice/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+      - /home/amonoff/.polar/networks/3/volumes/lnd/Es/tls.cert:/certs/tls.cert:ro
+      - /home/amonoff/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
     networks:
       - polar-network
     extra_hosts:

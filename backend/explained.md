@@ -181,17 +181,17 @@ tx.Commit()
 
 ### States
 
-| Deal Status | LNbits Hold State | Meaning |
-|-------------|-------------------|---------|
-| `awaiting_payment` | `PENDING`/`UNPAID` | Invoice created, client hasn't paid |
-| `locked` | `SETTLED` (held) | Client paid, funds held on network |
-| `disputed` | `SETTLED` (held) | Frozen, awaiting operator |
-| `released` | `SETTLED` + paid out | Funds sent to freelancer |
-| `refunded` | `CANCELLED`/`EXPIRED` | Funds returned to client |
+| Deal Status | Network state (Es/LND) | Meaning |
+|-------------|------------------------|---------|
+| `awaiting_payment` | No accepted hold yet | Hold invoice created; client has not funded it (or LND has not accepted it) |
+| `locked` (**Funds Held**) | `ACCEPTED`, `settled=false`, `settle_date=0` | Matching hash/amount held on Es, not settled |
+| `disputed` | `ACCEPTED` (held) | Frozen on Es, awaiting operator |
+| `released` | Settled with `R` + paid out | `R` revealed on Es; freelancer paid directly |
+| `refunded` | `CANCELLED`/`EXPIRED` | Funds returned to client; `R` not used |
 
 ### Sweep Job: `SweepExpiredHolds`
 
-Reconciles DB with network for stale deals. Deal-level holds only (`deal.CheckingID`); per-milestone holds (M2+) have no sweep coverage yet — see `MILESTONE_REDESIGN_NOTES.md` Outstanding.
+Reconciles DB with network for stale deals. Deal-level holds only (`deal.CheckingID`); per-milestone holds (M2+) have no sweep coverage yet — see `MILESTONE_REDESIGN_NOTES.md` Outstanding. Locking itself is not a sweep duty: `locked` requires the Es accepted-hold checker in `refreshPaymentStatus`, the webhook, or `FundDeal`; LNbits `paid=true` alone never locks a deal.
 
 ```go
 func (s *Service) SweepExpiredHolds(ctx, cutoff) {
@@ -257,23 +257,23 @@ CREATE INDEX idx_deals_disputed_at ON deals(disputed_at);          -- arbitratio
 ## 6. Arbitration Flow Summary
 
 ```
-Client pays hold invoice
+Client funds hold from linked wallet
         │
         ▼
-   Webhook/Poll → status=locked
+FundDeal / webhook / poll + Es accepted-hold check → locked (Funds Held)
         │
 Freelancer submits work
         │
-Client: Approve → settle+pay → released ✓
+Client: Approve → reveal R on Es + pay Fre → released ✓
    OR
-Client: Dispute → status=disputed (money FROZEN)
+Client: Reject/Dispute → status=disputed (money FROZEN, no R revealed)
         │
         ▼
 Operator views queue (ListDisputes ORDER BY disputed_at)
         │
-Operator: Release → settle+pay → released (CV anchor)
+Operator: Release → reveal R on Es + pay Fre → released (CV anchor)
    OR
-Operator: Refund  → cancel hold → refunded
+Operator: Refund  → cancel hold / wait expiry → refunded (no R)
         │
         ▼
 DB records: resolved_at, resolved_by, payout_checking_id
@@ -305,13 +305,17 @@ DB records: resolved_at, resolved_by, payout_checking_id
 
 | Aspect | Webhook | Polling (`CheckPayment`) |
 |--------|---------|--------------------------|
-| Trigger | LNbits pushes on payment | Client/frontend calls |
+| Trigger | LNbits pushes a best-effort notification | Client/frontend calls |
 | Auth | HMAC signature (`LNbits-Signature`) | JWT (freelancer) |
 | Idempotency | Handled by status check | Same |
-| Reliability | Can miss if down | Always works (fallback) |
+| Reliability | Can miss if down | Repeatable fallback |
 | Latency | Instant | Poll interval |
 
-Both converge on: `CheckPayment` → if paid + `awaiting_payment` → `UpdateStatus(locked)`.
+Both converge on: check LNbits, then verify the accepted hold on `polar-n3-Es`
+(matching hash/amount, `State == ACCEPTED`, `settled == false`, `settle_date == 0`),
+and move `awaiting_payment → locked` only with that proof. A missing checker
+returns `ErrVerificationUnavailable` (`503` from `FundDeal`); LNbits `paid=true`
+alone never locks.
 
 ---
 
@@ -352,7 +356,7 @@ Key test files:
 
 ### How the Escrow Hold Invoice Is Created
 
-When a deal is created, Ganji generates a **cryptographic preimage** (32 random bytes) and derives its **payment hash** (SHA-256). This hash locks the incoming payment — only revealing the preimage can settle it.
+When a deal is created, Ganji generates a **cryptographic preimage `R`** (32 random bytes) and derives its **payment hash** (SHA-256). This hash locks the incoming payment on `polar-n3-Es` — only revealing `R` can settle it. Client funding goes through `POST /public/deals/:shareToken/fund`: the backend pays the hold invoice transiently with the linked wallet admin key, verifies the accepted hold on Es, then locks the deal (**Funds Held**).
 
 ```go
 // 1. Generate preimage (32 random bytes)
@@ -380,9 +384,10 @@ hold, err := lnbits.CreateHoldInvoice(CreateHoldInvoiceRequest{
 | Aspect | Detail |
 |--------|--------|
 | **Preimage** | 32 bytes (256 bits entropy), stored as hex in DB. Never logged. |
-| **Payment hash** | `sha256(preimage)` — LNbits uses this to lock the HTLC. |
-| **Hold invoice** | LNbits holds funds on Lightning network. Cannot be paid to anyone until settled with preimage. |
-| **Webhook** | Attached per-invoice. LNbits POSTs to `WebhookURL` when payment arrives. |
+| **Payment hash** | `sha256(R)` — LNbits uses this to lock the HTLC on Es. |
+| **Hold invoice** | Backed by Es LND. Funds are `ACCEPTED` (held), not settled, until `R` is revealed. |
+| **Webhook** | Attached per-invoice, but best-effort: it and `CheckPayment` require Es accepted-hold verification. LNbits `paid=true` is not proof. |
+| **Checker** | `LND_REST_URL` / `LND_REST_CERT_PATH` / `LND_REST_MACAROON_PATH` on Es; missing checker blocks locking (`FundDeal` returns `503`). |
 | **Expiry** | Default 30 days (2,592,000 sec). After expiry, LNbits auto-cancels, funds return to payer. |
 
 ### Preimage Lifecycle
@@ -391,31 +396,35 @@ hold, err := lnbits.CreateHoldInvoice(CreateHoldInvoiceRequest{
 CREATE DEAL
     │
     ▼
-Generate preimage (32 random bytes)
+Generate preimage R (32 random bytes)
     │
     ▼
-hash = sha256(preimage)  ──▶ sent to LNbits as payment_hash
+hash = sha256(R)  ──▶ sent to LNbits as payment_hash
     │
     ▼
 Store preimage (raw hex) in DB
 Store preimage_hash (hex) in DB
     │
     ▼
-Client pays hold invoice (locked to preimage_hash)
+Client funds from linked wallet; backend pays hold invoice with wallet admin key
     │
     ▼
-LNbits holds funds (HTLC locked)
+Es LND reports ACCEPTED + matching hash/amount + unsettled → locked (Funds Held)
     │
     ▼
-OPERATOR/CLIENT DECIDES:
-    ├── RELEASE → SettleHold(preimage) → funds to wallet → PayInvoice(payee)
-    └── REFUND  → CancelHold(preimage_hash) → funds return to client
+ Freelancer submits work (requires locked)
+    │
+    ▼
+CLIENT / ARBITER DECIDES:
+    ├── APPROVE/RELEASE → reveal R on Es → PayInvoice → Fre paid directly
+    ├── REJECT after work_submitted → no R; do not settle/cancel/fail HTLC
+    └── REFUND → arbiter cancels or waits for expiry → Bob refunded (no R)
 ```
 
 **Security:** Preimage is the **single secret** that releases funds. If leaked before dispute resolution, anyone could settle the hold. That's why:
 - Never logged
-- Only used in `SettleHold` call
-- Deal moves to `disputed` on client complaint — freezes money until operator decides
+- Only used in the `SettleHold` call on Es
+- Rejecting after `work_submitted` or disputing moves the case to `disputed` — the HTLC stays held until the operator reveals `R` or cancels/waits for expiry
 
 ---
 
@@ -513,11 +522,11 @@ func (s *Service) RotateShareLink(ctx, userID, dealID) {
 - No auth required
 - Exposes only: title, amount, invoice, status, dispute_reason, created_at
 - **Never exposes:** preimage, payee_invoice, client_email, checking_id, internal UUID
-- Refreshes payment status from LNbits before responding (handles missed webhooks)
+- Refreshes payment status from LNbits plus the Es accepted-hold checker before responding (handles missed webhooks)
 
 **Public Approve (`POST /public/deals/:shareToken/approve`):**
 - No auth required — the share token is the authorization
-- Only legal from `locked` / `work_submitted` (hold refreshed from LNbits first)
+- Only legal from `locked` / `work_submitted` (accepted hold refreshed on Es first)
 - Runs the same `releaseEscrow` settle + payout legs as the authed approve; idempotent
 - `disputed → released` stays authed-only (email-matched arbitration gate)
 
@@ -638,7 +647,7 @@ func (s *Service) ApplyOperatorRole(ctx context.Context, emails []string) error 
 
 ```go
 var ValidTransitions = map[Status][]Status{
-    StatusAwaitingPayment: {StatusLocked, StatusWorkSubmitted, StatusDisputed, StatusRefunded},
+    StatusAwaitingPayment: {StatusLocked, StatusRefunded},
     StatusLocked:          {StatusWorkSubmitted, StatusDisputed},
     StatusWorkSubmitted:   {StatusReviewing, StatusReleased, StatusDisputed},
     StatusReviewing:       {StatusReleased, StatusDisputed},
@@ -652,11 +661,11 @@ var ValidTransitions = map[Status][]Status{
 
 | From → To | Trigger | Why Allowed |
 |-----------|---------|-------------|
-| `awaiting_payment` → `locked` | Webhook/poll detects payment | LNbits confirms hold paid (CLN) |
-| `awaiting_payment` → `work_submitted` | Freelancer submits without payment | LND holds never report "paid" — freelancer works on trust, client approves later |
-| `awaiting_payment` → `disputed` | Client disputes before payment | Client refuses to pay — freezes (no money to freeze yet) |
-| `awaiting_payment` → `refunded` | Sweep job (expired hold) | Hold expired/unpaid — network already returned funds |
-| `locked` → `work_submitted` | Freelancer submits work | Normal flow after payment confirmed |
+| `awaiting_payment` → `locked` | Es LND checker confirms accepted hold | Matching hash/amount, `ACCEPTED`, unsettled — shown as **Funds Held** |
+| `awaiting_payment` → `work_submitted` | **Invalid** | Work submission requires `locked` (an accepted hold) |
+| `awaiting_payment` → `disputed` | **Invalid** | Client cannot dispute an unpaid deal |
+| `awaiting_payment` → `refunded` | Sweep job (expired hold) | Hold expired/unfunded — network already returned funds |
+| `locked` → `work_submitted` | Freelancer submits work | Normal flow after the hold is funded (**Funds Held**) |
 | `locked` → `disputed` | Client disputes after payment | Money frozen on network, arbitration starts |
 | `work_submitted` → `reviewing` | Client starts formal review | Optional phase before approve/dispute |
 | `work_submitted` → `released` | Client approves | Settle hold + pay freelancer |
@@ -666,14 +675,17 @@ var ValidTransitions = map[Status][]Status{
 | `disputed` → `released` | Operator releases | Settle hold + pay freelancer (CV anchor) |
 | `disputed` → `refunded` | Operator refunds | Cancel hold, funds return to client |
 
-### LND vs CLN Difference
+### LND accepted-hold verification (no `paid=true` shortcut)
 
 | Backend | Hold Invoice Behavior | Ganji Handling |
 |---------|----------------------|----------------|
-| **CLN** (Core Lightning) | `paid=true` immediately on payment | Webhook → `awaiting_payment` → `locked` instantly |
-| **LND** | `paid=false` until **settle** | Poll/webhook sees unpaid → freelancer submits → client approves → `settle` proves funds were held all along |
+| **LND on `polar-n3-Es`** | Held payment stays `paid=false` until `R` is revealed | Backend pays the hold from the linked wallet, verifies `ACCEPTED`/matching hash+amount/unsettled on Es, then locks (**Funds Held**) and allows work submission |
+| **CLN / generic LNbits** | May report `paid=true` on acceptance | Not sufficient: `paid=true` alone never locks a deal; unsupported unless Es LND REST verification is available |
 
-**Design:** `awaiting_payment` → `work_submitted` allowed specifically for LND. Freelancer submits, client approves, settle atomically proves hold was funded.
+**Design:** `awaiting_payment → work_submitted` is invalid. The freelancer can
+submit only after the deal is `locked`; approve reveals `R` on Es and pays
+`polar-n3-Fre` directly. Rejecting submitted work reveals no `R` and does not
+settle/cancel/fail the HTLC.
 
 ---
 
@@ -729,11 +741,14 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 | `DATABASE_URL` | ✅ | — | Postgres connection string |
 | `JWT_SECRET` | ✅ | — | Access token signing key (32+ chars) |
 | `JWT_REFRESH_SECRET` | ✅ | — | Refresh token signing key (32+ chars) |
-| `LNBITS_URL` | ✅ | — | LNbits instance URL (e.g., `https://lnbits.example.com`) |
+| `LNBITS_URL` | ✅ | — | LNbits instance URL, backed by Es (e.g., `http://localhost:5000`) |
 | `LNBITS_API_KEY` | ✅ | — | Invoice key (read/create) |
 | `LNBITS_ADMIN_KEY` | ✅ | — | Admin key (settle/cancel/pay) |
 | `LNBITS_WEBHOOK_SECRET` | ⚠️ | "" | Wallet webhook secret (empty = dev mode) |
-| `WEBHOOK_URL` | ⚠️ | "" | Public URL for LNbits webhooks (e.g., `https://api.ganji.com/webhooks/lnbits`) |
+| `WEBHOOK_URL` | ⚠️ | "" | Public URL for LNbits webhooks (e.g., `http://localhost:8080/webhooks/lnbits`) |
+| `LND_REST_URL` | ✅ | — | Direct Es LND REST endpoint (e.g., `https://localhost:8082`) |
+| `LND_REST_CERT_PATH` | ✅ | — | Es TLS cert path (e.g., `/home/amonoff/.polar/networks/3/volumes/lnd/Es/tls.cert`) |
+| `LND_REST_MACAROON_PATH` | ✅ | — | Es admin macaroon path (e.g., `/home/amonoff/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon`) |
 | `PORT` | ❌ | 8080 | HTTP listen port |
 | `FRONTEND_URLS` | ❌ | localhost:3000 | CORS origins, comma-separated (singular `FRONTEND_URL` accepted as fallback) |
 | `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | ❌ | 2,592,000 | Hold invoice expiry (30 days) |
@@ -744,6 +759,13 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 | `OTS_ESPLORA_URL` | ❌ | "" | Esplora API for live OTS block-header verification (empty = offline proof check only) |
 | `OTS_ESPLORA_TIMEOUT_SECONDS` | ❌ | 10 | Per-request esplora timeout |
 | `OTS_UPGRADE_INTERVAL_SECONDS` | ❌ | 21,600 | OTS proof-upgrade worker interval (6 hours) |
+
+Set all three `LND_REST_*` values or none. The backend uses them to verify
+accepted holds directly on `polar-n3-Es` (Alice1/Es); LNbits must use
+`LND_REST_ENDPOINT=https://polar-n3-Es:8080`. Without the checker, deals cannot
+be verified/locked through the linked-wallet funding flow and `FundDeal`
+returns `503`. `polar-n3-Cl` is the client, `polar-n3-Fre` the freelancer, and
+`polar-n3-Pay` route-only Es → Fre if needed; Alice2/relay is not current.
 
 ### Migrations
 
@@ -836,7 +858,7 @@ password is configured.
 
 | Event | Trigger | Template | Freelancer Action |
 |-------|---------|----------|-------------------|
-| **Payment Received** | First durable deal → `locked` transition | Green, "View Deal" button | Submit work |
+| **Payment Received** | First durable deal → `locked` (**Funds Held**) transition | Green, "View Deal" button | Submit work |
 | **Dispute Raised** | Client: `DisputeDeal` | Amber, client reason shown | Wait for operator |
 | **Deal Released** | Operator/Client: `release` | Green, CV anchor mentioned | Funds in wallet |
 | **Deal Refunded** | Operator: `refund` | Red, no further action | Move on |
@@ -912,7 +934,9 @@ SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_ENCRYPTION=starttls SMTP_USER=you@gm
 ## 23. LNbits: Payout Verification & Operator Reconciliation
 
 Status of the LNbits integration as it stands, and the items still to
-research on LNbits 1.5.6.
+research on LNbits 1.5.6. Incoming hold funding/locking is no longer driven by
+LNbits `paid=true`: it uses the Es LND accepted-hold checker described in §4
+and §17. The notes below concern outgoing payout idempotency only.
 
 ### What has been done
 

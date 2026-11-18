@@ -15,12 +15,13 @@ app/
 │   └── page.tsx            # Authenticated deal list + empty state
 ├── deals/
 │   ├── new/
-│   │   └── page.tsx        # Create deal form
-│   │   └── [dealId]/
-│   │       └── page.tsx    # Deal detail + timeline + actions
-│   └── public/
+│   │   └── page.tsx        # Create deal form (payout invoice generation)
+│   └── [dealId]/
+│       └── page.tsx        # Deal detail + timeline + actions
+├── public/
+│   └── deals/
 │       └── [shareToken]/
-│           └── page.tsx    # Client-facing payment page
+│           └── page.tsx    # Client-facing fund/approve link
 ├── settings/
 │   └── page.tsx            # Profile, payee invoice, password
 ├── cv/
@@ -43,7 +44,7 @@ app/
 2. **Login** → `POST /auth/login` → JWT access + refresh tokens stored in localStorage
 3. **AuthContext** wraps the app provides `tokens` (access/refresh) and `user` (profile from `GET /auth/me`)
 4. **Token persistence** — access token in localStorage, refresh used silently when access expires
-5. **API client** — all protected endpoints require `Authorization: Bearer <token>` header; two public endpoints (`GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/approve`) are unauthenticated
+5. **API client** — all protected endpoints require `Authorization: Bearer <token>` header; public endpoints are unauthenticated: `GET /public/deals/:shareToken`, `GET /public/deals/:shareToken/milestones`, `POST /public/deals/:shareToken/fund` (client submits a linked wallet URL + key to pay the escrow hold), approve/reset/milestone actions, and exit
 
 ## State Management
 
@@ -81,6 +82,8 @@ api.updatePayeeInvoice(id, data, token)
 api.rotateShareLink(id, token)
 api.getPublicDeal(shareToken)
 api.getPublicMilestones(shareToken)
+api.fundPublicDeal(shareToken, { wallet_url, wallet_key, milestone_id? })  // POST /public/deals/:shareToken/fund
+api.generateInvoice({ wallet_url, wallet_key, amount_sats, memo? }, token)  // POST /deals/wallet/invoice
 api.publicApproveDeal(shareToken)
 api.publicResetPayout(shareToken, milestoneId?)
 api.publicAcceptNextMilestone(shareToken, milestoneId)
@@ -119,6 +122,8 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - `rotateShareLink(id, token)` → `POST /deals/:id/share-link`
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
 - `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
+- `fundPublicDeal(shareToken, data)` → `POST /public/deals/:shareToken/fund` (no auth; `data` = `{wallet_url, wallet_key, milestone_id?}`, wallet key is transient)
+- `generateInvoice(data, token)` → `POST /deals/wallet/invoice` (protected; `data` = `{wallet_url, wallet_key, amount_sats, memo?}`, used for the freelancer payout invoice)
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
 - `publicResetPayout(shareToken, milestoneId?)` → `POST /public/deals/:shareToken/payout/reset` (no auth)
 - `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)
@@ -144,6 +149,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - `MilestoneView` — `id`, `title`, `amount_sats`, `order`, `status`, `invoice?`, `completed_at`, `created_at`
 - `DealView` — full deal with all fields except `preimage`, `payee_invoice`, `verified_at` (redacted); in milestone mode `invoice`/`checking_id`/`status` mirror the active milestone — use `listMilestones` for per-milestone truth
 - `PublicDeal` — limited view: `title`, `amount_sats`, `source_platform`, `invoice`, `status`, `dispute_reason`, `created_at`, `milestones?`
+- `FundDealRequest` — `{wallet_url, wallet_key, milestone_id?}`; `GenerateInvoiceRequest` — `{wallet_url, wallet_key, amount_sats, memo?}`. Wallet URLs must be http/https hosts only (no userinfo/query/fragment, no allowlist); keys are never stored or logged.
 - `CreateDealRequest.milestones?` — `{title, amount_sats}[]`; when present, `amount_sats` on the deal is derived as the sum
 - `CVProfile` — `display_name`, `slug`, `trust_score`, `entries: CVEntry[]`
 - `CVEntry` — `id`, `deal_title`, `amount_sats`, `source_platform`, `artifact_kind`, `hash`, `algorithm`, `verified_at`, `created_at`, OTS fields
@@ -155,9 +161,12 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 |---|---|---|
 | `Button` | Primary/ghost/outline/danger buttons, sm/md/lg sizes, loading state | `variant`, `size`, `isLoading` |
 | `Input` | Form input with label, error state, focus gold glow | `label`, `error`, type |
+| `PasswordInput` | Password field with show/hide toggle used by login/signup | `label`, `error`, standard input attrs |
 | `FormBanner` | Error/success toast banner | `message`, `type` |
 | `AuthShell` | Centered auth card with vault-styling | `eyebrow`, `title`, `subtitle`, `children`, `footer` |
 | `DealCard` | Dashboard deal row with status badge, amount, client, share link | `deal: DealView`, `onClick?` |
+| `StatusIcon` | Inline SVG icons per deal status (`components/ui/status-icon.tsx`); no emoji status map | `status`, `className?` |
+| `WalletLinkDialog` | Shared LNbits URL/key dialog for funding and payout invoice generation (`components/deals/wallet-link-dialog.tsx`) | `title`, `walletURL`, `walletKey`, `keyLabel`, `submitLabel`, callbacks |
 | `format` | Currency (sats → ₿/k sats), relative time | — |
 
 ## Data Fetching
@@ -179,7 +188,9 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 ## State Machine Integration
 
 - Deal status transitions mirrored from backend `DEAL_LIFECYCLE.md`
+- `locked` is labelled **"Funds Held"** in the UI: it means the LND accepted hold on the escrow node Es was verified, **not** that the payment settled. Status icons are inline SVGs from `components/ui/status-icon.tsx`.
 - Milestone status transitions mirrored from the same doc's milestone table (`released` = paid; `completed` = payout pending, never paid; `disputed`/`rejected` = hold stays in review)
 - UI disables actions invalid per state (e.g., freelancer cannot set `locked`/`released`/`disputed`/`refunded` status directly)
-- Freelancer-driven transitions: `awaiting_payment → work_submitted`, `locked → work_submitted`, `work_submitted → reviewing`
-- Backend-only money states (`locked`, `released`, `disputed`, `refunded`) set by payment detection, approve, dispute, and arbitration; milestone `released` is set only by the canonical payout path and can never be set without escrow ("fund it first")
+- Freelancer-driven transitions: `locked → work_submitted`, `work_submitted → reviewing`. Work submission requires a `locked` deal; `awaiting_payment → work_submitted` is invalid.
+- Backend-only money states (`locked`, `released`, `disputed`, `refunded`) set by accepted-hold verification, approve, dispute, and arbitration; milestone `released` is set only by the canonical payout path and can never be set without escrow ("fund it first")
+- Approve/release reveals R and pays the freelancer directly; rejecting after `work_submitted` reveals no R and leaves the hold untouched; arbiter reveals R to pay or cancels/waits for expiry to refund (refund never uses R).

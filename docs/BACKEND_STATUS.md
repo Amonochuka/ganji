@@ -1,6 +1,6 @@
 # Ganji Backend — Status Report
 
-**Date:** 2026-08-26 (updated 2026-10-01)
+**Date:** 2026-08-26 (updated 2026-11-18)
 **Author:** opencode
 
 ---
@@ -8,8 +8,32 @@
 ## Updates since 2026-08-26
 
 This report was written early in the build. Since then the escrow core shipped
-and the snapshot below is only history — **read [`explained.md`](./explained.md)
+and the snapshot below is only history — **read [`explained.md`](../backend/explained.md)
 and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
+
+- **Accepted-hold escrow model (current).** The escrow node is `polar-n3-Es`
+  (Alice1/Es), the client is Bob/`polar-n3-Cl`, and the freelancer is
+  `polar-n3-Fre`; `polar-n3-Pay` is route-only (Es → Fre when needed), not a
+  second Ganji wallet. The Alice2/relay workflow was reverted and is not
+  current. A deal locks only after LND on Es verifies a matching hold
+  (hash + amount, `State == ACCEPTED`, `settled == false`, `settle_date == 0`);
+  LNbits `paid=true` is not proof of funds and no longer locks. The checker is
+  configured via `LND_REST_URL` / `LND_REST_CERT_PATH` /
+  `LND_REST_MACAROON_PATH`; without it verification is blocked and `FundDeal`
+  returns `503`. `locked` means **accepted hold**, not settled. Work submission
+  requires `locked` (`awaiting_payment → work_submitted` is invalid). Approve
+  reveals R and pays Fre directly; reject after `work_submitted` reveals no R
+  and does not settle/cancel/fail the HTLC; the arbiter reveals R to pay Fre or
+  cancels/waits for expiry to refund Bob; refund does not use R.
+- **Linked-wallet funding endpoints.** Public
+  `POST /public/deals/:shareToken/fund` takes `{wallet_url, wallet_key, milestone_id?}`
+  and protected `POST /deals/wallet/invoice` takes
+  `{wallet_url, wallet_key, amount_sats, memo?}`. Wallet URLs are http/https
+  host only (no userinfo/query/fragment, no allowlist); keys are transient and
+  are never stored or logged. The frontend exposes `api.fundPublicDeal()` and
+  `api.generateInvoice()`, fund buttons on the public deal and milestones,
+  payout invoice generation on `/deals/new`, "Funds Held" status labels, and
+  inline SVG status icons (`components/ui/status-icon.tsx`).
 
 - **Network-as-escrow (hold invoices) is live.** Deals create LNbits hold
   invoices; approve = settle + payout, dispute = **freeze + arbitration** (no
@@ -19,8 +43,10 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   shipped (robustness batch).
 - **Shareable payment link shipped.** Each deal has a revocable `share_token`;
   `GET /public/deals/:shareToken` shows a safe public view and refreshes the
-  hold status (locks when paid) so the client sees the payment land without an
-  account. `POST /deals/:dealID/share-link` rotates the token.
+  hold status (locks when the accepted hold is verified) so the client sees the
+  payment land without an account. `POST /public/deals/:shareToken/fund` pays
+  the hold from the client's linked wallet. `POST /deals/:dealID/share-link`
+  rotates the token.
 - **Live CV shipped.** Releasing a deal anchors its artifacts as SHA-256
   entries; the public `GET /cv/:slug` profile and `GET /cv/:slug/verify/:entryID`
   hash check are live, and `trust_score` is derived from released deals
@@ -54,16 +80,16 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
   `token_hash` constraint. The frontend public page is wired to the approve
   endpoint; `GET /auth/me` still awaits a Settings page — see
   [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md).
-- **Frontend compiles and has 7 pages implemented** — see [`FRONTEND_REPORT.md`](../FRONTEND_REPORT.md).
+- **Frontend compiles and has 12 pages implemented** — see [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md).
 - Still stubbed (unchanged): `internal/websocket`, `pkg/sanitize`.
   Rate limiting now implemented (in-memory) in `internal/middleware/ratelimit.go`.
-- **Milestone redesign (2026-11-09, `main`)** — sequential per-milestone escrow shipped as WIP (see [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) for canonical status). Consolidated migration `000008` (`milestones` + nullable deal hold); `CreateDealWithMilestones` funds M1; canonical `ReleaseMilestone` (idempotent two-phase payout); escrow-mandatory ("fund it first"); post-submission reject/exit → `disputed` (hold stays); operator per-milestone `ResolveMilestone`; symmetric exit; public milestone actions (`accept-next`/`reject`/`exit`). Outstanding: idempotency/atomicity parity + tests, per-milestone artifacts/evidence, deal-level current-milestone contract, UX/API polish, real-LNbits E2E (all tracked in the redesign notes TODOs).
+- **Milestone redesign (2026-11-09, `main`)** — sequential per-milestone escrow shipped as WIP (see [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) for canonical status). Consolidated migration `000008` (`milestones` + nullable deal hold); `CreateDealWithMilestones` funds M1; canonical `ReleaseMilestone` (idempotent two-phase payout); escrow-mandatory ("fund it first"); post-submission reject/exit → `disputed` (hold stays); operator per-milestone `ResolveMilestone`; symmetric exit; public milestone actions (`accept-next`/`reject`/`exit`). Idempotency/atomicity parity, per-milestone artifacts/evidence, deal-level current-milestone contract, and UX/API polish are done (with `milestone_service_test.go`); remaining: rework-after-reject policy, deal/milestone dispute coherence, and real-LNbits + accepted-hold E2E (tracked in the redesign notes TODOs).
 
 ---
 
 ## Summary
 
-The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, artifact/verification management, and LNbits payment integration all working. The webhook handler was added. Frontend now compiles with 7 pages.
+The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, artifact/verification management, and LNbits payment integration all working. The webhook handler was added, and funding is verified against LND accepted holds on Es. Frontend now compiles with 12 pages.
 
 **Overall completion: ~65%**
 
@@ -103,7 +129,7 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 | Payment check endpoint | ✅ Done | `internal/deals/handler.go` |
 | **Webhook handler** | ✅ Done | `internal/webhook/` |
 | HMAC signature verification | ✅ Done | `internal/webhook/service.go` |
-| Auto-transition on payment | ✅ Done | `internal/webhook/service.go` |
+| Auto-transition on accepted hold | ✅ Done (requires LND checker) | `internal/webhook/service.go` |
 
 ### Phase 4 — Live CV & Verification (Week 8–9) ✅ Backend done
 
@@ -154,11 +180,13 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 **Endpoint:** `POST /webhooks/lnbits` (public — no JWT auth)
 
 **Flow:**
-1. LNbits POSTs a JSON payload when an invoice is paid
+1. LNbits POSTs a JSON payload for a payment event on the escrow wallet
 2. Handler reads the raw body and the `LNbits-Signature` header
 3. Service verifies HMAC-SHA256 signature using `LNBITS_WEBHOOK_SECRET`
 4. Looks up the deal by `checking_id`
-5. If deal is `awaiting_payment` and payment status is `success`, transitions to `locked`
+5. If the deal is `awaiting_payment`, the LND accepted-hold checker on Es
+   confirms a matching hold (`ACCEPTED`, not settled) → transitions to `locked`;
+   `paid=true` alone is not enough, and a missing checker blocks the transition
 6. Returns appropriate HTTP status code based on the outcome
 
 **Response codes:**
@@ -198,6 +226,9 @@ Payment-not-successful returns `200` because the webhook was received and unders
 | `LNBITS_WEBHOOK_SECRET` | No* | HMAC secret for webhook verification (*recommended) |
 | `WEBHOOK_URL` | No** | Public URL for webhook endpoint (**required for webhooks to work) |
 | `LNBITS_ADMIN_KEY` | Yes | Router admin key — required for settle/cancel/payout money moves |
+| `LND_REST_URL` | Yes for funding | LND REST endpoint on the escrow node Es; enables the accepted-hold checker (missing checker → `FundDeal` 503) |
+| `LND_REST_CERT_PATH` | No | TLS cert path for the Es LND REST client |
+| `LND_REST_MACAROON_PATH` | No | Macaroon path for the Es LND REST client |
 | `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | No | Hold invoice lifetime (default: 30 days) |
 | `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | No | Hold-expiry sweep cadence (default: 21600s = 6h) |
 | `FRONTEND_URLS` | No | CORS origins, comma-separated (default: `http://localhost:3000`) |

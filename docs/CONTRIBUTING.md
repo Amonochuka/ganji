@@ -1,6 +1,6 @@
 # Contributing to Ganji
 
-This document covers team ownership, build order, and git conventions. For the current architecture, money flows, and API contract, read [`explained.md`](../explained.md) and [`API_REFERENCE.md`](./API_REFERENCE.md) first. Those, plus [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) and [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) (milestone money rules + status), are the source of truth — the original build document (a `.docx`) is not part of this repo.
+This document covers team ownership, build order, and git conventions. For the current architecture, money flows, and API contract, read [`explained.md`](../backend/explained.md) and [`API_REFERENCE.md`](./API_REFERENCE.md) first. Those, plus [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) and [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) (milestone money rules + status), are the source of truth — the original build document (a `.docx`) is not part of this repo.
 
 ---
 
@@ -44,6 +44,6 @@ Items from the Stage 2 / Stage 3 roadmap (M-Pesa, multisig arbiter, file uploads
 
 ## Reference Files
 
-- [`explained.md`](./explained.md) — architecture, escrow/state machine, package walkthrough
+- [`explained.md`](../backend/explained.md) — architecture, escrow/state machine, package walkthrough
 - [`API_REFERENCE.md`](./API_REFERENCE.md) — endpoint contract, error codes, state machine
 - [`BACKEND_STATUS.md`](./BACKEND_STATUS.md) — what's built vs. not
