@@ -1,4 +1,4 @@
-# Tomorrow's Demo Runbook — Full Deal Flow
+# Demo Runbook — Full Deal Flow
 
 > Step-by-step from a cold start to a real hold invoice being paid.
 > Follow top to bottom. Commands use the repo root `~/Projects/ganji` unless noted.
@@ -99,16 +99,25 @@ docker exec polar-n3-bob lncli --network=regtest \
 ```
 Copy the `address` value.
 
-### 2.2 Mine blocks to Bob (fund him with ~1 BTC of fake sats)
+### 2.2 Mine blocks to Bob (fund him with fake sats)
 
 ```bash
 BOB_ADDRESS="paste_the_address_here"
+# Mine 10 blocks to Bob — each block reward goes to his address
 for i in $(seq 1 10); do
   docker exec polar-n3-backend1 bitcoin-cli -regtest \
     -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 \
     generatetoaddress 1 "$BOB_ADDRESS"
 done
+
+# IMPORTANT: coinbase rewards need 100 confirmations before they're spendable!
+# Mine 100 more blocks (to any address) to mature them.
+docker exec polar-n3-backend1 bitcoin-cli -regtest \
+  -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 100
 ```
+
+> ⚠️ **Coinbase maturity:** Regtest requires 100 confirmations for mined block rewards. If you skip the second step, Bob's balance stays at 5,000 sats even though the blocks were mined — the rewards are "immature".
+
 Wait ~10s, then check Bob's balance:
 
 ```bash
@@ -117,7 +126,7 @@ docker exec polar-n3-bob lncli --network=regtest \
   --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
   walletbalance
 ```
-Expect: `total_balance` around 500,000,000 sats.
+Expect: `total_balance` around 500,000,000,000 sats (500 BTC).
 
 ### 2.3 Open a channel Bob → Alice (needed to pay Lightning invoices)
 
