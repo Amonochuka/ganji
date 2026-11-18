@@ -21,7 +21,7 @@ You mine blocks **only at setup**, not per deal. In production nobody mines — 
 
 > 🎯 **Long-term goal:** automate this whole demo (spin up Polar, mine, fund, open channels, create deal, pay, settle) with a single script. See [Part 7 — Automation](#part-7--automation-roadmap).
 >
-> Demo LNbits config disables the fee reserve (`LNBITS_RESERVE_FEE_MIN=0`, `LNBITS_RESERVE_FEE_PERCENT=0`) so the escrow wallet can fully pay out in local regtest. Do not copy this to real-money deployments.
+> Demo LNbits config disables the fee reserve (`LNBITS_RESERVE_FEE_MIN=0`, `LNBITS_RESERVE_FEE_PERCENT=0`) so the escrow wallet can fully pay out in local regtest. Existing wallets also need `lnbits_reserve_fee_min=0` and `lnbits_reserve_fee_percent=0.0` in LNbits Admin → Server Settings, because saved DB settings override env on startup. Do not copy this to real-money deployments.
 
 ---
 
@@ -607,6 +607,8 @@ scripts/
 | Bob funded but balance unchanged | Coinbase maturity — mine 100 more blocks (see Part 2.2 explanation) |
 | Deal still `awaiting_payment` after Bob paid | Expected on LND: hold stays `paid:false`. Check Alice invoice `ACCEPTED`; then freelancer submits work, client approves (Part 5.0–5.2) |
 | Approve returns `cannot be approved from status awaiting_payment` | Run Part 5.1 first (`SubmitWork` moves it to `work_submitted`) |
+| Approve says `You must reserve at least ...` | Set LNbits Admin → Server Settings reserve min/percent to `0`, or update `system_settings` in `ganji_lnbits-data`, then restart LNbits. Env vars alone do not override saved admin settings. |
+| Reset button disappeared after approve failed | Expected when LNbits definitively refused (`status: "failed"`): the marker auto-clears so no reset is needed. Fix the reserve, then approve again. |
 | Carol can't receive payout | Need Alice→Carol channel active, and Carol's payee invoice amount must be ≤ channel capacity |
 
 ---
