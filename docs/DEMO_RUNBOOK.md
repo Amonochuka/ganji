@@ -371,24 +371,11 @@ So do **not** change code to force `locked` from a pending hold. Follow the norm
 
 ### 5.1 Freelancer submits work (`awaiting_payment → work_submitted`)
 
-`SubmitWork` is allowed from `awaiting_payment`, but it requires at least one artifact. There is no upload button in the current frontend, so use the API as the freelancer (`polar@test.com`):
+`SubmitWork` is allowed from `awaiting_payment`, but it requires at least one artifact. In the frontend, log in as the freelancer (`polar@test.com`), open the deal, and use the **Deliverables** panel:
 
-```bash
-FREELANCER_TOKEN="<login token for polar@test.com>"
-DEAL_ID="7d130616-a511-4a2c-8485-df7f78125359"
-
-echo "demo deliverable" > /tmp/deliverable.txt
-
-curl -s -X POST \
-  -H "Authorization: Bearer $FREELANCER_TOKEN" \
-  -F "kind=source_file" \
-  -F "artifact=@/tmp/deliverable.txt" \
-  http://localhost:8080/deals/$DEAL_ID/artifacts
-
-curl -s -X POST \
-  -H "Authorization: Bearer $FREELANCER_TOKEN" \
-  http://localhost:8080/deals/$DEAL_ID/submit
-```
+1. Paste a work link into **Work link or delivery note** and click **Attach Work Link**, or upload a file with **Upload File**.
+2. Confirm the artifact appears in the deliverables list.
+3. Click **Submit Work**. The button unlocks only after at least one artifact is attached.
 
 Check the deal page: status should now be `work_submitted`.
 

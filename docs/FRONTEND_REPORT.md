@@ -44,6 +44,10 @@
 - `listDeals(token)` → `GET /deals`
 - `createDeal(data, token)` → `POST /deals` (`data.milestones?` supported)
 - `getDeal(id, token)` → `GET /deals/:id`
+- `listArtifacts(id, token)` → `GET /deals/:id/artifacts`
+- `uploadArtifact(id, kind, file, token)` → `POST /deals/:id/artifacts` (multipart)
+- `downloadArtifact(id, artifactId, token)` → `GET /deals/:id/artifacts/:artifactID/download`
+- `deleteArtifact(id, artifactId, token)` → `DELETE /deals/:id/artifacts/:artifactID`
 - `submitWork(id, token)` → `POST /deals/:id/submit` (milestone mode: submits the active milestone via the same endpoint)
 - `approveDeal(id, token)` → `POST /deals/:id/approve` (milestone mode: releases the active milestone)
 - `disputeDeal(id, reason, token)` → `POST /deals/:id/dispute`

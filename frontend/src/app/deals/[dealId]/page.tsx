@@ -1,12 +1,12 @@
 // @ts-nocheck
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { DealCard } from "@/components/deals/deal-card";
-import { api, type DealView, type DealStatus, type DealDetailResponse, type SubmitWorkResponse, type DisputeDealResponse, type MilestoneView } from "@/lib/api/api-client";
+import { api, type Artifact, type ArtifactKind, type DealView, type DealStatus, type DealDetailResponse, type SubmitWorkResponse, type DisputeDealResponse, type MilestoneView } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatCurrency } from "@/lib/utils/format";
 
@@ -18,9 +18,16 @@ export default function DealDetailPage() {
 
   const [deal, setDeal] = useState<DealView | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneView[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [workLink, setWorkLink] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [artifactKind, setArtifactKind] = useState<ArtifactKind>("source_file");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!tokens) {
@@ -29,6 +36,7 @@ export default function DealDetailPage() {
     }
     fetchDeal();
     fetchMilestones();
+    fetchArtifacts();
   }, [tokens, dealId, router]);
 
   async function fetchDeal() {
@@ -38,7 +46,7 @@ export default function DealDetailPage() {
       const res = await api.getDeal(dealId, tokens.access_token);
       setDeal(res.deal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load deal");
+      setLoadError(err instanceof Error ? err.message : "Failed to load deal");
     } finally {
       setIsLoading(false);
     }
@@ -50,18 +58,31 @@ export default function DealDetailPage() {
       const res = await api.listMilestones(dealId, tokens.access_token);
       setMilestones(res.milestones);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load milestones");
+      setActionError(err instanceof Error ? err.message : "Failed to load milestones");
+    }
+  }
+
+  async function fetchArtifacts() {
+    if (!tokens) return;
+    try {
+      const res = await api.listArtifacts(dealId, tokens.access_token);
+      setArtifacts(res.artifacts);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to load deliverables");
     }
   }
 
   async function handleAction(action: string, fn: () => Promise<void>) {
+    setActionError(null);
+    setNotice(null);
     setActionLoading(action);
     try {
       await fn();
       await fetchDeal();
       await fetchMilestones();
+      await fetchArtifacts();
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${action}`);
+      setActionError(err instanceof Error ? err.message : `Failed to ${action}`);
     } finally {
       setActionLoading(null);
     }
@@ -71,6 +92,53 @@ export default function DealDetailPage() {
     await handleAction("submit work", async () => {
       const res = await api.submitWork(dealId, tokens!.access_token);
       setDeal(res.deal);
+    });
+  }
+
+  async function handleAttachWorkLink() {
+    const value = workLink.trim();
+    if (!value) {
+      setActionError("Enter a work link first");
+      return;
+    }
+    const file = new File([value], "work-link.txt", { type: "text/plain" });
+    await handleAction("attach work link", async () => {
+      await api.uploadArtifact(dealId, "source_file", file, tokens!.access_token);
+      setWorkLink("");
+    });
+  }
+
+  async function handleUploadFile() {
+    if (!selectedFile) {
+      setActionError("Choose a file to upload");
+      return;
+    }
+    const file = selectedFile;
+    await handleAction("upload artifact", async () => {
+      await api.uploadArtifact(dealId, artifactKind, file, tokens!.access_token);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    });
+  }
+
+  async function handleDeleteArtifact(artifactId: string) {
+    if (!window.confirm("Remove this deliverable?")) return;
+    await handleAction("delete artifact", async () => {
+      await api.deleteArtifact(dealId, artifactId, tokens!.access_token);
+    });
+  }
+
+  async function handleDownloadArtifact(artifact: Artifact) {
+    await handleAction("download artifact", async () => {
+      const blob = await api.downloadArtifact(dealId, artifact.id, tokens!.access_token);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = artifact.storage_key.split("/").pop() || "artifact";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
     });
   }
 
@@ -94,8 +162,8 @@ export default function DealDetailPage() {
     if (!deal) return;
     const url = `${window.location.origin}/public/deals/${deal.share_token}`;
     await navigator.clipboard.writeText(url);
-    setError("Share link copied to clipboard");
-    setTimeout(() => setError(null), 3000);
+    setNotice("Share link copied to clipboard");
+    setTimeout(() => setNotice(null), 3000);
   }
 
   async function handleApproveDeal() {
@@ -125,13 +193,13 @@ export default function DealDetailPage() {
     );
   }
 
-  if (!deal || error) {
+  if (!deal || loadError) {
     return (
       <main className="flex min-h-screen flex-col bg-vault-bg">
         <DealHeader user={user} />
         <div className="flex-1 flex items-center justify-center px-6">
           <div className="text-center">
-            <p className="text-ink-500 mb-4">{error || "Deal not found"}</p>
+            <p className="text-ink-500 mb-4">{loadError || "Deal not found"}</p>
             <Link href="/dashboard">
               <Button variant="ghost">Back to Dashboard</Button>
             </Link>
@@ -143,7 +211,8 @@ export default function DealDetailPage() {
 
   const isFreelancer = user?.id === deal.freelancer_id;
   const isClient = !!user && user.email.toLowerCase() === deal.client_email.toLowerCase();
-  const canSubmit = isFreelancer && (deal.status === "locked" || deal.status === "awaiting_payment");
+  const canAttachArtifact = isFreelancer && (deal.status === "locked" || deal.status === "awaiting_payment");
+  const canSubmit = canAttachArtifact && artifacts.length > 0;
   const canDispute = isFreelancer && (deal.status === "locked" || deal.status === "work_submitted" || deal.status === "reviewing");
   const canRotateLink = isFreelancer;
   const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(deal.status);
@@ -167,9 +236,9 @@ export default function DealDetailPage() {
             </span>
           </div>
 
-          {error && (
-            <div className="mb-6 p-4 rounded-lg bg-yellow-600/10 border border-yellow-600/30 text-yellow-400 text-sm">
-              {error}
+          {(actionError || notice) && (
+            <div className={`mb-6 p-4 rounded-lg text-sm border ${actionError ? "bg-yellow-600/10 border-yellow-600/30 text-yellow-400" : "bg-green-600/10 border-green-600/30 text-green-400"}`}>
+              {actionError || notice}
             </div>
           )}
 
@@ -227,10 +296,116 @@ export default function DealDetailPage() {
                 </div>
               )}
 
+              {(isFreelancer || isClient || artifacts.length > 0) && (
+                <div className="vault-card p-6 vault-seam">
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Deliverables</h2>
+                  {canAttachArtifact && (
+                    <div className="space-y-4 mb-6">
+                      <div className="space-y-2">
+                        <label htmlFor="work-link" className="text-sm font-medium text-ink-300">
+                          Work link or delivery note
+                        </label>
+                        <textarea
+                          id="work-link"
+                          rows={3}
+                          value={workLink}
+                          onChange={(event) => setWorkLink(event.target.value)}
+                          placeholder="Paste a link to the delivered work, repository, or document"
+                          className="w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-transparent"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleAttachWorkLink}
+                          disabled={!workLink.trim() || actionLoading === "attach work link"}
+                          isLoading={actionLoading === "attach work link"}
+                        >
+                          Attach Work Link
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        <label htmlFor="artifact-file" className="text-sm font-medium text-ink-300">
+                          Upload a deliverable file
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          <input
+                            ref={fileInputRef}
+                            id="artifact-file"
+                            type="file"
+                            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                            className="flex-1 min-w-[200px] rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-300 file:mr-3 file:rounded file:border-0 file:bg-gold-500 file:px-3 file:py-1 file:text-vault-bg"
+                          />
+                          <select
+                            aria-label="Artifact kind"
+                            value={artifactKind}
+                            onChange={(event) => setArtifactKind(event.target.value as ArtifactKind)}
+                            className="rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-300"
+                          >
+                            <option value="source_file">source_file</option>
+                            <option value="source_code">source_code</option>
+                          </select>
+                          <Button
+                            size="sm"
+                            onClick={handleUploadFile}
+                            disabled={!selectedFile || actionLoading === "upload artifact"}
+                            isLoading={actionLoading === "upload artifact"}
+                          >
+                            Upload File
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {artifacts.length === 0 ? (
+                    <p className="text-sm text-ink-500">No deliverables attached yet.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {artifacts.map((artifact) => (
+                        <li key={artifact.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-vault-border bg-vault-raised px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="truncate font-mono text-sm text-ink-200">{artifact.storage_key.split("/").pop()}</p>
+                            <p className="text-xs text-ink-500">
+                              {artifact.kind} • {new Date(artifact.uploaded_at).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDownloadArtifact(artifact)}
+                              disabled={actionLoading === "download artifact"}
+                              isLoading={actionLoading === "download artifact"}
+                            >
+                              Download
+                            </Button>
+                            {canAttachArtifact && (
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => handleDeleteArtifact(artifact.id)}
+                                disabled={actionLoading === "delete artifact"}
+                                isLoading={actionLoading === "delete artifact"}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {canAttachArtifact && artifacts.length === 0 && (
+                    <p className="mt-3 text-xs text-yellow-400">Attach at least one deliverable before clicking Submit Work.</p>
+                  )}
+                </div>
+              )}
+
               {isFreelancer && (
                 <div className="vault-card p-6 vault-seam">
                   <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Actions</h2>
                   <div className="flex flex-wrap gap-3">
+                    {canAttachArtifact && !canSubmit && (
+                      <span className="flex items-center px-3 py-2 text-sm text-ink-500">Submit Work unlocks after a deliverable is attached.</span>
+                    )}
                     {canSubmit && (
                       <Button
                         onClick={handleSubmitWork}

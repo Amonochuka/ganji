@@ -70,6 +70,10 @@ Typed wrapper around `fetch` with two export styles:
 api.listDeals(token)
 api.createDeal(data, token)          // data may include milestones[]
 api.getDeal(id, token)
+api.listArtifacts(id, token)
+api.uploadArtifact(id, kind, file, token)
+api.downloadArtifact(id, artifactId, token)
+api.deleteArtifact(id, artifactId, token)
 api.submitWork(id, token)
 api.approveDeal(id, token)
 api.disputeDeal(id, reason, token)

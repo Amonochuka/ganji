@@ -12,10 +12,11 @@ export class ApiError extends Error {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...options.headers,
     },
     credentials: "include",
@@ -45,9 +46,10 @@ export const api = {
   },
 
   post<T>(path: string, body: unknown, token?: string) {
+    const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
     return fetchJson<T>(path, {
       method: "POST",
-      body: JSON.stringify(body),
+      body: isFormData ? body : JSON.stringify(body),
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
   },
@@ -90,6 +92,39 @@ export const api = {
 
   submitWork(dealId: string, token: string) {
     return this.post<SubmitWorkResponse>(`/deals/${dealId}/submit`, {}, token);
+  },
+
+  listArtifacts(dealId: string, token: string) {
+    return this.get<{ artifacts: Artifact[] }>(`/deals/${dealId}/artifacts`, token);
+  },
+
+  uploadArtifact(dealId: string, kind: ArtifactKind, file: File, token: string) {
+    const form = new FormData();
+    form.append("kind", kind);
+    form.append("artifact", file, file.name);
+    return this.post<{ artifact: Artifact }>(`/deals/${dealId}/artifacts`, form, token);
+  },
+
+  deleteArtifact(dealId: string, artifactId: string, token: string) {
+    return this.delete<void>(`/deals/${dealId}/artifacts/${artifactId}`, token);
+  },
+
+  async downloadArtifact(dealId: string, artifactId: string, token: string): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/deals/${dealId}/artifacts/${artifactId}/download`, {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let message = "Failed to download artifact";
+      try {
+        const data = await res.json();
+        message = data.error || data.message || message;
+      } catch {
+        message = res.statusText || message;
+      }
+      throw new ApiError(message, res.status);
+    }
+    return res.blob();
   },
 
   approveDeal(dealId: string, token: string) {
@@ -265,6 +300,17 @@ export type DealDetailResponse = {
 export type SubmitWorkResponse = {
   message: string;
   deal: DealView;
+};
+
+export type ArtifactKind = "source_code" | "source_file";
+
+export type Artifact = {
+  id: string;
+  deal_id: string;
+  milestone_id?: string | null;
+  kind: ArtifactKind;
+  storage_key: string;
+  uploaded_at: string;
 };
 
 export type ApproveDealResponse = {
