@@ -21,6 +21,10 @@ export default function CreateDealPage() {
   const [sourcePlatform, setSourcePlatform] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [payeeInvoice, setPayeeInvoice] = useState("");
+  const [walletURL, setWalletURL] = useState("");
+  const [walletKey, setWalletKey] = useState("");
+  const [invoiceNotice, setInvoiceNotice] = useState<string | null>(null);
+  const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [milestoneMode, setMilestoneMode] = useState(false);
@@ -43,6 +47,39 @@ export default function CreateDealPage() {
   }
   function removeMilestone(i: number) {
     setMilestones((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+  }
+
+  async function handleGenerateInvoice() {
+    setError(null);
+    setInvoiceNotice(null);
+    const amount = milestoneMode ? milestonesTotal : /^\d+$/.test(amountSats.trim()) ? parseInt(amountSats, 10) : 0;
+    if (amount <= 0) {
+      setError("Enter a positive amount before generating an invoice");
+      return;
+    }
+    if (!walletURL.trim() || !walletKey.trim()) {
+      setError("Enter your wallet URL and invoice key");
+      return;
+    }
+    setIsGeneratingInvoice(true);
+    try {
+      const res = await api.generateInvoice(
+        {
+          wallet_url: walletURL.trim(),
+          wallet_key: walletKey.trim(),
+          amount_sats: amount,
+          memo: title.trim() || "Ganji payout",
+        },
+        tokens!.access_token
+      );
+      setPayeeInvoice(res.invoice.bolt11);
+      setWalletKey("");
+      setInvoiceNotice("Payout invoice generated and filled in below.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate invoice. Try again.");
+    } finally {
+      setIsGeneratingInvoice(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -161,6 +198,24 @@ export default function CreateDealPage() {
                 <label className="block text-sm font-medium text-ink-300 mb-1.5">Your Payee Invoice (Lightning)</label>
                 <textarea name="payee_invoice" required value={payeeInvoice} onChange={(e) => setPayeeInvoice(e.target.value)} placeholder="lnbc500000u1p3... (your Lightning invoice for receiving payment)" rows={3} className="w-full rounded-lg border border-vault-border bg-vault-raised px-4 py-2.5 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30 font-mono text-xs resize-none" />
                 <p className="mt-1.5 text-xs text-ink-500">Generate a receive invoice from your Lightning wallet (Zap, Phoenix, Breez, etc.)</p>
+              </div>
+
+              <div className="rounded-lg border border-vault-border p-4 space-y-3">
+                <p className="text-sm font-medium text-ink-200">Generate payout invoice with LNbits</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-ink-500 mb-1.5">Wallet URL</label>
+                    <input type="url" value={walletURL} onChange={(e) => setWalletURL(e.target.value)} placeholder="http://localhost:5000" className="w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-ink-500 mb-1.5">Wallet invoice key</label>
+                    <input type="password" value={walletKey} onChange={(e) => setWalletKey(e.target.value)} placeholder="LNbits invoice key" className="w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30" />
+                  </div>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={handleGenerateInvoice} isLoading={isGeneratingInvoice} disabled={isSubmitting}>
+                  Generate payout invoice
+                </Button>
+                {invoiceNotice && <p className="text-xs text-green-400">{invoiceNotice}</p>}
               </div>
 
               <Button type="submit" isLoading={isSubmitting} size="lg" className="w-full">Create Deal</Button>

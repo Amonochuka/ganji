@@ -151,6 +151,14 @@ export const api = {
     return this.get<{ milestones: MilestoneView[] }>(`/public/deals/${shareToken}/milestones`);
   },
 
+  fundPublicDeal(shareToken: string, data: FundDealRequest) {
+    return this.post<FundDealResponse>(`/public/deals/${shareToken}/fund`, data);
+  },
+
+  generateInvoice(data: GenerateInvoiceRequest, token: string) {
+    return this.post<GenerateInvoiceResponse>("/deals/wallet/invoice", data, token);
+  },
+
   publicApproveDeal(shareToken: string) {
     return this.post<PublicApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
   },
@@ -332,6 +340,32 @@ export type PublicApproveDealResponse = {
 export type PublicResetPayoutResponse = {
   message: string;
   deal: PublicDeal;
+};
+
+export type FundDealRequest = {
+  wallet_url: string;
+  wallet_key: string;
+  milestone_id?: string;
+};
+
+export type FundDealResponse = {
+  message: string;
+  deal: PublicDeal;
+};
+
+export type GenerateInvoiceRequest = {
+  wallet_url: string;
+  wallet_key: string;
+  amount_sats: number;
+  memo?: string;
+};
+
+export type GenerateInvoiceResponse = {
+  invoice: {
+    bolt11: string;
+    payment_hash: string;
+    checking_id: string;
+  };
 };
 
 export type DisputeDealResponse = {

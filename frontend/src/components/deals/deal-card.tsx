@@ -1,6 +1,7 @@
 "use client";
 
 import { DealView, DealStatus } from "@/lib/api/api-client";
+import { StatusIcon } from "@/components/ui/status-icon";
 import { formatCurrency } from "@/lib/utils/format";
 
 interface DealCardProps {
@@ -8,14 +9,14 @@ interface DealCardProps {
   onClick?: () => void;
 }
 
-const statusConfig: Record<DealStatus, { label: string; className: string; icon: string }> = {
-  awaiting_payment: { label: "Awaiting Payment", className: "bg-yellow-600/20 text-yellow-400 border-yellow-600/30", icon: "⏳" },
-  locked: { label: "Locked", className: "bg-blue-600/20 text-blue-400 border-blue-600/30", icon: "🔒" },
-  work_submitted: { label: "Work Submitted", className: "bg-purple-600/20 text-purple-400 border-purple-600/30", icon: "📤" },
-  reviewing: { label: "Under Review", className: "bg-indigo-600/20 text-indigo-400 border-indigo-600/30", icon: "👁️" },
-  released: { label: "Released", className: "bg-green-600/20 text-green-400 border-green-600/30", icon: "✅" },
-  disputed: { label: "Disputed", className: "bg-red-600/20 text-red-400 border-red-600/30", icon: "⚠️" },
-  refunded: { label: "Refunded", className: "bg-gray-600/20 text-gray-400 border-gray-600/30", icon: "↩️" },
+const statusConfig: Record<DealStatus, { label: string; className: string }> = {
+  awaiting_payment: { label: "Awaiting Payment", className: "bg-yellow-600/20 text-yellow-400 border-yellow-600/30" },
+  locked: { label: "Funds Held", className: "bg-blue-600/20 text-blue-400 border-blue-600/30" },
+  work_submitted: { label: "Work Submitted", className: "bg-purple-600/20 text-purple-400 border-purple-600/30" },
+  reviewing: { label: "Under Review", className: "bg-indigo-600/20 text-indigo-400 border-indigo-600/30" },
+  released: { label: "Released", className: "bg-green-600/20 text-green-400 border-green-600/30" },
+  disputed: { label: "Disputed", className: "bg-red-600/20 text-red-400 border-red-600/30" },
+  refunded: { label: "Refunded", className: "bg-gray-600/20 text-gray-400 border-gray-600/30" },
 };
 
 export function DealCard({ deal, onClick }: DealCardProps) {
@@ -33,7 +34,7 @@ export function DealCard({ deal, onClick }: DealCardProps) {
           <p className="mt-1 text-sm text-ink-500 font-mono">{deal.source_platform}</p>
         </div>
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${config.className} whitespace-nowrap`}>
-          {config.icon} {config.label}
+          <StatusIcon status={deal.status} /> {config.label}
         </span>
       </div>
 

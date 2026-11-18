@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { StatusIcon } from "@/components/ui/status-icon";
 import { api, type PublicDeal, type DealStatus, type MilestoneView } from "@/lib/api/api-client";
 import { formatCurrency } from "@/lib/utils/format";
 
@@ -16,6 +17,10 @@ export default function PublicDealPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [fundTarget, setFundTarget] = useState<{ milestoneId?: string; label: string } | null>(null);
+  const [walletURL, setWalletURL] = useState("");
+  const [walletKey, setWalletKey] = useState("");
+  const [walletError, setWalletError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDeal();
@@ -49,6 +54,44 @@ export default function PublicDealPage() {
       await fetchDeal(true);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed: ${key}`);
+      await fetchDeal(true);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  function openFundDialog(milestoneId?: string, label = "this deal") {
+    setFundTarget({ milestoneId, label });
+    setWalletURL("");
+    setWalletKey("");
+    setWalletError(null);
+    setActionError(null);
+  }
+
+  function closeFundDialog() {
+    setFundTarget(null);
+    setWalletKey("");
+    setWalletError(null);
+  }
+
+  async function handleFund() {
+    if (!fundTarget) return;
+    const key = fundTarget.milestoneId ? `fund-${fundTarget.milestoneId}` : "fund";
+    setActionLoading(key);
+    setActionError(null);
+    setWalletError(null);
+    try {
+      const res = await api.fundPublicDeal(shareToken, {
+        wallet_url: walletURL.trim(),
+        wallet_key: walletKey.trim(),
+        ...(fundTarget.milestoneId ? { milestone_id: fundTarget.milestoneId } : {}),
+      });
+      setDeal(res.deal);
+      closeFundDialog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Funding failed";
+      setActionError(message);
+      setWalletError(message);
       await fetchDeal(true);
     } finally {
       setActionLoading(null);
@@ -116,7 +159,7 @@ export default function PublicDealPage() {
         <div className="w-full max-w-xl text-center">
           <Link href="/" className="logo-gnj inline-block mb-8" aria-label="Ganji Home">ganji</Link>
           <div className="vault-card p-8 vault-seam">
-            <div className="text-4xl mb-4">🔍</div>
+            <StatusIcon status="search" className="mx-auto mb-4 h-10 w-10 text-ink-500" />
             <h1 className="font-display text-2xl font-semibold text-ink-100 mb-2">Deal Not Found</h1>
             <p className="text-ink-500 mb-6">{error || "This deal link is invalid or has expired."}</p>
             <div className="flex items-center justify-center gap-3">
@@ -132,7 +175,8 @@ export default function PublicDealPage() {
   const isPaid = deal.status === "released";
   const isRefunded = deal.status === "refunded";
   const isDisputed = deal.status === "disputed";
-  const canApproveDeal = deal.status === "work_submitted" || deal.status === "locked";
+  const canApproveDeal = deal.status === "work_submitted" || deal.status === "reviewing";
+  const fundsHeld = ["locked", "work_submitted", "reviewing"].includes(deal.status);
   const canResetDealPayout = !!deal.payout_reset_available;
   const milestones = deal.milestones || [];
   const hasMilestones = milestones.length > 0;
@@ -151,7 +195,7 @@ export default function PublicDealPage() {
         <div className="mx-auto w-full max-w-xl space-y-6">
           <div className="text-center">
             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${getStatusClass(deal.status)}`}>
-              {getStatusIcon(deal.status)} {getStatusLabel(deal.status)}
+              <StatusIcon status={deal.status} /> {getStatusLabel(deal.status)}
             </span>
           </div>
 
@@ -166,21 +210,27 @@ export default function PublicDealPage() {
 
             {deal.dispute_reason && (
               <div className="mb-6 p-4 rounded-lg bg-red-600/10 border border-red-600/30">
-                <p className="font-medium text-red-400 mb-1">⚠️ Dispute / Issue</p>
+                <p className="flex items-center justify-center gap-1.5 font-medium text-red-400 mb-1"><StatusIcon status="disputed" /> Dispute / Issue</p>
                 <p className="text-sm text-ink-300">{deal.dispute_reason}</p>
               </div>
             )}
 
             {isPaid && (
               <div className="mb-6 p-4 rounded-lg bg-green-600/10 border border-green-600/30 text-center">
-                <p className="font-medium text-green-400 mb-1">✅ Payment Released</p>
+                <p className="flex items-center justify-center gap-1.5 font-medium text-green-400 mb-1"><StatusIcon status="released" /> Payment Released</p>
                 <p className="text-sm text-ink-300">Escrow released to the freelancer.</p>
               </div>
             )}
             {isRefunded && (
               <div className="mb-6 p-4 rounded-lg bg-gray-600/10 border border-gray-600/30 text-center">
-                <p className="font-medium text-gray-400 mb-1">↩️ Refunded / Cancelled</p>
+                <p className="flex items-center justify-center gap-1.5 font-medium text-gray-400 mb-1"><StatusIcon status="refunded" /> Refunded / Cancelled</p>
                 <p className="text-sm text-ink-300">Funds returned per policy for the exited/unfunded portion.</p>
+              </div>
+            )}
+            {fundsHeld && (
+              <div className="mb-6 p-4 rounded-lg bg-blue-600/10 border border-blue-600/30 text-center">
+                <p className="flex items-center justify-center gap-1.5 font-medium text-blue-400 mb-1"><StatusIcon status="locked" /> Funds held in escrow</p>
+                <p className="text-sm text-ink-300">Ganji verified the Lightning hold. The freelancer can see that funding is committed.</p>
               </div>
             )}
 
@@ -194,6 +244,11 @@ export default function PublicDealPage() {
                     <input type="text" readOnly value={deal.invoice} className="flex-1 rounded-lg border border-vault-border bg-vault-bg px-3 py-2 text-xs font-mono text-ink-400" />
                     <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(deal.invoice)}>Copy</Button>
                   </div>
+                  {!hasMilestones && deal.status === "awaiting_payment" && (
+                    <Button className="mt-3 w-full" onClick={() => openFundDialog(undefined, "this deal")} isLoading={actionLoading === "fund"} disabled={!!actionLoading}>
+                      Fund from linked wallet
+                    </Button>
+                  )}
                   {hasMilestones ? (
                     <p className="mt-2 text-xs text-ink-500">
                       Milestone invoices are applied sequentially (M1 → M2…). Each milestone is funded, reviewed, and released before the next begins.
@@ -252,6 +307,7 @@ export default function PublicDealPage() {
                     isLast={i === milestones.length - 1}
                     canAct={!terminal && !isDisputed}
                     actionLoading={actionLoading}
+                    onFund={() => openFundDialog(ms.id, `milestone ${ms.order}`)}
                     onAcceptNext={() => handleAcceptNext(ms.id)}
                     onReject={() => handleReject(ms.id)}
                     onResetPayout={() => handleResetPayout(ms.id)}
@@ -267,7 +323,7 @@ export default function PublicDealPage() {
                     <p className="mt-1 text-xs text-gold-400">Work submitted on the deal is recorded here.</p>
                   </div>
                   <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${getStatusClass(deal.status)}`}>
-                    {getStatusIcon(deal.status)} {getStatusLabel(deal.status)}
+                    <StatusIcon status={deal.status} /> {getStatusLabel(deal.status)}
                   </span>
                 </div>
               </div>
@@ -291,13 +347,45 @@ export default function PublicDealPage() {
           </div>
         </div>
       </div>
+
+      {fundTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6" onMouseDown={closeFundDialog}>
+          <div className="vault-card w-full max-w-md p-6 vault-seam" onMouseDown={(event) => event.stopPropagation()}>
+            <h2 className="font-display text-xl font-semibold text-ink-100 mb-2">Link wallet to fund {fundTarget.label}</h2>
+            <p className="text-xs text-ink-500 mb-5">
+              Enter your LNbits wallet URL and admin key. Ganji uses them only for this payment and does not store them.
+            </p>
+            <label className="block text-sm font-medium text-ink-300 mb-1.5">Wallet URL</label>
+            <input
+              type="url"
+              value={walletURL}
+              onChange={(event) => setWalletURL(event.target.value)}
+              placeholder="http://localhost:5000"
+              className="mb-4 w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30"
+            />
+            <label className="block text-sm font-medium text-ink-300 mb-1.5">Wallet admin key</label>
+            <input
+              type="password"
+              value={walletKey}
+              onChange={(event) => setWalletKey(event.target.value)}
+              placeholder="LNbits admin key"
+              className="w-full rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30"
+            />
+            {walletError && <p className="mt-3 text-sm text-red-400">{walletError}</p>}
+            <div className="mt-6 flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={closeFundDialog} disabled={!!actionLoading}>Cancel</Button>
+              <Button className="flex-1" onClick={handleFund} isLoading={!!actionLoading} disabled={!!actionLoading}>Pay hold invoice</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
-function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onReject, onResetPayout }: {
+function MilestoneRow({ ms, isLast, canAct, actionLoading, onFund, onAcceptNext, onReject, onResetPayout }: {
   ms: MilestoneView; isLast: boolean; canAct: boolean; actionLoading: string | null;
-  onAcceptNext: () => void; onReject: () => void; onResetPayout: () => void;
+  onFund: () => void; onAcceptNext: () => void; onReject: () => void; onResetPayout: () => void;
 }) {
   const needsFunding = ms.status === "awaiting_payment" && !!ms.invoice;
   const actionable = canAct && (ms.status === "in_progress" || ms.status === "pending" || ms.status === "completed" || ms.status === "funded" || ms.status === "work_submitted" || ms.status === "awaiting_payment");
@@ -318,6 +406,15 @@ function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onRejec
             <input type="text" readOnly value={ms.invoice || ""} className="flex-1 rounded border border-vault-border bg-vault-bg px-2 py-1 text-xs font-mono text-ink-400" />
             <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(ms.invoice || "")}>Copy</Button>
           </div>
+          <Button
+            size="sm"
+            className="mt-2 w-full"
+            onClick={onFund}
+            isLoading={actionLoading === `fund-${ms.id}`}
+            disabled={!!actionLoading}
+          >
+            Fund from linked wallet
+          </Button>
         </div>
       )}
       {canAct && ms.payout_reset_available && (
@@ -360,10 +457,7 @@ function msStatusClass(s: string) {
   return ({ pending: "bg-yellow-600/20 text-yellow-400", awaiting_payment: "bg-yellow-600/20 text-yellow-400", funded: "bg-blue-600/20 text-blue-400", in_progress: "bg-blue-600/20 text-blue-400", work_submitted: "bg-gold-500/20 text-gold-400", completed: "bg-blue-600/20 text-blue-400", released: "bg-green-600/20 text-green-400", exited: "bg-red-600/20 text-red-400", rejected: "bg-orange-600/20 text-orange-400", disputed: "bg-red-600/20 text-red-400", refunded: "bg-gray-600/20 text-gray-400" } as Record<string,string>)[s] || "bg-gray-600/20 text-gray-400";
 }
 function getStatusLabel(status: DealStatus): string {
-  return ({ awaiting_payment: "Awaiting Payment", locked: "Funds Locked", work_submitted: "Work Submitted", reviewing: "Under Review", released: "Released", disputed: "Disputed", refunded: "Refunded" } as Record<DealStatus,string>)[status];
-}
-function getStatusIcon(status: DealStatus): string {
-  return ({ awaiting_payment: "⏳", locked: "🔒", work_submitted: "📤", reviewing: "👁️", released: "✅", disputed: "⚠️", refunded: "↩️" } as Record<DealStatus,string>)[status];
+  return ({ awaiting_payment: "Awaiting Payment", locked: "Funds Held", work_submitted: "Work Submitted", reviewing: "Under Review", released: "Released", disputed: "Disputed", refunded: "Refunded" } as Record<DealStatus,string>)[status];
 }
 function getStatusClass(status: DealStatus): string {
   return ({ awaiting_payment: "bg-yellow-600/20 text-yellow-400 border-yellow-600/30", locked: "bg-blue-600/20 text-blue-400 border-blue-600/30", work_submitted: "bg-purple-600/20 text-purple-400 border-purple-600/30", reviewing: "bg-indigo-600/20 text-indigo-400 border-indigo-600/30", released: "bg-green-600/20 text-green-400 border-green-600/30", disputed: "bg-red-600/20 text-red-400 border-red-600/30", refunded: "bg-gray-600/20 text-gray-400 border-gray-600/30" } as Record<DealStatus,string>)[status];

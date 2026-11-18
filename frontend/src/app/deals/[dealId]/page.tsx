@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { StatusIcon } from "@/components/ui/status-icon";
 import { DealCard } from "@/components/deals/deal-card";
 import { api, type Artifact, type ArtifactKind, type DealView, type DealStatus, type DealDetailResponse, type SubmitWorkResponse, type DisputeDealResponse, type MilestoneView } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -211,8 +212,9 @@ export default function DealDetailPage() {
 
   const isFreelancer = user?.id === deal.freelancer_id;
   const isClient = !!user && user.email.toLowerCase() === deal.client_email.toLowerCase();
-  const canAttachArtifact = isFreelancer && (deal.status === "locked" || deal.status === "awaiting_payment");
+  const canAttachArtifact = isFreelancer && deal.status === "locked";
   const canSubmit = canAttachArtifact && artifacts.length > 0;
+  const fundsHeld = ["locked", "work_submitted", "reviewing"].includes(deal.status);
   const canDispute = isFreelancer && (deal.status === "locked" || deal.status === "work_submitted" || deal.status === "reviewing");
   const canRotateLink = isFreelancer;
   const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(deal.status);
@@ -232,13 +234,19 @@ export default function DealDetailPage() {
               <h1 className="font-display text-3xl font-semibold text-ink-100">{deal.title}</h1>
             </div>
             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${getStatusClass(deal.status)}`}>
-              {getStatusIcon(deal.status)} {getStatusLabel(deal.status)}
+              <StatusIcon status={deal.status} /> {getStatusLabel(deal.status)}
             </span>
           </div>
 
           {(actionError || notice) && (
             <div className={`mb-6 p-4 rounded-lg text-sm border ${actionError ? "bg-yellow-600/10 border-yellow-600/30 text-yellow-400" : "bg-green-600/10 border-green-600/30 text-green-400"}`}>
               {actionError || notice}
+            </div>
+          )}
+
+          {fundsHeld && (
+            <div className="mb-6 p-4 rounded-lg bg-blue-600/10 border border-blue-600/30 text-sm text-blue-400">
+              <span className="inline-flex items-center gap-1.5"><StatusIcon status="locked" /> Funds held in Lightning escrow. Ganji verified the hold; work can proceed.</span>
             </div>
           )}
 
@@ -288,7 +296,7 @@ export default function DealDetailPage() {
 
               {deal.dispute_reason && (
                 <div className="vault-card p-6 vault-seam border-red-600/30 bg-red-600/5">
-                  <h2 className="font-display text-lg font-semibold text-red-400 mb-2 flex items-center gap-2">⚠️ Dispute</h2>
+                  <h2 className="font-display text-lg font-semibold text-red-400 mb-2 flex items-center gap-2"><StatusIcon status="disputed" /> Dispute</h2>
                   <p className="text-ink-300">{deal.dispute_reason}</p>
                   {deal.disputed_at && (
                     <p className="mt-2 text-xs text-ink-500 font-mono">Disputed at {new Date(deal.disputed_at).toLocaleString()}</p>
@@ -447,7 +455,7 @@ export default function DealDetailPage() {
                     )}
                     {deal.status === "released" && (
                       <span className="flex items-center px-3 py-2 text-sm text-green-400 bg-green-600/10 rounded-lg border border-green-600/30">
-                        ✅ Released — {formatCurrency(deal.amount_sats)} paid to your invoice
+                        <StatusIcon status="released" /> Released — {formatCurrency(deal.amount_sats)} paid to your invoice
                       </span>
                     )}
                   </div>
@@ -492,12 +500,12 @@ export default function DealDetailPage() {
                     )}
                     {deal.status === "released" && (
                       <span className="flex items-center px-3 py-2 text-sm text-green-400 bg-green-600/10 rounded-lg border border-green-600/30">
-                        ✅ Payment released to the freelancer
+                        <StatusIcon status="released" /> Payment released to the freelancer
                       </span>
                     )}
                     {deal.status === "refunded" && (
                       <span className="flex items-center px-3 py-2 text-sm text-gray-400 bg-gray-600/10 rounded-lg border border-gray-600/30">
-                        ↩️ Escrow refunded
+                        <StatusIcon status="refunded" /> Escrow refunded
                       </span>
                     )}
                     {deal.status !== "released" && deal.status !== "refunded" && (
@@ -526,7 +534,7 @@ export default function DealDetailPage() {
                           <p className="mt-1 text-xs text-gold-400">Work submitted on the deal is recorded here.</p>
                         </div>
                         <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border ${getStatusClass(deal.status)}`}>
-                          {getStatusIcon(deal.status)} {getStatusLabel(deal.status)}
+                          <StatusIcon status={deal.status} /> {getStatusLabel(deal.status)}
                         </span>
                       </div>
                     </div>
@@ -564,11 +572,11 @@ export default function DealDetailPage() {
                   </p>
                   {deal.verified_at ? (
                     <div className="p-3 rounded-lg bg-green-600/10 border border-green-600/30 text-green-400 text-sm">
-                      ✅ Verified on Bitcoin at {new Date(deal.verified_at).toLocaleString()}
+                      <span className="inline-flex items-center gap-1.5"><StatusIcon status="valid" /> Verified on Bitcoin at {new Date(deal.verified_at).toLocaleString()}</span>
                     </div>
                   ) : (
                     <div className="p-3 rounded-lg bg-yellow-600/10 border border-yellow-600/30 text-yellow-400 text-sm">
-                      ⏳ Pending verification (anchors on release)
+                      <span className="inline-flex items-center gap-1.5"><StatusIcon status="awaiting_payment" /> Pending verification (anchors on release)</span>
                     </div>
                   )}
                 </div>
@@ -630,12 +638,8 @@ function getStatusClass(status: string): string {
   };
   return map[status] || "bg-gray-600/10 text-gray-400 border-gray-600/30";
 }
-function getStatusIcon(status: string): string {
-  const map: Record<string, string> = { awaiting_payment: "⏳", locked: "🔒", work_submitted: "📤", reviewing: "👀", released: "✅", disputed: "⚠️", refunded: "↩️" };
-  return map[status] || "•";
-}
 function getStatusLabel(status: string): string {
-  const map: Record<string, string> = { awaiting_payment: "Awaiting payment", locked: "Locked", work_submitted: "Work submitted", reviewing: "Reviewing", released: "Released", disputed: "Disputed", refunded: "Refunded" };
+  const map: Record<string, string> = { awaiting_payment: "Awaiting payment", locked: "Funds held", work_submitted: "Work submitted", reviewing: "Reviewing", released: "Released", disputed: "Disputed", refunded: "Refunded" };
   return map[status] || status.replace(/_/g, " ");
 }
 

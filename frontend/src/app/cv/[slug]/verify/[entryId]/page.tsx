@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { StatusIcon } from "@/components/ui/status-icon";
 import { api, type VerifyResult } from "@/lib/api/api-client";
 
 export default function VerifyEntryPage() {
@@ -59,7 +60,10 @@ export default function VerifyEntryPage() {
             <div className="space-y-6">
               <div className={`vault-card p-6 vault-seam ${result.valid && result.matches_current ? "border-green-600/30" : "border-red-600/30"}`}>
                 <div className="flex items-center gap-3 mb-4">
-                  <span className="text-2xl">{result.valid && result.matches_current ? "✅" : "❌"}</span>
+                  <StatusIcon
+                    status={result.valid && result.matches_current ? "valid" : "invalid"}
+                    className={`h-8 w-8 ${result.valid && result.matches_current ? "text-green-400" : "text-red-400"}`}
+                  />
                   <div>
                     <p className="font-display text-lg font-semibold text-ink-100">
                       {result.valid && result.matches_current ? "Hash matches — entry intact" : "Hash mismatch — possible tampering"}
