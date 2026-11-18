@@ -95,12 +95,6 @@ lnbits-health: ## Test LNbits connectivity
 	@source $(ENV_FILE) 2>/dev/null || true; \
 	curl -s -H "X-Api-Key: $$LNBITS_API_KEY" $$LNBITS_URL/api/v1/wallet | jq .
 
-.PHONY: lnbits-fund-regtest
-lnbits-fund-regtest: ## Fund LNbits wallet on regtest (requires bitcoind container)
-	@echo "Generating 101 blocks to fund wallet..."
-	docker exec bitcoind bitcoin-cli -regtest -rpcuser=user -rpcpassword=pass generatetoaddress 101 $$(docker exec bitcoind bitcoin-cli -regtest -rpcuser=user -rpcpassword=pass getnewaddress)
-	@echo "✓ Wallet funded"
-
 # ─── ngrok ──────────────────────────────────────────────────────────────────
 
 .PHONY: ngrok

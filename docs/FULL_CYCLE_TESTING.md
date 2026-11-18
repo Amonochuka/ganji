@@ -82,64 +82,21 @@ This interactive script will:
 
 ## Option 2: Full Regtest (No Real Funds)
 
-### 1. Start Bitcoin Core + LND + LNbits (Docker Compose)
-Create `docker-compose.yml`:
-```yaml
-version: '3.8'
-services:
-  bitcoind:
-    image: ruimarinho/bitcoin-core:26.0
-    ports: ["18443:18443", "18444:18444"]
-    volumes: [bitcoind-data:/bitcoin]
-    command: -regtest -fallbackfee=0.0001 -server -rpcuser=user -rpcpassword=pass -rpcallowip=0.0.0.0/0
+Use the current Polar-based stack in [`POLAR_LNBITS_SETUP.md`](./POLAR_LNBITS_SETUP.md):
+Polar network 3 provides bitcoind and the LND nodes (`polar-n3-Es` escrow,
+`polar-n3-Cl` client, `polar-n3-Fre` freelancer). Ganji's LNbits runs from the
+root `lnbits-docker-compose.yml` and joins `polar-network-3_default`.
 
-  lnd:
-    image: lightninglabs/lnd:v0.18.0-beta
-    ports: ["10009:10009", "8080:8080"]
-    volumes: [lnd-data:/lnd, ./lnd.conf:/etc/lnd/lnd.conf]
-    depends_on: [bitcoind]
-
-  lnbits:
-    image: lnbits/lnbits:latest
-    ports: ["5000:5000"]
-    environment:
-      - LNBITS_NETWORK=regtest
-      - LNBITS_BACKEND_WALLET_CLASS=LndRestWallet
-      - LND_REST_ENDPOINT=http://lnd:8080
-      - LND_REST_CERT=/lnd/tls.cert
-      - LND_REST_MACAROON=/lnd/admin.macaroon
-    volumes: [lnbits-data:/data]
-    depends_on: [lnd]
-
-volumes:
-  bitcoind-data:
-  lnd-data:
-  lnbits-data:
-```
-
-Create `lnd.conf`:
-```
-[Application Options]
-debuglevel=info
-[Bitcoin]
-bitcoin.regtest=1
-[Bitcoind]
-bitcoind.rpchost=bitcoind:18443
-bitcoind.rpcuser=user
-bitcoind.rpcpass=pass
-bitcoind.zmqpubrawblock=tcp://bitcoind:28332
-bitcoind.zmqpubrawtx=tcp://bitcoind:28333
-```
-
-Start:
 ```bash
-docker-compose up -d
-# Wait for all services healthy (check docker-compose logs -f)
-# Fund wallet:
-make lnbits-fund-regtest
+docker compose -f lnbits-docker-compose.yml up -d
 ```
 
-### 2. Configure Environment
+Follow [`POLAR_LNBITS_SETUP.md`](./POLAR_LNBITS_SETUP.md) for funding the nodes
+and [`DEMO_RUNBOOK.md`](./DEMO_RUNBOOK.md) for the full cycle. The old
+standalone `lnbits-regtest/` Compose stack and `make lnbits-fund-regtest` target
+were removed.
+
+### 1. Configure Environment
 ```bash
 LNBITS_URL=http://localhost:5000
 LNBITS_API_KEY=your_invoice_key_from_lnbits_ui
@@ -151,7 +108,7 @@ LND_REST_CERT_PATH=/path/to/es/tls.cert
 LND_REST_MACAROON_PATH=/path/to/es/admin.macaroon
 ```
 
-### 3. Test
+### 2. Test
 ```bash
 make db-up && make run
 # In another terminal:
