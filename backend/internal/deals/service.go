@@ -1110,16 +1110,10 @@ func isHoldReleased(status string) bool {
 	}
 }
 
-// CheckPayment queries LNbits for the payment status of a deal's hold
-// invoice. If the payment is confirmed paid (held on the network under the
-// payment hash), the deal transitions from awaiting_payment to locked. The
-// caller should never be trusted to set the status directly — the backend
-// determines it from LNbits.
-//
-// Backend autodetection: on CLN-backed LNbits a held invoice already
-// reports paid=true, so this locks as soon as the client pays. On LND-backed
-// LNbits a held invoice stays unpaid (paid=false) until it is settled, so
-// the escrow node's LND REST API is checked for an accepted hold first.
+// CheckPayment queries the escrow node for an accepted hold on a deal's
+// invoice. LNbits paid=true is not proof that funds are locked, so the deal
+// only transitions from awaiting_payment to locked after the escrow node
+// reports an accepted hold under the deal's payment hash.
 func (s *Service) CheckPayment(ctx context.Context, userID, dealID string) (*Deal, error) {
 	deal, err := s.repo.GetDealByID(ctx, dealID)
 	if err != nil {
@@ -1141,37 +1135,36 @@ func (s *Service) CheckPayment(ctx context.Context, userID, dealID string) (*Dea
 	return deal, nil
 }
 
-// refreshPaymentStatus asks LNbits and, for accepted LND holds, the escrow
-// node for the hold's current state. It moves an awaiting_payment deal to
-// locked once funds are committed. LNbits/LND errors are returned so the
-// authed caller can surface them; the public link treats them as best-effort.
+// refreshPaymentStatus confirms the invoice with LNbits, asks the escrow node
+// for an accepted hold, and moves an awaiting_payment deal to locked only once
+// funds are committed. Verification errors are returned so callers cannot
+// mistake an unknown state for funding.
 func (s *Service) refreshPaymentStatus(ctx context.Context, deal *Deal) error {
-	payment, err := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+	if deal.Status != StatusAwaitingPayment {
+		return nil
+	}
+	if _, err := s.lnbits.CheckPayment(ctx, deal.CheckingID); err != nil {
+		return err
+	}
+	if s.acceptedHolds == nil || deal.PreimageHash == "" {
+		return ErrVerificationUnavailable
+	}
+
+	accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
 	if err != nil {
 		return err
 	}
-
-	funded := payment.Paid
-	if !funded && deal.Status == StatusAwaitingPayment && s.acceptedHolds != nil && deal.PreimageHash != "" {
-		funded, err = s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
-		if err != nil {
-			return err
-		}
-	}
-
-	if !funded {
+	if !accepted {
 		return nil
 	}
 
-	if deal.Status == StatusAwaitingPayment {
-		transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, StatusAwaitingPayment, StatusLocked)
-		if err != nil {
-			return err
-		}
-		if transitioned {
-			deal.Status = StatusLocked
-			s.notifyPaymentLocked(deal)
-		}
+	transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, StatusAwaitingPayment, StatusLocked)
+	if err != nil {
+		return err
+	}
+	if transitioned {
+		deal.Status = StatusLocked
+		s.notifyPaymentLocked(deal)
 	}
 
 	return nil

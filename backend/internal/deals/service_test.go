@@ -1243,7 +1243,7 @@ func TestUpdateStatusBlocksClientOnlyTransitions(t *testing.T) {
 	}
 }
 
-func TestCheckPaymentLocksWhenPaid(t *testing.T) {
+func TestCheckPaymentDoesNotLockOnPaidWithoutProof(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1263,16 +1263,12 @@ func TestCheckPaymentLocksWhenPaid(t *testing.T) {
 
 	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}))
 
-	result, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	_, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if !errors.Is(err, ErrVerificationUnavailable) {
+		t.Fatalf("expected verification unavailable, got %v", err)
 	}
-
-	if result.Status != StatusLocked {
-		t.Errorf("expected the deal to be locked, got %s", result.Status)
-	}
-	if repo.deals[deal.ID].Status != StatusLocked {
-		t.Errorf("expected repo status locked, got %s", repo.deals[deal.ID].Status)
+	if repo.deals[deal.ID].Status != StatusAwaitingPayment {
+		t.Errorf("expected paid=true without accepted hold to stay awaiting_payment, got %s", repo.deals[deal.ID].Status)
 	}
 }
 
@@ -1352,14 +1348,13 @@ func TestCheckPaymentReturnsLNDFundingError(t *testing.T) {
 	}
 }
 
-func TestCheckPaymentKeepsAwaitingPaymentWhileHeld(t *testing.T) {
-	// LND-backed LNbits does not report a held invoice as paid. The deal
-	// must stay awaiting_payment — it only moves on approve, because settle
-	// is what atomically proves the funds were held.
+func TestCheckPaymentRequiresAcceptedHoldVerifier(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
 	deal.CheckingID = "checking-1"
+	deal.PreimageHash = "bb"
+	deal.AmountSats = 5000
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1369,13 +1364,12 @@ func TestCheckPaymentKeepsAwaitingPaymentWhileHeld(t *testing.T) {
 
 	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}))
 
-	result, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	_, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if !errors.Is(err, ErrVerificationUnavailable) {
+		t.Fatalf("expected verification unavailable, got %v", err)
 	}
-
-	if result.Status != StatusAwaitingPayment {
-		t.Errorf("expected deal to stay awaiting_payment while held, got %s", result.Status)
+	if repo.deals[deal.ID].Status != StatusAwaitingPayment {
+		t.Errorf("expected deal to stay awaiting_payment without verification, got %s", repo.deals[deal.ID].Status)
 	}
 }
 
@@ -1582,8 +1576,8 @@ func TestGetPublicDealReturnsSafeView(t *testing.T) {
 
 func TestGetPublicDealLocksWhenPaymentConfirmed(t *testing.T) {
 	// The client who opens the share link has no account and can never call
-	// the freelancer-only poll endpoint — the public view itself must refresh
-	// the LNbits hold status and lock the deal when the payment landed.
+	// the freelancer-only poll endpoint — the public view itself must check
+	// the escrow node and lock the deal when the hold is accepted.
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1595,7 +1589,7 @@ func TestGetPublicDealLocksWhenPaymentConfirmed(t *testing.T) {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
 		_, _ = w.Write([]byte(`{"paid":true,"details":{"status":"HOLD"}}`))
-	}))
+	}), WithAcceptedHoldChecker(&fakeAcceptedHoldChecker{accepted: true}))
 
 	publicDeal, err := service.GetPublicDeal(context.Background(), "abc123")
 	if err != nil {

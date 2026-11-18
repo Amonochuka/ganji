@@ -54,20 +54,16 @@ func (s *Service) SetAcceptedHoldChecker(checker deals.AcceptedHoldChecker) {
 	s.acceptedHolds = checker
 }
 
-// HandlePayment processes an LNbits payment notification and transitions
-// the matching deal from awaiting_payment to locked when payment succeeds.
+// HandlePayment processes an LNbits payment notification and transitions the
+// matching deal from awaiting_payment to locked only when the escrow node has
+// accepted the hold.
 func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotification) error {
 	if notification.CheckingID == "" {
 		return fmt.Errorf("%w: missing checking_id", ErrMalformedPayload)
 	}
 
-	payment, err := s.lnbits.CheckPayment(ctx, notification.CheckingID)
-	if err != nil {
+	if _, err := s.lnbits.CheckPayment(ctx, notification.CheckingID); err != nil {
 		return fmt.Errorf("verify payment with lnbits: %w", err)
-	}
-
-	if !payment.Paid {
-		return fmt.Errorf("%w: payment not confirmed by lnbits", ErrPaymentFailed)
 	}
 
 	deal, err := s.repo.GetDealByCheckingID(ctx, notification.CheckingID)
@@ -78,15 +74,19 @@ func (s *Service) HandlePayment(ctx context.Context, notification *PaymentNotifi
 
 		return fmt.Errorf("lookup deal by checking_id: %w", err)
 	}
+	if deal.Status != deals.StatusAwaitingPayment {
+		return nil
+	}
+	if s.acceptedHolds == nil {
+		return fmt.Errorf("verify accepted hold with escrow node: %w", deals.ErrVerificationUnavailable)
+	}
 
-	if s.acceptedHolds != nil {
-		accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
-		if err != nil {
-			return fmt.Errorf("verify accepted hold with escrow node: %w", err)
-		}
-		if !accepted {
-			return fmt.Errorf("%w: escrow node has not accepted the hold", ErrPaymentFailed)
-		}
+	accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
+	if err != nil {
+		return fmt.Errorf("verify accepted hold with escrow node: %w", err)
+	}
+	if !accepted {
+		return fmt.Errorf("%w: escrow node has not accepted the hold", ErrPaymentFailed)
 	}
 
 	transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, deals.StatusAwaitingPayment, deals.StatusLocked)

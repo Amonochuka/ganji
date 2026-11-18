@@ -73,7 +73,7 @@ func (f *fakeDealReader) UpdateStatusIfCurrent(
 	return true, nil
 }
 
-func TestHandlePaymentLocksPaidDeal(t *testing.T) {
+func TestHandlePaymentRequiresAcceptedHoldVerifier(t *testing.T) {
 	paymentChecker := &fakePaymentChecker{
 		payment: &lnbits.CheckPaymentResponse{
 			Paid: true,
@@ -94,8 +94,8 @@ func TestHandlePaymentLocksPaidDeal(t *testing.T) {
 	}
 
 	err := service.HandlePayment(context.Background(), notification)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if !errors.Is(err, deals.ErrVerificationUnavailable) {
+		t.Fatalf("expected verification unavailable, got %v", err)
 	}
 
 	if paymentChecker.lastCheckingID != "checking-123" {
@@ -105,18 +105,8 @@ func TestHandlePaymentLocksPaidDeal(t *testing.T) {
 		)
 	}
 
-	if dealReader.updatedDealID != "deal-123" {
-		t.Fatalf(
-			"expected deal-123 to be updated, got %s",
-			dealReader.updatedDealID,
-		)
-	}
-
-	if dealReader.updatedStatus != deals.StatusLocked {
-		t.Fatalf(
-			"expected status locked, got %s",
-			dealReader.updatedStatus,
-		)
+	if dealReader.updatedDealID != "" {
+		t.Fatalf("expected no deal update, got %q", dealReader.updatedDealID)
 	}
 }
 
@@ -129,12 +119,15 @@ func TestHandlePaymentDoesNotLockUnpaidDeal(t *testing.T) {
 
 	dealReader := &fakeDealReader{
 		deal: &deals.Deal{
-			ID:     "deal-123",
-			Status: deals.StatusAwaitingPayment,
+			ID:           "deal-123",
+			Status:       deals.StatusAwaitingPayment,
+			PreimageHash: "hash-1",
+			AmountSats:   5000,
 		},
 	}
 
 	service := NewService(dealReader, paymentChecker)
+	service.SetAcceptedHoldChecker(&fakeAcceptedHoldChecker{})
 
 	notification := &PaymentNotification{
 		CheckingID: "checking-123",
@@ -285,7 +278,7 @@ func (f *fakeAcceptedHoldChecker) IsAcceptedHold(_ context.Context, paymentHash 
 
 func TestHandlePaymentLocksOnlyAcceptedHold(t *testing.T) {
 	paymentChecker := &fakePaymentChecker{
-		payment: &lnbits.CheckPaymentResponse{Paid: true},
+		payment: &lnbits.CheckPaymentResponse{Paid: false},
 	}
 	dealReader := &fakeDealReader{
 		deal: &deals.Deal{

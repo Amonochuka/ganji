@@ -87,6 +87,7 @@ func TestHandleLNbitsWebhookAcceptsValidSignature(t *testing.T) {
 	}
 
 	service := NewService(dealReader, paymentChecker)
+	service.SetAcceptedHoldChecker(&fakeAcceptedHoldChecker{accepted: true})
 	router := setupWebhookRouterWithSecret(service, "wallet-secret")
 
 	body := `{"checking_id":"checking-123"}`
@@ -181,6 +182,7 @@ func TestHandleLNbitsWebhookReturnsOKForPaidPayment(t *testing.T) {
 	}
 
 	service := NewService(dealReader, paymentChecker)
+	service.SetAcceptedHoldChecker(&fakeAcceptedHoldChecker{accepted: true})
 	router := setupWebhookRouter(service)
 
 	body := `{"checking_id":"checking-123"}`
@@ -253,12 +255,15 @@ func TestHandleLNbitsWebhookIgnoresUnpaidPayment(t *testing.T) {
 
 	dealReader := &fakeDealReader{
 		deal: &deals.Deal{
-			ID:     "deal-123",
-			Status: deals.StatusAwaitingPayment,
+			ID:           "deal-123",
+			Status:       deals.StatusAwaitingPayment,
+			PreimageHash: "hash-1",
+			AmountSats:   5000,
 		},
 	}
 
 	service := NewService(dealReader, paymentChecker)
+	service.SetAcceptedHoldChecker(&fakeAcceptedHoldChecker{})
 	router := setupWebhookRouter(service)
 
 	request := httptest.NewRequest(
