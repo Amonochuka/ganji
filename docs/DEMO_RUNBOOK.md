@@ -33,6 +33,32 @@ You mine blocks **only at setup**, not per deal. In production nobody mines — 
 | **Polar** | Polar desktop app | No login/password by default | It is a local desktop app. If you set a password, use your own; nothing is stored in this repo. |
 | **Ganji frontend** | `http://localhost:3000` | Signup/login with a local test user | Demo deal uses freelancer `polar@test.com` and client `local@test.com`. |
 
+### Polar install on Ubuntu (user-local, no sudo)
+
+Polar was installed from the official GitHub release as an AppImage:
+
+```bash
+mkdir -p ~/Applications ~/.local/share/applications
+curl -fL -o ~/Applications/polar.AppImage \
+  https://github.com/jamaljsr/polar/releases/download/v4.0.0/polar-linux-x86_64-v4.0.0.AppImage
+chmod +x ~/Applications/polar.AppImage
+```
+
+Expected SHA-256 for `polar-linux-x86_64-v4.0.0.AppImage`:
+
+```text
+b59657fd9c9b0b0a69395e055f7c9c1468ec8f874cfb5597da8fdfa64345fc9c
+```
+
+This machine has no `libfuse2`, so launch with AppImage extraction mode and Electron sandbox flags:
+
+```bash
+DISPLAY=:0 ~/Applications/polar.AppImage \
+  --appimage-extract-and-run --no-sandbox --disable-setuid-sandbox
+```
+
+A desktop launcher is installed at `~/.local/share/applications/polar.desktop` with the same flags. Polar has no default login/password; it is a local desktop app.
+
 ### Where to see escrow in each UI
 
 **LNbits UI** (`http://localhost:5000`, login above):
