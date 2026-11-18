@@ -11,6 +11,8 @@ services:
       - LNBITS_ADMIN_UI=true
       - LNBITS_ALLOW_PUBLIC_ACCOUNT_CREATION=true
       - LNBITS_DATA_FOLDER=/data
+      - LNBITS_RESERVE_FEE_MIN=0
+      - LNBITS_RESERVE_FEE_PERCENT=0
     volumes:
       - lnbits-data:/data
       - /home/amonoff/.polar/networks/3/volumes/lnd/alice/tls.cert:/certs/tls.cert:ro

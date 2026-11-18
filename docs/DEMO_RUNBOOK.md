@@ -20,6 +20,8 @@ Carol  = fake FREELANCER (receives the payout — gets sats in)
 You mine blocks **only at setup**, not per deal. In production nobody mines — clients bring their own funded wallets.
 
 > 🎯 **Long-term goal:** automate this whole demo (spin up Polar, mine, fund, open channels, create deal, pay, settle) with a single script. See [Part 7 — Automation](#part-7--automation-roadmap).
+>
+> Demo LNbits config disables the fee reserve (`LNBITS_RESERVE_FEE_MIN=0`, `LNBITS_RESERVE_FEE_PERCENT=0`) so the escrow wallet can fully pay out in local regtest. Do not copy this to real-money deployments.
 
 ---
 
@@ -58,6 +60,30 @@ DISPLAY=:0 ~/Applications/polar.AppImage \
 ```
 
 A desktop launcher is installed at `~/.local/share/applications/polar.desktop` with the same flags. Polar has no default login/password; it is a local desktop app.
+
+### Containers this app owns
+
+These are the containers created by this repo's Compose files. The backend and frontend are currently run from the host, so only LNbits is running in Docker locally.
+
+| Container | Service | Compose file | Port / storage | Purpose |
+|-----------|---------|--------------|----------------|---------|
+| `ganji-lnbits-1` | `lnbits` | `lnbits-docker-compose.yml` | `5000:5000`, volume `ganji_lnbits-data` | Ganji escrow wallet, backed by Polar's Alice node. |
+| `ganji-db-1` | `db` | `docker-compose.yml` | `5432:5432`, volume `ganji_pgdata` | Ganji Postgres. Defined locally; currently not created. |
+| `ganji-api-1` | `api` | `docker-compose.yml` | `8080:8080`, volume `ganji_uploads` | Ganji Go API. Defined locally; currently not created. |
+| `ganji-frontend-1` | `frontend` | `docker-compose.yml` | `3000:3000` | Ganji Next.js frontend. Defined locally; currently not created. |
+
+Polar network 3 is an external dependency, not created by Ganji: `polar-n3-backend1` (regtest Bitcoin), `polar-n3-alice` (escrow LND node), and `polar-n3-bob` (demo client node). Ganji's LNbits joins `polar-network-3_default` and mounts Alice's TLS cert and admin macaroon read-only.
+
+List all Ganji-owned containers:
+
+```bash
+docker ps -a --filter label=com.docker.compose.project=ganji \
+  --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+docker compose -f docker-compose.yml ps -a
+docker compose -f lnbits-docker-compose.yml ps -a
+```
+
+Both Compose files share the project name `ganji`. Avoid `docker compose -f docker-compose.yml down --remove-orphans` while LNbits is needed — it also removes `ganji-lnbits-1`. Use `docker compose -f lnbits-docker-compose.yml down` to stop LNbits while preserving its external volume.
 
 ### Where to see escrow in each UI
 
