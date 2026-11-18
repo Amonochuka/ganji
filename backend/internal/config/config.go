@@ -18,6 +18,9 @@ type Config struct {
 	LNBitsAPIKey              string
 	LNBitsAdminKey            string
 	LNBitsWebhookSecret       string
+	LNDRESTURL                string
+	LNDRESTCertPath           string
+	LNDRESTMacaroonPath       string
 	PreimageEncryptionKey     string
 	WebhookURL                string
 	FrontendURLs              []string
@@ -51,6 +54,9 @@ func Load() *Config {
 		LNBitsAPIKey:              getEnv("LNBITS_API_KEY", ""),
 		LNBitsAdminKey:            getEnv("LNBITS_ADMIN_KEY", ""),
 		LNBitsWebhookSecret:       getEnv("LNBITS_WEBHOOK_SECRET", ""),
+		LNDRESTURL:                getEnv("LND_REST_URL", ""),
+		LNDRESTCertPath:           getEnv("LND_REST_CERT_PATH", ""),
+		LNDRESTMacaroonPath:       getEnv("LND_REST_MACAROON_PATH", ""),
 		PreimageEncryptionKey:     getEnv("PREIMAGE_ENCRYPTION_KEY", ""),
 		WebhookURL:                getEnv("WEBHOOK_URL", ""),
 		FrontendURLs:              getEnvListFallback("FRONTEND_URLS", "FRONTEND_URL"),
