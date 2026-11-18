@@ -711,7 +711,7 @@ func (s *Service) settleMilestoneHoldGuarded(ctx context.Context, m *Milestone) 
 	}
 	if _, err := s.lnbits.SettleHold(ctx, m.Preimage); err != nil {
 		payment, checkErr := s.lnbits.CheckPayment(ctx, m.CheckingID)
-		if checkErr != nil || payment.Details.Status != "SETTLED" {
+		if checkErr != nil || !isHoldSettled(payment.Details.Status) {
 			return fmt.Errorf("settling milestone escrow %s: %w", m.ID, err)
 		}
 	}
@@ -743,7 +743,7 @@ func (s *Service) settleHoldGuarded(ctx context.Context, deal *Deal) error {
 
 	if _, err := s.lnbits.SettleHold(ctx, deal.Preimage); err != nil {
 		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
-		if checkErr != nil || payment.Details.Status != "SETTLED" {
+		if checkErr != nil || !isHoldSettled(payment.Details.Status) {
 			return fmt.Errorf("settling escrow for deal %s: %w", deal.ID, err)
 		}
 	}
@@ -772,22 +772,26 @@ func (s *Service) checkOutgoingPayout(ctx context.Context, payoutCheckingID stri
 	return false, false, nil
 }
 
-// isPayoutConfirmed reports whether an outgoing payment status means the
-// freelancer got paid. LNbits backends report the underlying backend status
-// verbatim, so we accept the common set instead of hard-coding one backend.
-func isPayoutConfirmed(status string) bool {
-	switch status {
-	case "SETTLED", "COMPLETE", "SUCCEEDED", "PAID":
+func isHoldSettled(status string) bool {
+	switch strings.ToUpper(status) {
+	case "SETTLED", "SUCCESS", "COMPLETE", "SUCCEEDED", "PAID":
 		return true
 	default:
 		return false
 	}
 }
 
+// isPayoutConfirmed reports whether an outgoing payment status means the
+// freelancer got paid. LNbits backends report the underlying backend status
+// verbatim, so we accept the common set instead of hard-coding one backend.
+func isPayoutConfirmed(status string) bool {
+	return isHoldSettled(status)
+}
+
 // isPayoutFailed reports whether an outgoing payment status definitively means
 // nothing was sent.
 func isPayoutFailed(status string) bool {
-	switch status {
+	switch strings.ToUpper(status) {
 	case "FAILED", "UNPAID", "CANCELLED", "EXPIRED":
 		return true
 	default:

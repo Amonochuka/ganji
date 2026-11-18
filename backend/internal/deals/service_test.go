@@ -809,6 +809,41 @@ func TestApproveDealSettlesAlreadySettledHoldIdempotently(t *testing.T) {
 	}
 }
 
+func TestApproveDealAcceptsLowercaseSuccessHoldStatus(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+
+	var paidOut bool
+
+	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/payments/settle":
+			_, _ = w.Write([]byte(`[false,null,null,"payment already settled",null,null]`))
+		case "/api/v1/payments":
+			paidOut = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"payment_hash":"o1","checking_id":"oc1"}`))
+		case "/api/v1/payments/bb":
+			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"bb","status":"success"}}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+
+	updated, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if updated.Status != StatusReleased {
+		t.Fatalf("expected status released, got %s", updated.Status)
+	}
+	if !paidOut {
+		t.Error("expected the freelancer to be paid out")
+	}
+}
+
 func TestApproveDealRefusesPayoutUnlessSettled(t *testing.T) {
 	// LNbits refuses to settle and reports the hold as still held: the sats
 	// must NOT be forwarded, and the deal must not be released.

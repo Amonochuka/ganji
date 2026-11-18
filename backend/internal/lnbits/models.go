@@ -1,5 +1,10 @@
 package lnbits
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // CreateHoldInvoiceRequest creates a hold (HODL) invoice on LNbits. The
 // payment hash is derived from the preimage Ganji generates, so LNbits
 // locks the incoming payment to exactly that hash. The funds sit held on
@@ -33,6 +38,42 @@ type SimpleInvoiceResponse struct {
 	OK           bool   `json:"ok"`
 	CheckingID   string `json:"checking_id"`
 	ErrorMessage string `json:"error_message"`
+}
+
+func (r *SimpleInvoiceResponse) UnmarshalJSON(data []byte) error {
+	var object struct {
+		OK           bool   `json:"ok"`
+		CheckingID   string `json:"checking_id"`
+		ErrorMessage string `json:"error_message"`
+	}
+	if err := json.Unmarshal(data, &object); err == nil {
+		r.OK = object.OK
+		r.CheckingID = object.CheckingID
+		r.ErrorMessage = object.ErrorMessage
+		return nil
+	}
+
+	var fields []json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("decode invoice response: %w", err)
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("decode invoice response: empty tuple")
+	}
+	if err := json.Unmarshal(fields[0], &r.OK); err != nil {
+		return fmt.Errorf("decode invoice response ok: %w", err)
+	}
+	if len(fields) > 1 && string(fields[1]) != "null" {
+		if err := json.Unmarshal(fields[1], &r.CheckingID); err != nil {
+			return fmt.Errorf("decode invoice response checking_id: %w", err)
+		}
+	}
+	if len(fields) > 3 && string(fields[3]) != "null" {
+		if err := json.Unmarshal(fields[3], &r.ErrorMessage); err != nil {
+			return fmt.Errorf("decode invoice response error_message: %w", err)
+		}
+	}
+	return nil
 }
 
 // Raw response from LNBits.

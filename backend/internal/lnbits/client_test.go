@@ -170,6 +170,21 @@ func TestSettleHoldUsesAdminKey(t *testing.T) {
 	}
 }
 
+func TestSettleHoldAcceptsTupleResponse(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[true,"c1",null,null,"deadbeef",null]`))
+	})
+
+	response, err := client.SettleHold(context.Background(), "deadbeef")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !response.OK || response.CheckingID != "c1" {
+		t.Fatalf("unexpected tuple response %+v", response)
+	}
+}
+
 func TestSettleHoldRefused(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -220,6 +235,21 @@ func TestCancelHoldUsesAdminKey(t *testing.T) {
 
 	if (*requests)[0] != "POST /api/v1/payments/cancel" {
 		t.Fatalf("unexpected request %q", (*requests)[0])
+	}
+}
+
+func TestCancelHoldAcceptsTupleResponse(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[true,"c1",null,null,null,null]`))
+	})
+
+	response, err := client.CancelHold(context.Background(), "ph1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !response.OK || response.CheckingID != "c1" {
+		t.Fatalf("unexpected tuple response %+v", response)
 	}
 }
 
