@@ -66,6 +66,7 @@ Then use `DATABASE_URL=postgres://postgres:postgres@localhost:5432/ganji?sslmode
 |---|---|
 | `NEXT_PUBLIC_API_URL` | Backend API base URL (e.g., `http://localhost:8080`) |
 | `NEXT_PUBLIC_WS_URL` | WebSocket URL for real-time updates (not built yet) |
+| `GANJI_ALLOWED_DEV_ORIGINS` | Optional comma-separated LAN hostnames/IPs allowed to request Next.js dev resources; set when accessing `npm run dev` from another device, then restart the dev server |
 
 ## Notes
 

@@ -1,12 +1,22 @@
 import type { NextConfig } from "next";
 
+const allowedDevOrigins = (process.env.GANJI_ALLOWED_DEV_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
-  // Allow the host IP you use for development on the LAN.
-  // You can add additional entries here (comma‑separated) or use '*'
-  // while debugging locally. Remember to tighten this before production.
-  allowedDevOrigins: ['192.168.89.197', '192.168.1.16'],
+  output: "standalone",
+  allowedDevOrigins,
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: "http://localhost:8080/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

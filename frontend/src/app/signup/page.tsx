@@ -66,7 +66,7 @@ export default function SignupPage() {
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+      <form onSubmit={handleSubmit} method="post" className="flex flex-col gap-5" noValidate>
         {error && <FormBanner message={error} />}
         <Input
           label="Display name"

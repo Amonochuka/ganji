@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
 import { FormBanner } from "@/components/ui/form-banner";
@@ -19,6 +19,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("email") || params.has("password")) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -48,7 +55,7 @@ export default function LoginPage() {
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+      <form onSubmit={handleSubmit} method="post" className="flex flex-col gap-5" noValidate>
         {error && <FormBanner message={error} />}
         <Input
           label="Email"

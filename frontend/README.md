@@ -106,6 +106,7 @@ npm run build   # production build (Turbopack)
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Backend API base URL |
 | `NEXT_PUBLIC_WS_URL` | — | WebSocket URL (not implemented yet) |
+| `GANJI_ALLOWED_DEV_ORIGINS` | — | Comma-separated LAN hostnames/IPs allowed to request Next.js dev resources; set this when opening the dev server from another device and restart `npm run dev` |
 
 ## Known Issues
 
