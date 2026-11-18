@@ -97,4 +97,7 @@ with a linked wallet and approves via `POST /public/deals/:shareToken/approve`;
 the client needs no Ganji account. A `locked` deal is labelled "Funds Held"
 (an LND-accepted hold, not a settled payment). Settings (`/settings`, on
 `GET /auth/me`) and Live CV pages are built. Status icons are inline SVGs from
-`components/ui/status-icon.tsx`, not an emoji map.
+`components/ui/status-icon.tsx`, not an emoji map. Manual-pay funding is still
+deferred: the current fund button requires an LNbits URL/admin key, while the
+planned flow will show the `bolt11` and verify the same Es accepted hold after
+the client pays from any Lightning wallet.

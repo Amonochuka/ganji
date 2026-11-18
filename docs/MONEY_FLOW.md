@@ -94,6 +94,15 @@ milestone `awaiting_payment → funded → in_progress` (and the deal to `locked
 only after Es verification. Without it, the first unfunded milestone or the
 legacy deal-level hold is funded.
 
+### Deferred: manual-pay mode
+
+The linked-wallet flow above is the current implementation. A later manual-pay
+mode will show the hold `bolt11` on the public deal page and let the client pay
+it in any Lightning wallet, including exchange wallets that do not expose LNbits
+API keys. The client would press **"I paid — verify hold"**, and Ganji would run
+the same Es `IsAcceptedHold` check before locking; no admin key would be sent to
+Ganji. This is not built yet and must not weaken the accepted-hold requirement.
+
 ## Payout Invoice Helper (`POST /deals/wallet/invoice`)
 
 Protected. Body: `{wallet_url, wallet_key, amount_sats, memo?}` (`memo` defaults

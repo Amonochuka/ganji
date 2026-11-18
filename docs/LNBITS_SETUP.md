@@ -302,6 +302,18 @@ curl -X POST http://localhost:8080/public/deals/<share_token>/fund \
 
 ---
 
+## Deferred Manual-Pay Mode
+
+The current buttons require LNbits-compatible wallets because Ganji calls
+`PayInvoice` for the client and creates the freelancer's payout invoice through
+LNbits. A planned manual-pay mode will instead display the hold `bolt11`, let
+the client pay from any Lightning wallet (including exchange wallets), and
+expose an **"I paid — verify hold"** action. That mode will still require the
+same Es LND accepted-hold proof before the deal becomes **Funds Held**, and it
+will not require the client to share an admin key. It is not implemented yet.
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |
