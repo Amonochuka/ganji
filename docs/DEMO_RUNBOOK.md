@@ -8,12 +8,18 @@
 ## Part 0 — Concepts (read once, 2 minutes)
 
 ```
-Bob    = fake CLIENT   (pays the invoice)
-Alice  = ESCROW vault  (holds the sats; backs LNbits)
-Carol  = fake FREELANCER (optional — we can reuse Bob for now)
+Bob    = fake CLIENT     (pays the invoice — sends sats out)
+Alice  = ESCROW vault    (holds the sats; backs LNbits)
+Carol  = fake FREELANCER (receives the payout — gets sats in)
 ```
 
+**Two demo modes:**
+- **Simple mode** (Parts 1–5): Bob plays BOTH client and freelancer — he pays in, then gets paid back. Fine for proving escrow works, but the money just returns to the same wallet.
+- **Realistic mode** (Part 6): Add a third node **Carol** as the freelancer, so the flow is truly `Bob → Alice → Carol` with three separate wallets.
+
 You mine blocks **only at setup**, not per deal. In production nobody mines — clients bring their own funded wallets.
+
+> 🎯 **Long-term goal:** automate this whole demo (spin up Polar, mine, fund, open channels, create deal, pay, settle) with a single script. See [Part 7 — Automation](#part-7--automation-roadmap).
 
 ---
 
@@ -117,6 +123,39 @@ docker exec polar-n3-backend1 bitcoin-cli -regtest \
 ```
 
 > ⚠️ **Coinbase maturity:** Regtest requires 100 confirmations for mined block rewards. If you skip the second step, Bob's balance stays at 5,000 sats even though the blocks were mined — the rewards are "immature".
+
+<details>
+<summary><strong>📚 Why 100 blocks? (Coinbase Maturity Explained)</strong> — click to expand</summary>
+
+When you "mine a block," the miner gets a reward (50 BTC in regtest). That reward is paid via a special transaction called a **coinbase transaction**. Bitcoin has a security rule:
+
+> **Coinbase rewards can't be spent until 100 blocks have been mined on top of them.**
+
+This exists in real Bitcoin too — it prevents a miner from spending rewards from a block that might get reorged (orphaned) out of the chain.
+
+**In our demo:**
+1. `generatetoaddress 1 "$BOB_ADDRESS"` → creates a block with a 50 BTC coinbase reward to Bob's address
+2. That reward is `immature` — it exists but can't be used
+3. Each subsequent block adds one confirmation
+4. After 100 more blocks, the reward becomes `mature` and spendable → LND finally counts it in `walletbalance`
+
+**What we observed (the bug that cost us 20 minutes):**
+```
+Mined 10 blocks to Bob's address
+→ Bob's walletbalance: 5,000 sats (unchanged!)
+→ Blocks WERE mined, but rewards were immature
+
+Mined 100 more blocks
+→ Bob's walletbalance: 100,000,005,000 sats ✅
+```
+
+**Key insight:** `bitcoin-cli` shows the blocks exist, but LND's `walletbalance` only counts **mature, spendable** UTXOs. Immature coinbase outputs are excluded.
+
+**Alternatives to mining 100 blocks:**
+- Use Polar GUI's "Deposit" button — it handles this automatically
+- Get coins from Alice (she has mature funds) via `sendtoaddress` — no maturity wait
+
+</details>
 
 Wait ~10s, then check Bob's balance:
 
@@ -261,6 +300,166 @@ The hold invoice should now show `state: SETTLED`.
 
 ---
 
+## Part 6 — Realistic 3-Wallet Experiment (Bob → Alice → Carol)
+
+This mode gives a clean, realistic escrow demo: **Bob pays, Alice holds, Carol receives** — three separate wallets, no money looping back to the same node.
+
+### 6.1 What We're Building
+
+```
+┌─────────────┐         ┌─────────────┐         ┌─────────────┐
+│    BOB      │  pays   │   ALICE     │  pays   │   CAROL     │
+│  (client)   │────────▶│  (escrow)   │────────▶│ (freelancer)│
+└─────────────┘         └─────────────┘         └─────────────┘
+   sends sats            holds sats              receives sats
+```
+
+### 6.2 Add Carol to Polar
+
+**Using Polar GUI (recommended):**
+1. Open the Polar desktop app
+2. Select network 3
+3. Click **"Add Node"** → choose **LND**
+4. Name it `carol`
+5. Connect it to the existing bitcoind backend (`polar-n3-backend1`)
+6. Click **Start**
+
+**Or via CLI** — add a `carol` service to Polar's compose file:
+
+```bash
+# See the existing alice/bob services in ~/.polar/networks/3/docker-compose.yml
+# Copy the bob service block, rename: bob → carol, ports 8082→8083, 10002→10003, 9736→9737
+# Then:
+docker compose -f ~/.polar/networks/3/docker-compose.yml up -d carol
+```
+
+> ⚠️ Editing Polar's compose file while Polar GUI is open may cause conflicts. Prefer the GUI method.
+
+### 6.3 Fund Carol (same maturity rules apply!)
+
+```bash
+# Get Carol's address
+docker exec polar-n3-carol lncli --network=regtest \
+  --tlscertpath=/home/lnd/.lnd/tls.cert \
+  --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  newaddress p2wkh
+
+# Mine to it + mature
+CAROL_ADDRESS="paste_carols_address"
+for i in $(seq 1 5); do
+  docker exec polar-n3-backend1 bitcoin-cli -regtest \
+    -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 \
+    generatetoaddress 1 "$CAROL_ADDRESS"
+done
+docker exec polar-n3-backend1 bitcoin-cli -regtest \
+  -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 100
+```
+
+### 6.4 Open a channel Carol → Alice (so Alice can pay Carol)
+
+Bob→Alice channel already exists (Part 2.3). Now we need **Alice→Carol** so escrow can pay out:
+
+```bash
+# Get Carol's pubkey
+CAROL_PUBKEY=$(docker exec polar-n3-carol lncli --network=regtest \
+  --tlscertpath=/home/lnd/.lnd/tls.cert \
+  --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  getinfo | grep identity_pubkey | cut -d'"' -f4)
+
+# Open channel Alice → Carol (Alice has plenty of funds)
+docker exec polar-n3-alice lncli --network=regtest \
+  --tlscertpath=/home/lnd/.lnd/tls.cert \
+  --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  openchannel "$CAROL_PUBKEY" 500000
+
+# Mine 6 confirmations
+docker exec polar-n3-backend1 bitcoin-cli -regtest \
+  -rpcuser=polaruser -rpcpassword=polarpass -rpcport=18443 -generate 6
+```
+
+### 6.5 Generate the Payee Invoice from Carol
+
+```bash
+docker exec polar-n3-carol lncli --network=regtest \
+  --tlscertpath=/home/lnd/.lnd/tls.cert \
+  --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  addinvoice --amt=50000 --memo="freelancer payout to Carol"
+```
+Copy the `payment_request` (starts `lnbcrt...`) — paste this into Ganji's `payee_invoice` field.
+
+### 6.6 Run the Flow
+
+1. **Create deal** in Ganji with Carol's payee invoice
+2. **Pay the hold invoice** from Bob (same as Part 4)
+3. **Approve** in Ganji → escrow settles → Alice pays Carol's invoice
+4. **Verify Carol received:**
+```bash
+docker exec polar-n3-carol lncli --network=regtest \
+  --tlscertpath=/home/lnd/.lnd/tls.cert \
+  --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  listinvoices | grep -A 5 "settled"
+```
+
+**Result:** Bob's balance went down, Carol's went up, Alice acted as pure intermediary. Clean three-way escrow demo. ✅
+
+---
+
+## Part 7 — Automation Roadmap
+
+The goal is to replace all the manual terminal work above with **one command**:
+
+```bash
+make demo          # or: ./scripts/demo-full-flow.sh
+```
+
+### What such a script would do
+
+| Step | Command/action | Automatable? |
+|------|---------------|--------------|
+| 1. Start Polar | `docker compose -f ~/.polar/networks/3/docker-compose.yml up -d` | ✅ |
+| 2. Wait for LND sync | Poll `getinfo` until `synced_to_chain: true` | ✅ |
+| 3. Mine fresh block | `bitcoin-cli -generate 1` | ✅ |
+| 4. Start LNbits | `docker compose -f lnbits-docker-compose.yml up -d` | ✅ |
+| 5. Start backend | `go run ./cmd/api &` + poll `/health` | ✅ |
+| 6. Start frontend | `npm run dev &` + poll port 3000 | ✅ |
+| 7. Fund Bob | `newaddress` → `generatetoaddress` → mine 100 → check balance | ✅ |
+| 8. Open channels | `openchannel` Bob→Alice, Alice→Carol → mine 6 | ✅ |
+| 9. Create deal via API | `curl POST /auth/signup` + `curl POST /deals` | ✅ |
+| 10. Parse hold invoice | `jq` the response | ✅ |
+| 11. Pay from Bob | `lncli payinvoice` | ✅ |
+| 12. Approve deal | `curl POST /deals/:id/approve` | ✅ |
+| 13. Verify | Check all balances | ✅ |
+
+### Suggested structure
+
+```
+scripts/
+├── demo-full-flow.sh      # orchestrator — runs all steps
+├── lib/
+│   ├── lnd.sh             # lndcli wrapper with cert/macaroon paths
+│   ├── bitcoind.sh        # bitcoin-cli wrapper
+│   └── wait.sh            # polling helpers (wait_for_sync, wait_for_balance)
+├── demo-config.sh         # configurable: amounts, emails, container names
+└── demo-reset.sh          # tear down + fresh start (wipe volumes)
+```
+
+### Key design decisions to make later
+
+- **Idempotency:** script should skip steps already done (e.g., don't re-fund Bob if he has enough)
+- **Cleanup:** reset script that wipes LNbits DB + Polar volumes for a truly fresh run
+- **Output:** pretty-printed status at each step ("✅ Bob funded: 1000 BTC", "⏳ waiting for sync...")
+- **Error handling:** fail fast with clear messages (e.g., "Alice not synced after 60s — check chain tip")
+- **Third wallet:** add Carol only when realism matters; skip for quick smoke tests
+
+### Why automate?
+
+- Reproducible demos (same result every time)
+- Fast regression testing after code changes
+- Easy onboarding for new devs ("just run `make demo`")
+- Can later become a CI smoke test
+
+---
+
 ## Quick Troubleshooting
 
 | Symptom | Fix |
@@ -272,6 +471,8 @@ The hold invoice should now show `state: SETTLED`.
 | `Wallet not found` | Check API keys in DB match `backend/.env` |
 | `Invoice key required` | Backend sends `out: false`; manual curls must too |
 | Bob can't pay | Check channel active (`listchannels`) and Bob has sats (`walletbalance`) |
+| Bob funded but balance unchanged | Coinbase maturity — mine 100 more blocks (see Part 2.2 explanation) |
+| Carol can't receive payout | Need Alice→Carol channel active, and Carol's payee invoice amount must be ≤ channel capacity |
 
 ---
 
