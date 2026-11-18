@@ -110,7 +110,7 @@ export default function CreateDealPage() {
           <div className="mb-8 text-center">
             <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-ink-500 hover:text-ink-300 mb-6 block text-left">← Back to Dashboard</Link>
             <h1 className="font-display text-3xl font-semibold text-ink-100 mb-2">Create New Deal</h1>
-            <p className="text-ink-500">Set up Lightning escrow. Use milestones for sequential per-milestone holds (M1 funded/released, then M2).</p>
+            <p className="text-ink-500">Set up Lightning escrow. A one-step deal is shown as one final milestone; enable milestones for sequential holds (M1 funded/released, then M2).</p>
           </div>
 
           <div className="vault-card p-6 md:p-8 vault-seam">
@@ -167,7 +167,7 @@ export default function CreateDealPage() {
             </form>
           </div>
 
-          <p className="mt-6 text-center text-xs text-ink-700">In milestone mode, M1 gets a hold invoice after creation (client pays). Later milestones are funded sequentially.</p>
+          <p className="mt-6 text-center text-xs text-ink-700">Single-step deals use one hold invoice and appear as one final milestone. In milestone mode, M1 gets a hold invoice after creation and later milestones are funded sequentially.</p>
         </div>
       </div>
     </main>

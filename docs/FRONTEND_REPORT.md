@@ -29,6 +29,8 @@
 | `FormBanner` | `components/ui/form-banner.tsx` | Error/success toast banner |
 | `AuthShell` | `components/auth/auth-shell.tsx` | Centered auth card with vault-seam styling |
 | `DealCard` | `components/deals/deal-card.tsx` | Dashboard deal row with status badge, amount, client, copy share link |
+| `DealDetailPage` | `app/deals/[dealId]/page.tsx` | Authed deal view with artifact deliverables panel and synthetic single-step milestone |
+| `PublicDealPage` | `app/public/deals/[shareToken]/page.tsx` | Client review link with approve/exit actions and synthetic single-step milestone |
 | `format.ts` | `lib/utils/format.ts` | Currency (sats → ₿/k sats), relative time |
 
 ---

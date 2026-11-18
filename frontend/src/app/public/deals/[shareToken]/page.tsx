@@ -77,7 +77,11 @@ export default function PublicDealPage() {
   }
 
   async function handleExit() {
-    if (!window.confirm("Exit this deal? If the current milestone has not been submitted/approved, its escrow for that milestone will not be released to the freelancer (refunded/cancelled per policy).")) return;
+    const hasMilestones = (deal?.milestones || []).length > 0;
+    const message = hasMilestones
+      ? "Exit this deal? If the current milestone has not been submitted/approved, its escrow for that milestone will not be released to the freelancer (refunded/cancelled per policy)."
+      : "Exit this deal? The held escrow will be cancelled or refunded, and no payout will be sent to the freelancer.";
+    if (!window.confirm(message)) return;
     await runAction("exit", async () => {
       await api.publicExitDeal(shareToken);
     });
@@ -178,9 +182,15 @@ export default function PublicDealPage() {
                     <input type="text" readOnly value={deal.invoice} className="flex-1 rounded-lg border border-vault-border bg-vault-bg px-3 py-2 text-xs font-mono text-ink-400" />
                     <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(deal.invoice)}>Copy</Button>
                   </div>
-                  <p className="mt-2 text-xs text-ink-500">
-                    Per-milestone invoices/payments are applied sequentially (M1 → M2…). Escrow settlement wiring is being finalized; actions below manage milestone state/review.
-                  </p>
+                  {hasMilestones ? (
+                    <p className="mt-2 text-xs text-ink-500">
+                      Milestone invoices are applied sequentially (M1 → M2…). Each milestone is funded, reviewed, and released before the next begins.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs text-ink-500">
+                      Single-step deal: this invoice holds the full amount. Approve &amp; Release Payment settles it to the freelancer.
+                    </p>
+                  )}
                 </div>
 
                 {canApproveDeal && !hasMilestones && (
@@ -198,10 +208,12 @@ export default function PublicDealPage() {
 
           <div className="vault-card p-6 vault-seam">
             <h2 className="font-display text-lg font-semibold text-ink-100 mb-1">Milestones</h2>
-            <p className="text-xs text-ink-500 mb-4">Review step-by-step. After approving M1, you can approve/start M2 (sequential per-milestone funding).</p>
-            {!hasMilestones ? (
-              <p className="text-sm text-ink-500">No milestones defined yet.</p>
-            ) : (
+            <p className="text-xs text-ink-500 mb-4">
+              {hasMilestones
+                ? "Review step-by-step. After approving M1, you can approve/start M2 (sequential per-milestone funding)."
+                : "This single-step deal is shown as one final milestone."}
+            </p>
+            {hasMilestones ? (
               <div className="space-y-3">
                 {milestones.map((ms, i) => (
                   <MilestoneRow
@@ -215,13 +227,30 @@ export default function PublicDealPage() {
                   />
                 ))}
               </div>
+            ) : (
+              <div className="p-4 rounded-lg border border-vault-border bg-vault-raised/40">
+                <div className="flex justify-between items-start gap-3">
+                  <div>
+                    <h3 className="font-medium text-ink-100">#1 Final delivery</h3>
+                    <p className="text-sm text-ink-500">{formatCurrency(deal.amount_sats)}</p>
+                    <p className="mt-1 text-xs text-gold-400">Work submitted on the deal is recorded here.</p>
+                  </div>
+                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium border ${getStatusClass(deal.status)}`}>
+                    {getStatusIcon(deal.status)} {getStatusLabel(deal.status)}
+                  </span>
+                </div>
+              </div>
             )}
             {!terminal && (
               <div className="mt-5 pt-4 border-t border-vault-border">
                 <Button variant="danger" className="w-full" onClick={handleExit} isLoading={actionLoading === "exit"} disabled={!!actionLoading}>
                   Exit Deal
                 </Button>
-                <p className="mt-2 text-xs text-ink-500">Exit mid-milestone (work not submitted/approved): that milestone is not paid to the freelancer; funds refunded/cancelled per policy. Same symmetry applies to freelancer exits.</p>
+                <p className="mt-2 text-xs text-ink-500">
+                  {hasMilestones
+                    ? "Exit mid-milestone (work not submitted/approved): that milestone is not paid to the freelancer; funds refunded/cancelled per policy. Same symmetry applies to freelancer exits."
+                    : "Exit before approval: this single-step deal is not paid to the freelancer; funds are refunded/cancelled per policy. Same symmetry applies to freelancer exits."}
+                </p>
               </div>
             )}
           </div>

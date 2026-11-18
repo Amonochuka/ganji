@@ -518,7 +518,18 @@ export default function DealDetailPage() {
                 <div className="vault-card p-6 vault-seam">
                   <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Milestones</h2>
                   {milestones.length === 0 ? (
-                    <p className="text-ink-500">No milestones defined for this deal</p>
+                    <div className="p-4 rounded-lg border border-vault-border bg-vault-raised/40">
+                      <div className="flex justify-between items-start gap-3">
+                        <div>
+                          <h3 className="font-medium text-ink-100">#1 Final delivery</h3>
+                          <p className="text-sm text-ink-500">Sats: {formatCurrency(deal.amount_sats)} • Single-step deal</p>
+                          <p className="mt-1 text-xs text-gold-400">Work submitted on the deal is recorded here.</p>
+                        </div>
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border ${getStatusClass(deal.status)}`}>
+                          {getStatusIcon(deal.status)} {getStatusLabel(deal.status)}
+                        </span>
+                      </div>
+                    </div>
                   ) : (
                     <div className="space-y-4">
                       {milestones.map((ms) => (

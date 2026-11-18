@@ -377,7 +377,7 @@ So do **not** change code to force `locked` from a pending hold. Follow the norm
 2. Confirm the artifact appears in the deliverables list.
 3. Click **Submit Work**. The button unlocks only after at least one artifact is attached.
 
-Check the deal page: status should now be `work_submitted`.
+Check the deal page: status should now be `work_submitted`. The client share page shows the same single-step deal as one “Final delivery” milestone, so the submitted work is visible even though no milestone rows were created.
 
 ### 5.2 Client approves (`work_submitted → released`)
 
