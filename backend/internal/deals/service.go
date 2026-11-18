@@ -1654,6 +1654,25 @@ func (s *Service) ListVerificationsByArtifact(ctx context.Context, userID, artif
 	return s.repo.ListVerificationsByArtifact(ctx, artifactID)
 }
 
+func canResetDealPayoutAttempt(deal *Deal) bool {
+	return deal != nil &&
+		(deal.Status == StatusLocked || deal.Status == StatusWorkSubmitted) &&
+		deal.PayoutCheckingID == "" &&
+		deal.PayoutAttemptedAt.Valid
+}
+
+func canResetMilestonePayoutAttempt(m *Milestone) bool {
+	if m == nil || m.PayoutCheckingID != "" || !m.PayoutAttemptedAt.Valid {
+		return false
+	}
+	switch m.Status {
+	case MilestoneFunded, MilestoneInProgress, MilestoneWorkSubmitted, MilestoneCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
 // GetPublicDeal returns a safe, public view of the deal for the shareable
 // link. No auth required — anyone holding the (unguessable, rotatable)
 // share_token can see it. We expose only the fields needed to pay and track
@@ -1685,22 +1704,26 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	views := make([]MilestoneView, 0, len(ms))
 	activeInvoice := deal.Invoice
 	activeStatus := deal.Status
+	payoutResetAvailable := canResetDealPayoutAttempt(deal)
 	for i := range ms {
 		var completed *string
 		if ms[i].CompletedAt.Valid {
 			s := ms[i].CompletedAt.Time.Format(time.RFC3339)
 			completed = &s
 		}
+		resetAvailable := canResetMilestonePayoutAttempt(&ms[i])
 		views = append(views, MilestoneView{
-			ID:          ms[i].ID,
-			Title:       ms[i].Title,
-			AmountSats:  ms[i].AmountSats,
-			Order:       ms[i].Order,
-			Status:      string(ms[i].Status),
-			Invoice:     ms[i].Invoice,
-			CompletedAt: completed,
-			CreatedAt:   ms[i].CreatedAt,
+			ID:                   ms[i].ID,
+			Title:                ms[i].Title,
+			AmountSats:           ms[i].AmountSats,
+			Order:                ms[i].Order,
+			Status:               string(ms[i].Status),
+			Invoice:              ms[i].Invoice,
+			CompletedAt:          completed,
+			CreatedAt:            ms[i].CreatedAt,
+			PayoutResetAvailable: resetAvailable,
 		})
+		payoutResetAvailable = payoutResetAvailable || resetAvailable
 		if activeInvoice == "" && (ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending || ms[i].Status == MilestoneFunded || ms[i].Status == MilestoneInProgress) && ms[i].Invoice != "" {
 			activeInvoice = ms[i].Invoice
 		}
@@ -1709,14 +1732,15 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 		}
 	}
 	return &PublicDeal{
-		Title:          deal.Title,
-		AmountSats:     deal.AmountSats,
-		SourcePlatform: deal.SourcePlatform,
-		Invoice:        activeInvoice,
-		Status:         activeStatus,
-		DisputeReason:  deal.DisputeReason,
-		CreatedAt:      deal.CreatedAt,
-		Milestones:     views,
+		Title:                deal.Title,
+		AmountSats:           deal.AmountSats,
+		SourcePlatform:       deal.SourcePlatform,
+		Invoice:              activeInvoice,
+		Status:               activeStatus,
+		DisputeReason:        deal.DisputeReason,
+		CreatedAt:            deal.CreatedAt,
+		Milestones:           views,
+		PayoutResetAvailable: payoutResetAvailable,
 	}, nil
 }
 
@@ -1812,6 +1836,70 @@ func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*De
 			return repo.UpdateStatus(ctx, id, StatusReleased)
 		},
 	})
+}
+
+func (s *Service) PublicResetPayout(ctx context.Context, shareToken, milestoneID string) (*PublicDeal, error) {
+	if shareToken == "" {
+		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
+	}
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	repo := s.repo.WithTx(tx)
+
+	if milestoneID != "" {
+		m, err := repo.GetMilestoneForUpdate(ctx, milestoneID)
+		if err != nil {
+			return nil, err
+		}
+		if m.DealID != deal.ID {
+			return nil, ErrMilestoneNotFound
+		}
+		if m.PayoutCheckingID != "" {
+			return nil, fmt.Errorf("%w: milestone payout %s is recorded; operator reconciliation required", ErrPayoutInFlight, m.PayoutCheckingID)
+		}
+		if !m.PayoutAttemptedAt.Valid {
+			return nil, fmt.Errorf("%w: milestone %d has no unconfirmed payout attempt", ErrInvalidInput, m.Order)
+		}
+		if !canResetMilestonePayoutAttempt(m) {
+			return nil, fmt.Errorf("%w: milestone %d cannot reset payout from status %s", ErrInvalidTransition, m.Order, m.Status)
+		}
+		if err := repo.ClearMilestonePayoutTracking(ctx, m.ID); err != nil {
+			return nil, fmt.Errorf("resetting milestone payout tracking %s: %w", m.ID, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit transaction: %w", err)
+		}
+		return s.GetPublicDeal(ctx, shareToken)
+	}
+
+	locked, err := repo.GetDealForUpdate(ctx, deal.ID)
+	if err != nil {
+		return nil, err
+	}
+	if locked.PayoutCheckingID != "" {
+		return nil, fmt.Errorf("%w: payout %s is recorded; operator reconciliation required", ErrPayoutInFlight, locked.PayoutCheckingID)
+	}
+	if !locked.PayoutAttemptedAt.Valid {
+		return nil, fmt.Errorf("%w: deal has no unconfirmed payout attempt", ErrInvalidInput)
+	}
+	if !canResetDealPayoutAttempt(locked) {
+		return nil, fmt.Errorf("%w: deal cannot reset payout from status %s", ErrInvalidTransition, locked.Status)
+	}
+	if err := repo.ClearPayoutTracking(ctx, locked.ID); err != nil {
+		return nil, fmt.Errorf("resetting payout tracking for deal %s: %w", locked.ID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+	return s.GetPublicDeal(ctx, shareToken)
 }
 
 // RotateShareLink mints a fresh share token for a deal, immediately killing

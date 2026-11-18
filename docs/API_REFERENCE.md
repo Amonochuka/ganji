@@ -156,7 +156,7 @@ Requires auth. Returns the authenticated user's profile (same `User` shape as si
 
 ## 3. Deals
 
-All deal endpoints require `Authorization: Bearer <access_token>` **except the public share-link endpoints** (`GET /public/deals/:shareToken`, `GET /public/deals/:shareToken/milestones`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`, `POST /public/deals/:shareToken/milestones/:milestoneID/reject`, `POST /public/deals/:shareToken/exit`), which are intentionally unauthenticated so the freelancer can share a link the client can open without an account — to check payment status, pay, approve delivery, accept/reject a milestone, or exit.
+All deal endpoints require `Authorization: Bearer <access_token>` **except the public share-link endpoints** (`GET /public/deals/:shareToken`, `GET /public/deals/:shareToken/milestones`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/payout/reset`, `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next`, `POST /public/deals/:shareToken/milestones/:milestoneID/reject`, `POST /public/deals/:shareToken/exit`), which are intentionally unauthenticated so the freelancer can share a link the client can open without an account — to check payment status, pay, approve delivery, clear a failed payout attempt, accept/reject a milestone, or exit.
 
 Every deal carries a unique **`share_token`** — a high-entropy random value, separate from the deal's UUID. It is the only thing that identifies a deal on the public endpoint, so:
 
@@ -188,7 +188,7 @@ The endpoint **refreshes the hold status with LNbits before answering**: if the 
 }
 ```
 
-In milestone mode the endpoint also refreshes each active milestone hold with LNbits before answering, so status and the active invoice reflect reality even if the webhook was delayed. `invoice`/`status` are mirrored from the active milestone for compatibility; `milestones[]` carries per-milestone truth (`released` = paid, `completed` = payout pending, `disputed`/`rejected` = hold stays in review).
+In milestone mode the endpoint also refreshes each active milestone hold with LNbits before answering, so status and the active invoice reflect reality even if the webhook was delayed. `invoice`/`status` are mirrored from the active milestone for compatibility; `milestones[]` carries per-milestone truth (`released` = paid, `completed` = payout pending, `disputed`/`rejected` = hold stays in review). The safe view includes `payout_reset_available` at deal level and on milestones when an unconfirmed payout attempt can be cleared; it never exposes payout-tracking internals.
 
 **Response `404`**
 ```json
@@ -226,6 +226,33 @@ In milestone mode the endpoint releases the **active milestone's** hold via the 
 | `400` | Blank token, or deal not in `locked`/`work_submitted` |
 | `404` | No deal for the share token |
 | `500` | Network leg failed (deal state unchanged by the DB's rules) |
+
+### `POST /public/deals/:shareToken/payout/reset`
+
+Public. Clears an internal payout-attempt marker when LNbits definitively refused a payout before sending it. This is a recovery action after failures such as an insufficient fee reserve; it **does not move money, settle/cancel escrow, or change deal/milestone status**. The share token is the authorization.
+
+Body is optional; omit or send `{"milestone_id": ""}` to clear the deal-level marker. Send `{"milestone_id": "<uuid>"}` to clear one milestone marker. Only non-terminal release-eligible states with `payout_attempted_at` set and no `payout_checking_id` are resettable. If a payout checking ID exists, the payout may have been sent and must be reconciled by an operator instead.
+
+**Response `200`**
+```json
+{
+  "message": "payout attempt cleared",
+  "deal": {
+    "status": "work_submitted",
+    "payout_reset_available": false,
+    ...
+  }
+}
+```
+
+**Responses:**
+
+| Status | Condition |
+|---|---|
+| `400` | Blank token, no unconfirmed marker, non-terminal reset not allowed, or milestone does not belong to the deal |
+| `404` | No deal or milestone for the share token |
+| `409` | Payout checking ID exists; operator reconciliation required |
+| `500` | Internal error |
 
 ### `POST /deals/:dealID/share-link`
 
@@ -539,6 +566,7 @@ Auth/portal behavior in milestone mode:
 Public (share-token-only, no JWT) milestone actions:
 
 - `GET /public/deals/:shareToken/milestones` — list milestones for the share link.
+- `POST /public/deals/:shareToken/payout/reset` — clear a definitively unconfirmed deal or milestone payout-attempt marker; never moves money or changes status. `409` when a checking ID exists.
 - `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` — release that escrow-backed milestone (settle + pay), then fund the next; final milestone releases the deal. `disputed`/`rejected` → `400` (operator resolution required). No-hold → "fund it first" error, never marked paid.
 - `POST /public/deals/:shareToken/milestones/:milestoneID/reject` — body `{reason}` (required, ≤2000 chars). Only from `work_submitted`/`completed`. **Does not auto-refund**: hold stays, milestone → `disputed` pending independent review. The reason also lands on the deal's `dispute_reason`.
 - `POST /public/deals/:shareToken/exit` — public exit with the same pre/post-submission money rules as the authed exit.

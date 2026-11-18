@@ -328,6 +328,21 @@ func TestPayInvoice4xxIsClassifiedRefused(t *testing.T) {
 	}
 }
 
+func TestPayInvoiceFailed520IsClassifiedRefused(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"detail":"You must reserve at least (500 sat) to cover potential routing fees.","status":"failed"}`))
+	})
+
+	_, err := client.PayInvoice(context.Background(), "lnbc2")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrPayoutRefused) {
+		t.Fatalf("expected definitive 520 to be ErrPayoutRefused, got %v", err)
+	}
+}
+
 func TestCheckPayment(t *testing.T) {
 	client, requests := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

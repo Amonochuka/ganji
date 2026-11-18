@@ -1908,6 +1908,63 @@ func TestReconcilePayoutResetRefusesTerminalOrUntracked(t *testing.T) {
 	}
 }
 
+func TestPublicResetPayoutClearsUnconfirmedAttempt(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := newTestService(repo)
+	view, err := service.PublicResetPayout(context.Background(), deal.ShareToken, "")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if view.PayoutResetAvailable {
+		t.Fatal("expected reset availability to be false after clearing")
+	}
+	stored := repo.deals[deal.ID]
+	if stored.PayoutAttemptedAt.Valid || stored.PayoutCheckingID != "" {
+		t.Fatal("expected payout tracking to be cleared")
+	}
+	if stored.Status != StatusWorkSubmitted {
+		t.Fatalf("expected status to stay work_submitted, got %s", stored.Status)
+	}
+}
+
+func TestPublicResetPayoutRefusesRecordedPayout(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+	deal.PayoutCheckingID = "payout-1"
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := newTestService(repo)
+	_, err := service.PublicResetPayout(context.Background(), deal.ShareToken, "")
+	if !errors.Is(err, ErrPayoutInFlight) {
+		t.Fatalf("expected ErrPayoutInFlight, got %v", err)
+	}
+	if repo.deals[deal.ID].PayoutCheckingID != "payout-1" {
+		t.Fatal("expected recorded payout id to be preserved")
+	}
+}
+
+func TestPublicResetPayoutRefusesUntrackedAndTerminal(t *testing.T) {
+	repo := newFakeDealRepo()
+	untracked := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	untracked.Status = StatusWorkSubmitted
+	terminal := escrowDeal(repo, "deal-2", "freelancer-1", "client@example.com")
+	terminal.Status = StatusReleased
+	terminal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	service := newTestService(repo)
+	if _, err := service.PublicResetPayout(context.Background(), untracked.ShareToken, ""); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput for an untracked deal, got %v", err)
+	}
+	if _, err := service.PublicResetPayout(context.Background(), terminal.ShareToken, ""); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition for a terminal deal, got %v", err)
+	}
+}
+
 func TestSweepSkipsDealMovedByConcurrentActor(t *testing.T) {
 	// The sweep reads a deal as expired, but a concurrent approve releases it
 	// before the guarded refund write: the guard must lose, leaving the released

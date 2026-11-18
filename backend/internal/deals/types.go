@@ -95,14 +95,15 @@ const (
 // of the response on purpose so a shared link never leaks the DB row handle
 // (rotation would otherwise be pointless if the UUID leaked inside the body).
 type PublicDeal struct {
-	Title          string          `json:"title"`
-	AmountSats     int64           `json:"amount_sats"`
-	SourcePlatform string          `json:"source_platform"`
-	Invoice        string          `json:"invoice"`
-	Status         Status          `json:"status"`
-	DisputeReason  string          `json:"dispute_reason"`
-	CreatedAt      time.Time       `json:"created_at"`
-	Milestones     []MilestoneView `json:"milestones,omitempty"`
+	Title                string          `json:"title"`
+	AmountSats           int64           `json:"amount_sats"`
+	SourcePlatform       string          `json:"source_platform"`
+	Invoice              string          `json:"invoice"`
+	Status               Status          `json:"status"`
+	DisputeReason        string          `json:"dispute_reason"`
+	CreatedAt            time.Time       `json:"created_at"`
+	Milestones           []MilestoneView `json:"milestones,omitempty"`
+	PayoutResetAvailable bool            `json:"payout_reset_available,omitempty"`
 }
 
 type PublicMilestoneAction struct {
@@ -193,13 +194,14 @@ func (d *Deal) View() DealView {
 // share token itself.
 func (d *Deal) PublicView() PublicDeal {
 	return PublicDeal{
-		Title:          d.Title,
-		AmountSats:     d.AmountSats,
-		SourcePlatform: d.SourcePlatform,
-		Invoice:        d.Invoice,
-		Status:         d.Status,
-		DisputeReason:  d.DisputeReason,
-		CreatedAt:      d.CreatedAt,
+		Title:                d.Title,
+		AmountSats:           d.AmountSats,
+		SourcePlatform:       d.SourcePlatform,
+		Invoice:              d.Invoice,
+		Status:               d.Status,
+		DisputeReason:        d.DisputeReason,
+		CreatedAt:            d.CreatedAt,
+		PayoutResetAvailable: canResetDealPayoutAttempt(d),
 	}
 }
 
@@ -262,12 +264,12 @@ func CanTransition(from, to Status) bool {
 }
 
 type Artifact struct {
-	ID           string    `json:"id"`
-	DealID       string    `json:"deal_id"`
-	MilestoneID  *string   `json:"milestone_id,omitempty"`
-	Kind         ArtifactKind `json:"kind"`
-	StorageKey   string    `json:"storage_key"`
-	UploadedAt   time.Time `json:"uploaded_at"`
+	ID          string       `json:"id"`
+	DealID      string       `json:"deal_id"`
+	MilestoneID *string      `json:"milestone_id,omitempty"`
+	Kind        ArtifactKind `json:"kind"`
+	StorageKey  string       `json:"storage_key"`
+	UploadedAt  time.Time    `json:"uploaded_at"`
 }
 
 // Artifact types
@@ -331,17 +333,17 @@ type Milestone struct {
 type MilestoneStatus string
 
 const (
-	MilestonePending        MilestoneStatus = "pending"
+	MilestonePending         MilestoneStatus = "pending"
 	MilestoneAwaitingPayment MilestoneStatus = "awaiting_payment"
-	MilestoneFunded         MilestoneStatus = "funded"
-	MilestoneInProgress     MilestoneStatus = "in_progress"
-	MilestoneWorkSubmitted  MilestoneStatus = "work_submitted"
-	MilestoneCompleted      MilestoneStatus = "completed"
-	MilestoneReleased       MilestoneStatus = "released"
-	MilestoneExited         MilestoneStatus = "exited"
-	MilestoneRejected       MilestoneStatus = "rejected"
-	MilestoneRefunded       MilestoneStatus = "refunded"
-	MilestoneDisputed       MilestoneStatus = "disputed"
+	MilestoneFunded          MilestoneStatus = "funded"
+	MilestoneInProgress      MilestoneStatus = "in_progress"
+	MilestoneWorkSubmitted   MilestoneStatus = "work_submitted"
+	MilestoneCompleted       MilestoneStatus = "completed"
+	MilestoneReleased        MilestoneStatus = "released"
+	MilestoneExited          MilestoneStatus = "exited"
+	MilestoneRejected        MilestoneStatus = "rejected"
+	MilestoneRefunded        MilestoneStatus = "refunded"
+	MilestoneDisputed        MilestoneStatus = "disputed"
 )
 
 // ValidMilestoneTransitions defines allowed milestone status transitions for
@@ -354,17 +356,17 @@ var ValidMilestoneTransitions = map[MilestoneStatus][]MilestoneStatus{
 	MilestoneInProgress:      {MilestoneWorkSubmitted, MilestoneReleased, MilestoneExited, MilestoneRefunded, MilestoneDisputed},
 	MilestoneWorkSubmitted:   {MilestoneReleased, MilestoneCompleted, MilestoneRejected, MilestoneDisputed, MilestoneExited},
 	// completed = approved/payout-pending (if used); must reach released via idempotent payout path.
-	MilestoneCompleted:       {MilestoneReleased, MilestoneDisputed},
+	MilestoneCompleted: {MilestoneReleased, MilestoneDisputed},
 	// rejected = client rejected submitted work; HOLD STAYS, goes to independent review/dispute resolution.
 	// rejected -> released is operator-release-only (canonical path); direct
 	// approve/accept-next still refuses rejected (requires independent
 	// resolution). Enforced in service layer, mirrored here for completeness.
-	MilestoneRejected:        {MilestoneDisputed, MilestoneInProgress, MilestoneWorkSubmitted, MilestoneReleased},
+	MilestoneRejected: {MilestoneDisputed, MilestoneInProgress, MilestoneWorkSubmitted, MilestoneReleased},
 	// disputed = independent review; resolution releases or refunds the hold.
-	MilestoneDisputed:        {MilestoneReleased, MilestoneRefunded},
-	MilestoneReleased:        {}, // terminal (paid)
-	MilestoneRefunded:        {}, // terminal
-	MilestoneExited:          {}, // terminal
+	MilestoneDisputed: {MilestoneReleased, MilestoneRefunded},
+	MilestoneReleased: {}, // terminal (paid)
+	MilestoneRefunded: {}, // terminal
+	MilestoneExited:   {}, // terminal
 }
 
 // CanMilestoneTransition checks whether moving from one milestone status to

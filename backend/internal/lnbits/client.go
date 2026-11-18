@@ -226,9 +226,16 @@ func (c *Client) PayInvoice(ctx context.Context, bolt11 string) (string, error) 
 			)
 		}
 		// A 4xx is a guaranteed non-send (invalid bolt11, insufficient
-		// balance, bad auth...). A 5xx is ambiguous: the server may have
-		// started the payment before failing.
-		if response.StatusCode < http.StatusInternalServerError {
+		// balance, bad auth...). LNbits reports definitive PaymentError
+		// rejections as 520 with status=failed; those never start a payment.
+		// Any other 5xx is ambiguous: the server may have started the payment
+		// before failing.
+		var failure struct {
+			Status string `json:"status"`
+		}
+		definitive := response.StatusCode < http.StatusInternalServerError ||
+			(json.Unmarshal(body, &failure) == nil && failure.Status == "failed")
+		if definitive {
 			return "", fmt.Errorf("%w: lnbits returned %d: %s", ErrPayoutRefused, response.StatusCode, string(body))
 		}
 		return "", fmt.Errorf("lnbits returned %d: %s", response.StatusCode, string(body))

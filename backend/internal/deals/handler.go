@@ -11,14 +11,15 @@ import (
 )
 
 type MilestoneView struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	AmountSats  int64     `json:"amount_sats"`
-	Order       int       `json:"order"`
-	Status      string    `json:"status"`
-	Invoice     string    `json:"invoice,omitempty"`
-	CompletedAt *string   `json:"completed_at,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID                   string    `json:"id"`
+	Title                string    `json:"title"`
+	AmountSats           int64     `json:"amount_sats"`
+	Order                int       `json:"order"`
+	Status               string    `json:"status"`
+	Invoice              string    `json:"invoice,omitempty"`
+	CompletedAt          *string   `json:"completed_at,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	PayoutResetAvailable bool      `json:"payout_reset_available,omitempty"`
 }
 
 type Handler struct {
@@ -174,6 +175,7 @@ func RegisterPublicRoutes(router gin.IRouter, h *Handler) {
 	public.GET("/deals/:shareToken", h.GetPublicDeal)
 	public.GET("/deals/:shareToken/milestones", h.PublicListMilestones)
 	public.POST("/deals/:shareToken/approve", h.PublicApproveDeal)
+	public.POST("/deals/:shareToken/payout/reset", h.PublicResetPayout)
 	public.POST("/deals/:shareToken/milestones/:milestoneID/accept-next", h.PublicAcceptNextMilestone)
 	public.POST("/deals/:shareToken/milestones/:milestoneID/reject", h.PublicRejectMilestone)
 	public.POST("/deals/:shareToken/exit", h.PublicExitDeal)
@@ -865,6 +867,34 @@ func (h *Handler) PublicListMilestones(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"milestones": deal.Milestones})
+}
+
+type publicResetPayoutRequest struct {
+	MilestoneID string `json:"milestone_id"`
+}
+
+func (h *Handler) PublicResetPayout(c *gin.Context) {
+	shareToken := c.Param("shareToken")
+
+	var req publicResetPayoutRequest
+	_ = c.ShouldBindJSON(&req)
+	deal, err := h.service.PublicResetPayout(c.Request.Context(), shareToken, req.MilestoneID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutInFlight):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			log.Printf("public payout reset failed: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "payout attempt cleared", "deal": deal})
 }
 
 type publicRejectRequest struct {

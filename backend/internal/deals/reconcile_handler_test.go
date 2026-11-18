@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/Amonochuka/ganji-backend/internal/auth"
 )
 
@@ -62,6 +64,35 @@ func TestReconcileEndpointResetsHungAttempt(t *testing.T) {
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if repo.deals[deal.ID].PayoutAttemptedAt.Valid {
+		t.Fatal("expected the payout attempt marker to be cleared")
+	}
+	if repo.deals[deal.ID].Status != StatusWorkSubmitted {
+		t.Fatalf("expected the deal to stay work_submitted, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
+func TestPublicPayoutResetEndpointClearsUnconfirmedAttempt(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterPublicRoutes(router, NewHandler(newTestService(repo)))
+
+	req := httptest.NewRequest(http.MethodPost, "/public/deals/"+deal.ShareToken+"/payout/reset", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `"payout_reset_available"`) && !strings.Contains(resp.Body.String(), `"status":"work_submitted"`) {
+		t.Fatalf("expected public deal in response, got %s", resp.Body.String())
 	}
 	if repo.deals[deal.ID].PayoutAttemptedAt.Valid {
 		t.Fatal("expected the payout attempt marker to be cleared")

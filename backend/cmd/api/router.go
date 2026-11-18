@@ -107,6 +107,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	publicDeals.GET("/deals/:shareToken", dealHandler.GetPublicDeal)
 	publicDeals.GET("/deals/:shareToken/milestones", dealHandler.PublicListMilestones)
 	publicDeals.POST("/deals/:shareToken/approve", dealHandler.PublicApproveDeal)
+	publicDeals.POST("/deals/:shareToken/payout/reset", dealHandler.PublicResetPayout)
 	publicDeals.POST("/deals/:shareToken/milestones/:milestoneID/accept-next", dealHandler.PublicAcceptNextMilestone)
 	publicDeals.POST("/deals/:shareToken/milestones/:milestoneID/reject", dealHandler.PublicRejectMilestone)
 	publicDeals.POST("/deals/:shareToken/exit", dealHandler.PublicExitDeal)
