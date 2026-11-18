@@ -23,6 +23,41 @@ You mine blocks **only at setup**, not per deal. In production nobody mines — 
 
 ---
 
+## Part 0.5 — Demo Credentials & UI Checkpoints
+
+### Logins
+
+| UI | URL / App | Login | Notes |
+|----|-----------|-------|-------|
+| **LNbits** | `http://localhost:5000` | `admin` / `lnbits_local_dev_2026` | This is Ganji's escrow wallet, backed by Polar's Alice node. Local demo only. |
+| **Polar** | Polar desktop app | No login/password by default | It is a local desktop app. If you set a password, use your own; nothing is stored in this repo. |
+| **Ganji frontend** | `http://localhost:3000` | Signup/login with a local test user | Demo deal uses freelancer `polar@test.com` and client `local@test.com`. |
+
+### Where to see escrow in each UI
+
+**LNbits UI** (`http://localhost:5000`, login above):
+- Wallet balance shows `0 sats` while the hold is unsettled — expected.
+- **Transactions** shows `Test Deal Polar — 50,000 — pending` with a pause icon.
+- That row is the escrow/hold invoice. LNbits does **not** show LND internals like `ACCEPTED` or pending HTLC.
+
+**Polar UI** (Polar desktop app):
+1. Select network **3**.
+2. Click the **alice** node (`polar-n3-alice` — this is the escrow vault backing LNbits).
+3. Open **Invoices** and find the 50,000-sat invoice with hash prefix `94cc8d6f`.
+4. While held, it should show `ACCEPTED` (not `SETTLED`) and `settle_date: 0`.
+5. Open **Channels** and select Bob's 500,000-sat channel with Alice; look for the pending incoming HTLC of **50,000 sats**.
+
+CLI equivalent (authoritative):
+
+```bash
+docker exec polar-n3-alice lncli --network=regtest \
+  --tlscertpath=/home/lnd/.lnd/tls.cert \
+  --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  listinvoices
+```
+
+---
+
 ## Part 1 — Start Everything (Terminal)
 
 ### 1.1 Start Polar (bitcoind + Alice + Bob)
