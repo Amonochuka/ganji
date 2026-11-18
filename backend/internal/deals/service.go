@@ -30,6 +30,10 @@ type CVAnchorer interface {
 	AnchorReleasedDeal(ctx context.Context, freelancerID, dealID string) error
 }
 
+type AcceptedHoldChecker interface {
+	IsAcceptedHold(ctx context.Context, paymentHash string, amountSats int64) (bool, error)
+}
+
 // DealNotifier delivers best-effort notifications after a durable state
 // transition. Implementations must never make escrow correctness depend on
 // notification delivery.
@@ -51,6 +55,7 @@ const maxDisputeReasonRunes = 2000
 type Service struct {
 	repo           DealRepository
 	lnbits         *lnbits.Client
+	acceptedHolds  AcceptedHoldChecker
 	cv             CVAnchorer
 	storage        storage.Storage
 	maxUploadBytes int64
@@ -63,6 +68,10 @@ type Option func(*Service)
 // deal anchors its artifacts as verified entries on the freelancer's CV.
 func WithCVAnchorer(a CVAnchorer) Option {
 	return func(s *Service) { s.cv = a }
+}
+
+func WithAcceptedHoldChecker(checker AcceptedHoldChecker) Option {
+	return func(s *Service) { s.acceptedHolds = checker }
 }
 
 // WithStorage wires the artifact blob backend and the per-upload size cap.
@@ -1103,10 +1112,9 @@ func isHoldReleased(status string) bool {
 // determines it from LNbits.
 //
 // Backend autodetection: on CLN-backed LNbits a held invoice already
-// reports paid=true, so this locks as soon as the client pays. On
-// LND-backed LNbits a held invoice stays unpaid (paid=false) until it is
-// settled, so the deal remains awaiting_payment and only moves on approve —
-// the settle itself then atomically proves the funds were held.
+// reports paid=true, so this locks as soon as the client pays. On LND-backed
+// LNbits a held invoice stays unpaid (paid=false) until it is settled, so
+// the escrow node's LND REST API is checked for an accepted hold first.
 func (s *Service) CheckPayment(ctx context.Context, userID, dealID string) (*Deal, error) {
 	deal, err := s.repo.GetDealByID(ctx, dealID)
 	if err != nil {
@@ -1128,18 +1136,25 @@ func (s *Service) CheckPayment(ctx context.Context, userID, dealID string) (*Dea
 	return deal, nil
 }
 
-// refreshPaymentStatus asks LNbits for the hold's current state and moves an
-// awaiting_payment deal to locked once the payment is confirmed. It is the
-// single "paid => locked" reconciliation shared by the authed poll endpoint
-// and the public share link. LNbits errors are returned so the authed caller
-// can surface them; the public link treats them as best-effort.
+// refreshPaymentStatus asks LNbits and, for accepted LND holds, the escrow
+// node for the hold's current state. It moves an awaiting_payment deal to
+// locked once funds are committed. LNbits/LND errors are returned so the
+// authed caller can surface them; the public link treats them as best-effort.
 func (s *Service) refreshPaymentStatus(ctx context.Context, deal *Deal) error {
 	payment, err := s.lnbits.CheckPayment(ctx, deal.CheckingID)
 	if err != nil {
 		return err
 	}
 
-	if !payment.Paid {
+	funded := payment.Paid
+	if !funded && deal.Status == StatusAwaitingPayment && s.acceptedHolds != nil && deal.PreimageHash != "" {
+		funded, err = s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
+		if err != nil {
+			return err
+		}
+	}
+
+	if !funded {
 		return nil
 	}
 
@@ -1680,7 +1695,7 @@ func canResetMilestonePayoutAttempt(m *Milestone) bool {
 // checking_id, the internal deal id, or the share token itself).
 //
 // Before answering, GetPublicDeal re-checks the hold's status with LNbits and
-// locks the deal if the payment landed. The client who opens this link has no
+// LND and locks the deal if the payment landed. The client who opens this link has no
 // account, so they can never hit the freelancer-only poll endpoint — without
 // this refresh the page would stay "awaiting_payment" if the webhook was
 // delayed, lost, or never configured. LNbits being down is not a visitor
@@ -2156,7 +2171,16 @@ func (s *Service) refreshMilestonePayment(ctx context.Context, m *Milestone) err
 	if err != nil {
 		return err
 	}
-	if payment.Paid {
+
+	funded := payment.Paid
+	if !funded && s.acceptedHolds != nil && m.PreimageHash != "" {
+		funded, err = s.acceptedHolds.IsAcceptedHold(ctx, m.PreimageHash, m.AmountSats)
+		if err != nil {
+			return err
+		}
+	}
+
+	if funded {
 		m.Status = MilestoneFunded
 		if err := s.repo.UpdateMilestoneEscrow(ctx, m); err == nil {
 			// best-effort: move to in_progress if it was just funded

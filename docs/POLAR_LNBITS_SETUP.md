@@ -65,7 +65,7 @@ This guide explains how our local Lightning Network test environment works: **Po
 
 ### Why This Architecture?
 
-Ganji is a freelancer escrow platform. When a client pays for work, the money must be **held** until the work is approved, then **released** to the freelancer (or **refunded** if something goes wrong). This is possible because of **hold invoices** — a special Lightning feature that LNbits exposes through LND.
+Ganji is a freelancer escrow platform. When a client pays for work, the money must be **held** until the work is approved, then **released** to the freelancer (or **refunded** if something goes wrong). This is possible because of **hold invoices** — a special Lightning feature that LNbits exposes through LND. Money moves go through LNbits; accepted-hold detection also reads Es's LND REST API directly.
 
 ```
 Ganji Backend (Go)                 LNbits                    LND (Es)
@@ -85,7 +85,7 @@ Ganji Backend (Go)                 LNbits                    LND (Es)
      │                    freelancer gets paid                    │
 ```
 
-### LND hold semantics: why the deal stays `awaiting_payment`
+### LND hold semantics: how `awaiting_payment → locked` is detected
 
 With our **LND-backed LNbits**, a paid hold invoice does **not** become `paid: true`. LNbits reports:
 
@@ -93,14 +93,15 @@ With our **LND-backed LNbits**, a paid hold invoice does **not** become `paid: t
 { "paid": false, "status": "pending", "details": { "extra": { "hold_invoice": true } } }
 ```
 
-until Ganji calls `/api/v1/payments/settle` with the preimage. The funds are already locked in an HTLC at Es (`state: ACCEPTED` in LND), but LNbits/CLN-style `paid` detection cannot see it.
+until Ganji calls `/api/v1/payments/settle` with the preimage. The funds are already locked in an HTLC at Es (`state: ACCEPTED` in LND), so LNbits/CLN-style `paid` detection alone cannot see it.
 
 Consequences:
 - The LNbits webhook does not fire on payment acceptance; there is nothing to deliver yet.
-- Deal status intentionally remains `awaiting_payment` after the client pays.
-- The freelancer then submits work (`awaiting_payment → work_submitted`), and the client approves. `SettleHold` reveals the preimage, atomically proving the funds were held, then Ganji pays the freelancer's invoice.
+- Ganji checks Es directly through `backend/internal/lnd/client.go` when these are set in `backend/.env`: `LND_REST_URL=https://localhost:8082`, `LND_REST_CERT_PATH` pointing at Es's `tls.cert`, and `LND_REST_MACAROON_PATH` pointing at Es's `admin.macaroon`.
+- A matched payment hash, `state: ACCEPTED`, `settled: false`, `settle_date: 0`, and `amt_paid_sat >= deal.AmountSats` transition the deal to `locked`.
+- Without those LND variables set, LND-backed deals intentionally remain `awaiting_payment`; this is a local config gap, not proof of funding.
 
-This is by design in `backend/internal/deals/service.go` (`CheckPayment` comment) and `types.go` (`ValidTransitions`). Do not force `locked` from a pending hold — that would let an unpaid invoice look funded. Verify the hold at the LND layer instead (`ACCEPTED`, `amt_paid_sat`, `settle_date: 0`), as shown in `DEMO_RUNBOOK.md` Part 4.
+Never force `locked` from a generic pending hold. Verify the hold at the LND layer, as shown in `DEMO_RUNBOOK.md` Part 4.
 
 ### Network Topology
 

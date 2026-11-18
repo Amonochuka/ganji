@@ -14,6 +14,9 @@ critical ones:
 | `LNBITS_API_KEY` | LNbits **invoice key** (read/create invoices) |
 | `LNBITS_ADMIN_KEY` | LNbits **admin key** — required for settle/cancel/payout (money moves) |
 | `LNBITS_WEBHOOK_SECRET` | Wallet webhook secret for `LNbits-Signature` verification |
+| `LND_REST_URL` | Optional direct LND REST URL for accepted-hold verification (e.g., `https://localhost:8082`). Set with both paths below or leave all three unset. |
+| `LND_REST_CERT_PATH` | TLS certificate path for that LND node (never paste certificate contents here) |
+| `LND_REST_MACAROON_PATH` | Admin macaroon file path for that LND node (never paste macaroon contents here) |
 | `WEBHOOK_URL` | Public URL for LNbits to POST payment notifications (e.g., `https://api.ganji.app/webhooks/lnbits`) |
 | `FRONTEND_URLS` | CORS origins, comma-separated (e.g., `http://localhost:3000`). Singular `FRONTEND_URL` still accepted as a fallback. |
 | `OPERATOR_EMAILS` | Comma-separated emails promoted to arbitration operators at boot (`is_operator` claim). Empty by default; no operator means disputes can be raised but not resolved. |

@@ -419,6 +419,21 @@ func newTestService(repo DealRepository) *Service {
 	return NewService(repo, &lnbits.Client{})
 }
 
+type fakeAcceptedHoldChecker struct {
+	accepted    bool
+	err         error
+	calls       int
+	paymentHash string
+	amountSats  int64
+}
+
+func (f *fakeAcceptedHoldChecker) IsAcceptedHold(_ context.Context, paymentHash string, amountSats int64) (bool, error) {
+	f.calls++
+	f.paymentHash = paymentHash
+	f.amountSats = amountSats
+	return f.accepted, f.err
+}
+
 func TestCreateDealCreatesHoldInvoice(t *testing.T) {
 	var received struct {
 		paymentHash string
@@ -1242,6 +1257,82 @@ func TestCheckPaymentLocksWhenPaid(t *testing.T) {
 	}
 	if repo.deals[deal.ID].Status != StatusLocked {
 		t.Errorf("expected repo status locked, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
+func TestCheckPaymentLocksWhenLNDAcceptsHold(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.PreimageHash = "bb"
+	deal.AmountSats = 5000
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer server.Close()
+
+	checker := &fakeAcceptedHoldChecker{accepted: true}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(checker))
+
+	result, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.Status != StatusLocked || repo.deals[deal.ID].Status != StatusLocked {
+		t.Fatalf("expected LND-accepted hold to lock the deal")
+	}
+	if checker.calls != 1 || checker.paymentHash != deal.PreimageHash || checker.amountSats != deal.AmountSats {
+		t.Fatalf("unexpected checker call: %+v", checker)
+	}
+}
+
+func TestCheckPaymentKeepsAwaitingPaymentWhileHoldIsOpen(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.PreimageHash = "bb"
+	deal.AmountSats = 5000
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer server.Close()
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(&fakeAcceptedHoldChecker{}))
+
+	result, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.Status != StatusAwaitingPayment {
+		t.Fatalf("expected open hold to keep deal awaiting payment, got %s", result.Status)
+	}
+}
+
+func TestCheckPaymentReturnsLNDFundingError(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.PreimageHash = "bb"
+	deal.AmountSats = 5000
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer server.Close()
+
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(&fakeAcceptedHoldChecker{err: errors.New("lnd unavailable")}))
+
+	_, err := service.CheckPayment(context.Background(), "freelancer-1", deal.ID)
+	if err == nil {
+		t.Fatal("expected LND error")
 	}
 }
 

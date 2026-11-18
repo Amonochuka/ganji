@@ -17,6 +17,7 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/email"
 	"github.com/Amonochuka/ganji-backend/internal/health"
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
+	"github.com/Amonochuka/ganji-backend/internal/lnd"
 	"github.com/Amonochuka/ganji-backend/internal/middleware"
 	"github.com/Amonochuka/ganji-backend/internal/ots"
 	"github.com/Amonochuka/ganji-backend/internal/storage"
@@ -86,12 +87,29 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 		},
 	)
 
+	var acceptedHoldChecker deals.AcceptedHoldChecker
+	if cfg.LNDRESTURL != "" {
+		client, err := lnd.NewClient(lnd.Config{
+			URL:          cfg.LNDRESTURL,
+			CertPath:     cfg.LNDRESTCertPath,
+			MacaroonPath: cfg.LNDRESTMacaroonPath,
+		})
+		if err != nil {
+			log.Fatalf("configure LND accepted-hold checker: %v", err)
+		}
+		acceptedHoldChecker = client
+	}
+
 	emailSvc := email.NewService(cfg, authRepo)
-	dealService := deals.NewService(dealRepo, lnbitsClient,
+	dealOptions := []deals.Option{
 		deals.WithCVAnchorer(cvService),
 		deals.WithStorage(uploadStore, cfg.MaxUploadBytes),
 		deals.WithNotifier(emailSvc),
-	)
+	}
+	if acceptedHoldChecker != nil {
+		dealOptions = append(dealOptions, deals.WithAcceptedHoldChecker(acceptedHoldChecker))
+	}
+	dealService := deals.NewService(dealRepo, lnbitsClient, dealOptions...)
 	dealHandler := deals.NewHandler(dealService)
 
 	router.GET("/health", health.Handler(dbConn, lnbitsClient))
