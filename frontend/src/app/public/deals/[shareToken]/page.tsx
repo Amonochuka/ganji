@@ -102,7 +102,7 @@ export default function PublicDealPage() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-vault-bg px-6">
         <div className="w-full max-w-xl text-center">
-          <Link href="/" className="logo-gnj inline-block mb-8" aria-label="Ganji Home">GNJ</Link>
+          <Link href="/" className="logo-gnj inline-block mb-8" aria-label="Ganji Home">ganji</Link>
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-gold-500 border-t-transparent mx-auto" />
           <p className="mt-4 text-ink-500">Loading deal...</p>
         </div>
@@ -114,7 +114,7 @@ export default function PublicDealPage() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-vault-bg px-6">
         <div className="w-full max-w-xl text-center">
-          <Link href="/" className="logo-gnj inline-block mb-8" aria-label="Ganji Home">GNJ</Link>
+          <Link href="/" className="logo-gnj inline-block mb-8" aria-label="Ganji Home">ganji</Link>
           <div className="vault-card p-8 vault-seam">
             <div className="text-4xl mb-4">🔍</div>
             <h1 className="font-display text-2xl font-semibold text-ink-100 mb-2">Deal Not Found</h1>
