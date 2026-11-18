@@ -82,6 +82,7 @@ api.rotateShareLink(id, token)
 api.getPublicDeal(shareToken)
 api.getPublicMilestones(shareToken)
 api.publicApproveDeal(shareToken)
+api.publicResetPayout(shareToken, milestoneId?)
 api.publicAcceptNextMilestone(shareToken, milestoneId)
 api.publicRejectMilestone(shareToken, milestoneId, reason)
 api.publicExitDeal(shareToken)
@@ -119,6 +120,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
 - `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
+- `publicResetPayout(shareToken, milestoneId?)` → `POST /public/deals/:shareToken/payout/reset` (no auth)
 - `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)
 - `publicRejectMilestone(shareToken, milestoneId, reason)` → `POST /public/deals/:shareToken/milestones/:milestoneID/reject` (no auth)
 - `publicExitDeal(shareToken)` → `POST /public/deals/:shareToken/exit` (no auth)

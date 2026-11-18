@@ -73,6 +73,7 @@ api.updatePayeeInvoice(id, data, token)
 api.rotateShareLink(id, token)
 api.getPublicDeal(shareToken)
 api.publicApproveDeal(shareToken)
+api.publicResetPayout(shareToken, milestoneId?)
 ```
 
 Full TypeScript interfaces for all requests/responses: `DealView`, `DealStatus`, `PublicDeal`, `CreateDealRequest`, etc.

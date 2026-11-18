@@ -16,7 +16,7 @@
 | **Dashboard** | `/dashboard` | Authenticated deal list with status cards, empty state, create CTA | `GET /deals` |
 | **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title + sats each) | `POST /deals` (with `milestones[]`) |
 | **Deal Detail** | `/deals/[id]` | Full deal view, timeline, actions (submit/dispute/rotate), share link, verification status; milestone list + per-milestone actions incl. symmetric exit | `GET /deals/:id`, `POST /submit`, `POST /dispute`, `POST /share-link`, `POST /approve`, `POST /exit`, milestone endpoints |
-| **Public Deal** | `/public/deals/[shareToken]` | Client-facing view: invoice to pay, approve button wired to the public approve endpoint, dispute status; milestone accept-next/reject/exit wired | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/approve`, public milestone actions |
+| **Public Deal** | `/public/deals/[shareToken]` | Client-facing view: invoice to pay, approve/reset/accept/reject/exit actions wired to public endpoints; milestone accept-next/reject/exit wired | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/payout/reset`, public milestone actions |
 
 ---
 
@@ -58,6 +58,7 @@
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
 - `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
+- `publicResetPayout(shareToken, milestoneId?)` → `POST /public/deals/:shareToken/payout/reset` (no auth)
 - `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)
 - `publicRejectMilestone(shareToken, milestoneId, reason)` → `POST /public/deals/:shareToken/milestones/:milestoneID/reject` (no auth)
 - `publicExitDeal(shareToken)` → `POST /public/deals/:shareToken/exit` (no auth)

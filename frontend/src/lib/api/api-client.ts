@@ -155,6 +155,12 @@ export const api = {
     return this.post<PublicApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
   },
 
+  publicResetPayout(shareToken: string, milestoneId?: string) {
+    return this.post<PublicResetPayoutResponse>(`/public/deals/${shareToken}/payout/reset`, {
+      milestone_id: milestoneId || "",
+    });
+  },
+
   publicAcceptNextMilestone(shareToken: string, milestoneId: string) {
     return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/milestones/${milestoneId}/accept-next`, {});
   },
@@ -323,6 +329,11 @@ export type PublicApproveDealResponse = {
   deal: PublicDeal;
 };
 
+export type PublicResetPayoutResponse = {
+  message: string;
+  deal: PublicDeal;
+};
+
 export type DisputeDealResponse = {
   message: string;
   deal: DealView;
@@ -351,6 +362,7 @@ export type MilestoneView = {
   invoice?: string;
   completed_at: string | null;
   created_at: string;
+  payout_reset_available?: boolean;
 };
 
 export type PublicDeal = {
@@ -362,6 +374,7 @@ export type PublicDeal = {
   dispute_reason: string;
   created_at: string;
   milestones?: MilestoneView[];
+  payout_reset_available?: boolean;
 };
 
 export type CVEntry = {

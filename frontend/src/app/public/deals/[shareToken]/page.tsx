@@ -62,6 +62,17 @@ export default function PublicDealPage() {
     });
   }
 
+  async function handleResetPayout(milestoneId?: string) {
+    const message = milestoneId
+      ? "Clear the failed payout attempt for this milestone? This only removes the internal attempt marker. It does not move funds, settle escrow, or change the milestone status. Continue only after confirming the freelancer was not paid."
+      : "Clear the failed payout attempt for this deal? This only removes the internal attempt marker. It does not move funds, settle escrow, or change the deal status. Continue only after confirming the freelancer was not paid.";
+    if (!window.confirm(message)) return;
+    await runAction(milestoneId ? `reset-${milestoneId}` : "reset", async () => {
+      const res = await api.publicResetPayout(shareToken, milestoneId);
+      setDeal(res.deal);
+    });
+  }
+
   async function handleAcceptNext(milestoneId: string) {
     await runAction(`accept-${milestoneId}`, async () => {
       await api.publicAcceptNextMilestone(shareToken, milestoneId);
@@ -122,6 +133,7 @@ export default function PublicDealPage() {
   const isRefunded = deal.status === "refunded";
   const isDisputed = deal.status === "disputed";
   const canApproveDeal = deal.status === "work_submitted" || deal.status === "locked";
+  const canResetDealPayout = !!deal.payout_reset_available;
   const milestones = deal.milestones || [];
   const hasMilestones = milestones.length > 0;
   const terminal = isPaid || isRefunded;
@@ -193,7 +205,25 @@ export default function PublicDealPage() {
                   )}
                 </div>
 
-                {canApproveDeal && !hasMilestones && (
+                {canResetDealPayout && !hasMilestones && (
+                  <div className="p-4 rounded-lg bg-yellow-600/10 border border-yellow-600/30">
+                    <p className="font-medium text-yellow-400 mb-1">Payout needs a retry</p>
+                    <p className="text-xs text-ink-300 mb-3">
+                      A payout attempt was recorded but no payment was confirmed. Clear it before approving again. This does not move funds or change the deal status.
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => handleResetPayout()}
+                      isLoading={actionLoading === "reset"}
+                      disabled={!!actionLoading}
+                    >
+                      Clear failed payout attempt
+                    </Button>
+                  </div>
+                )}
+
+                {canApproveDeal && !hasMilestones && !canResetDealPayout && (
                   <Button size="lg" className="w-full py-3.5" onClick={handleApprove} isLoading={actionLoading === "approve"}>
                     Approve & Release Payment
                   </Button>
@@ -224,6 +254,7 @@ export default function PublicDealPage() {
                     actionLoading={actionLoading}
                     onAcceptNext={() => handleAcceptNext(ms.id)}
                     onReject={() => handleReject(ms.id)}
+                    onResetPayout={() => handleResetPayout(ms.id)}
                   />
                 ))}
               </div>
@@ -264,9 +295,9 @@ export default function PublicDealPage() {
   );
 }
 
-function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onReject }: {
+function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onReject, onResetPayout }: {
   ms: MilestoneView; isLast: boolean; canAct: boolean; actionLoading: string | null;
-  onAcceptNext: () => void; onReject: () => void;
+  onAcceptNext: () => void; onReject: () => void; onResetPayout: () => void;
 }) {
   const needsFunding = ms.status === "awaiting_payment" && !!ms.invoice;
   const actionable = canAct && (ms.status === "in_progress" || ms.status === "pending" || ms.status === "completed" || ms.status === "funded" || ms.status === "work_submitted" || ms.status === "awaiting_payment");
@@ -289,7 +320,23 @@ function MilestoneRow({ ms, isLast, canAct, actionLoading, onAcceptNext, onRejec
           </div>
         </div>
       )}
-      {actionable && !needsFunding && (
+      {canAct && ms.payout_reset_available && (
+        <div className="mt-3 p-3 rounded border border-yellow-600/30 bg-yellow-600/10">
+          <p className="text-xs text-ink-300 mb-2">
+            A payout attempt was recorded but no payment was confirmed. Clear it before approving again. This does not move funds or change the milestone status.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onResetPayout}
+            isLoading={actionLoading === `reset-${ms.id}`}
+            disabled={!!actionLoading}
+          >
+            Clear failed payout attempt
+          </Button>
+        </div>
+      )}
+      {actionable && !needsFunding && !ms.payout_reset_available && (
         <div className="mt-3 flex flex-wrap gap-2">
           <Button size="sm" onClick={onAcceptNext} isLoading={actionLoading === `accept-${ms.id}`} disabled={!!actionLoading}>
 {ms.status === "released" ? (isLast ? "Released (paid)" : "Released — Start Next") : ms.status === "completed" ? (isLast ? "Finalize payout" : "Release & Start Next") : "Approve / Release Milestone"}
