@@ -269,23 +269,82 @@ docker exec polar-n3-bob lncli --network=regtest \
 ### Watch what happens
 
 ```bash
-# LNbits logs — webhook fires, payment held
+# LNbits logs — no webhook on LND holds (see Part 5.0)
 docker logs ganji-lnbits-1 --tail 20
 
 # Deal status in Ganji (refresh the deal page)
-# Should go: awaiting_payment → funded / work_submitted
+# On LND-backed LNbits the status STAYS awaiting_payment here — that is expected (see Part 5.0)
 ```
 
 The sats are now **held at Alice** — not settled yet. Bob's channel balance dropped, but Alice hasn't actually received spendable funds.
+
+**LNbits UI shows the hold, but not the LND state:**
+- Wallet balance stays `0 sats` (hold not settled).
+- Transactions shows `Test Deal Polar — 50,000 — pending`.
+- There is no `ACCEPTED` / HTLC label in the LNbits UI. `pending` there means "not settled yet"; the definitive proof of Alice holding the HTLC is Polar/LND below.
+
+**Verify Alice is holding it (this is the definitive check):**
+
+```bash
+docker exec polar-n3-alice lncli --network=regtest \
+  --tlscertpath=/home/lnd/.lnd/tls.cert \
+  --macaroonpath=/home/lnd/.lnd/data/chain/bitcoin/regtest/admin.macaroon \
+  listinvoices | grep -A 8 '"r_hash": "94cc8d6f'
+```
+
+You want `state: ACCEPTED`, `amt_paid_sat: 50000`, `settle_date: 0`. That means Alice accepted the HTLC but has not revealed the preimage. In Polar GUI: **network 3 → alice → Invoices**, and **Channels → Bob's 500k channel → pending incoming HTLC 50,000**.
 
 ---
 
 ## Part 5 — Approve / Release (Escrow Settlement)
 
-In the Ganji deal page, use the **approve/release** action. Behind the scenes:
+### 5.0 Why the deal still says `awaiting_payment` (and no webhook fired)
+
+This is **intentional for LND-backed LNbits**, not a bug:
+
+- LNbits keeps a held invoice at `paid: false`, `status: pending` until the preimage is revealed by `settle`.
+- Ganji's webhook/poll only transitions `awaiting_payment → locked` when `paid: true` (that's CLN behaviour; CLN reports held invoices as paid).
+- With LND, the deal therefore stays `awaiting_payment` while the money is genuinely held at Alice. The **settle on approve** is what atomically proves the funds were held.
+
+So do **not** change code to force `locked` from a pending hold. Follow the normal flow instead:
+
+### 5.1 Freelancer submits work (`awaiting_payment → work_submitted`)
+
+`SubmitWork` is allowed from `awaiting_payment`, but it requires at least one artifact. There is no upload button in the current frontend, so use the API as the freelancer (`polar@test.com`):
+
+```bash
+FREELANCER_TOKEN="<login token for polar@test.com>"
+DEAL_ID="7d130616-a511-4a2c-8485-df7f78125359"
+
+echo "demo deliverable" > /tmp/deliverable.txt
+
+curl -s -X POST \
+  -H "Authorization: Bearer $FREELANCER_TOKEN" \
+  -F "kind=source_file" \
+  -F "artifact=@/tmp/deliverable.txt" \
+  http://localhost:8080/deals/$DEAL_ID/artifacts
+
+curl -s -X POST \
+  -H "Authorization: Bearer $FREELANCER_TOKEN" \
+  http://localhost:8080/deals/$DEAL_ID/submit
+```
+
+Check the deal page: status should now be `work_submitted`.
+
+### 5.2 Client approves (`work_submitted → released`)
+
+Log in as the client (`local@test.com`) and use the **approve/release** action on the deal page, or call:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $CLIENT_TOKEN" \
+  http://localhost:8080/deals/$DEAL_ID/approve
+```
+
+Behind the scenes:
 
 1. Ganji calls LNbits `/api/v1/payments/settle` with the preimage → held sats settle into escrow
-2. Ganji calls `PayInvoice(payee_invoice)` → pays out to Bob's payee invoice (freelancer)
+2. Ganji calls `PayInvoice(payee_invoice)` → pays out to the payee (Bob in simple mode, Carol in Part 6)
 3. Deal status → `released`
 
 Verify:
@@ -472,6 +531,8 @@ scripts/
 | `Invoice key required` | Backend sends `out: false`; manual curls must too |
 | Bob can't pay | Check channel active (`listchannels`) and Bob has sats (`walletbalance`) |
 | Bob funded but balance unchanged | Coinbase maturity — mine 100 more blocks (see Part 2.2 explanation) |
+| Deal still `awaiting_payment` after Bob paid | Expected on LND: hold stays `paid:false`. Check Alice invoice `ACCEPTED`; then freelancer submits work, client approves (Part 5.0–5.2) |
+| Approve returns `cannot be approved from status awaiting_payment` | Run Part 5.1 first (`SubmitWork` moves it to `work_submitted`) |
 | Carol can't receive payout | Need Alice→Carol channel active, and Carol's payee invoice amount must be ≤ channel capacity |
 
 ---

@@ -80,6 +80,23 @@ Ganji Backend (Go)                 LNbits                    LND (alice)
      │                    freelancer gets paid                    │
 ```
 
+### LND hold semantics: why the deal stays `awaiting_payment`
+
+With our **LND-backed LNbits**, a paid hold invoice does **not** become `paid: true`. LNbits reports:
+
+```json
+{ "paid": false, "status": "pending", "details": { "extra": { "hold_invoice": true } } }
+```
+
+until Ganji calls `/api/v1/payments/settle` with the preimage. The funds are already locked in an HTLC at Alice (`state: ACCEPTED` in LND), but LNbits/CLN-style `paid` detection cannot see it.
+
+Consequences:
+- The LNbits webhook does not fire on payment acceptance; there is nothing to deliver yet.
+- Deal status intentionally remains `awaiting_payment` after the client pays.
+- The freelancer then submits work (`awaiting_payment → work_submitted`), and the client approves. `SettleHold` reveals the preimage, atomically proving the funds were held, then Ganji pays the freelancer's invoice.
+
+This is by design in `backend/internal/deals/service.go` (`CheckPayment` comment) and `types.go` (`ValidTransitions`). Do not force `locked` from a pending hold — that would let an unpaid invoice look funded. Verify the hold at the LND layer instead (`ACCEPTED`, `amt_paid_sat`, `settle_date: 0`), as shown in `DEMO_RUNBOOK.md` Part 4.
+
 ### Network Topology
 
 | Network | Purpose | Who's on it |
