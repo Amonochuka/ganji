@@ -66,7 +66,7 @@ export default function DealDetailPage() {
     if (!tokens) return;
     try {
       const res = await api.listArtifacts(dealId, tokens.access_token);
-      setArtifacts(res.artifacts);
+      setArtifacts(res.artifacts ?? []);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to load deliverables");
     }

@@ -585,7 +585,7 @@ func (r *Repository) ListArtifactsByDeal(ctx context.Context, dealID string, mil
 		return nil, fmt.Errorf("repository: list artifacts: %w", err)
 	}
 	defer rows.Close()
-	var artifacts []Artifact
+	artifacts := make([]Artifact, 0)
 	for rows.Next() {
 		artifact := Artifact{}
 		err := rows.Scan(&artifact.ID, &artifact.DealID, &artifact.MilestoneID, &artifact.Kind, &artifact.StorageKey, &artifact.UploadedAt)
