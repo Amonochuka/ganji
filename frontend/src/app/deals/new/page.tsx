@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { WalletLinkDialog } from "@/components/deals/wallet-link-dialog";
@@ -15,7 +15,7 @@ type MilestoneDraft = { title: string; amount_sats: string };
 
 export default function CreateDealPage() {
   const router = useRouter();
-  const { tokens } = useAuth();
+  const { tokens, isLoading: authLoading } = useAuth();
 
   const [title, setTitle] = useState("");
   const [amountSats, setAmountSats] = useState("");
@@ -31,6 +31,11 @@ export default function CreateDealPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [milestoneMode, setMilestoneMode] = useState(false);
   const [milestones, setMilestones] = useState<MilestoneDraft[]>([{ title: "Milestone 1", amount_sats: "" }]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!tokens) router.push("/login");
+  }, [authLoading, tokens, router]);
 
   const platforms = [
     "Upwork", "Fiverr", "Freelancer.com", "Toptal", "Guru", "PeoplePerHour", "Direct Client", "Other",
@@ -140,6 +145,14 @@ export default function CreateDealPage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (authLoading) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-vault-bg px-6">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gold-500 border-t-transparent" />
+      </main>
+    );
   }
 
   if (!tokens) {

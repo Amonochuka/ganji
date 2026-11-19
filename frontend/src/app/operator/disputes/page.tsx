@@ -10,13 +10,14 @@ import { formatCurrency } from "@/lib/utils/format";
 
 export default function OperatorDisputesPage() {
   const router = useRouter();
-  const { tokens, user } = useAuth();
+  const { tokens, user, isLoading: authLoading } = useAuth();
   const [disputes, setDisputes] = useState<DealView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!tokens) {
       router.push("/login");
       return;
@@ -26,7 +27,7 @@ export default function OperatorDisputesPage() {
       return;
     }
     fetchDisputes();
-  }, [tokens, user, router]);
+  }, [authLoading, tokens, user, router]);
 
   async function fetchDisputes() {
     if (!tokens) return;

@@ -11,7 +11,7 @@ export default function ReconcilePage() {
   const params = useParams();
   const router = useRouter();
   const dealId = params.dealId as string;
-  const { tokens, user } = useAuth();
+  const { tokens, user, isLoading: authLoading } = useAuth();
   const [deal, setDeal] = useState<DealView | null>(null);
   const [action, setAction] = useState<"confirm_payout" | "reset_payout">("reset_payout");
   const [payoutId, setPayoutId] = useState("");
@@ -21,6 +21,7 @@ export default function ReconcilePage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!tokens) {
       router.push("/login");
       return;
@@ -40,7 +41,7 @@ export default function ReconcilePage() {
         setIsLoading(false);
       }
     })();
-  }, [tokens, user, dealId, router]);
+  }, [authLoading, tokens, user, dealId, router]);
 
   async function handleSubmit() {
     if (!tokens) return;

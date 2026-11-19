@@ -15,7 +15,7 @@ import { copyText } from "@/lib/utils/clipboard";
 export default function DealDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { tokens, user, logout } = useAuth();
+  const { tokens, user, logout, isLoading: authLoading } = useAuth();
   const dealId = params.dealId as string;
 
   const [deal, setDeal] = useState<DealView | null>(null);
@@ -32,6 +32,7 @@ export default function DealDetailPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!tokens) {
       router.push("/login");
       return;
@@ -39,7 +40,7 @@ export default function DealDetailPage() {
     fetchDeal();
     fetchMilestones();
     fetchArtifacts();
-  }, [tokens, dealId, router]);
+  }, [authLoading, tokens, dealId, router]);
 
   async function fetchDeal() {
     if (!tokens) return;

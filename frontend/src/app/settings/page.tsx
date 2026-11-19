@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { tokens, user: ctxUser, logout } = useAuth();
+  const { tokens, user: ctxUser, logout, isLoading: authLoading } = useAuth();
   const [user, setUser] = useState<User | null>(ctxUser);
   const [displayName, setDisplayName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -20,6 +20,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!tokens) {
       router.push("/login");
       return;
@@ -36,7 +37,7 @@ export default function SettingsPage() {
         setIsLoading(false);
       }
     })();
-  }, [tokens, router]);
+  }, [authLoading, tokens, router]);
 
   async function handleSave() {
     if (!tokens) return;
