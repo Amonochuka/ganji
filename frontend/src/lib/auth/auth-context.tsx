@@ -1,7 +1,15 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { api, type AuthTokens, type User, type LoginRequest, type RegisterRequest } from "@/lib/api/api-client";
+import {
+  api,
+  AUTH_SESSION_EXPIRED_EVENT,
+  AUTH_TOKENS_UPDATED_EVENT,
+  type AuthTokens,
+  type User,
+  type LoginRequest,
+  type RegisterRequest,
+} from "@/lib/api/api-client";
 
 interface AuthContextType {
   user: User | null;
@@ -30,6 +38,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(JSON.parse(storedUser));
     }
     setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    function handleTokensUpdated(event: Event) {
+      setTokens((event as CustomEvent<AuthTokens>).detail);
+    }
+
+    function handleSessionExpired() {
+      setTokens(null);
+      setUser(null);
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    }
+
+    window.addEventListener(AUTH_TOKENS_UPDATED_EVENT, handleTokensUpdated);
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => {
+      window.removeEventListener(AUTH_TOKENS_UPDATED_EVENT, handleTokensUpdated);
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+    };
   }, []);
 
   async function login(credentials: LoginRequest) {
