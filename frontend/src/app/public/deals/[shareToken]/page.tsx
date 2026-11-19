@@ -232,6 +232,7 @@ export default function PublicDealPage() {
               <div className="mb-6 p-4 rounded-lg bg-blue-600/10 border border-blue-600/30 text-center">
                 <p className="flex items-center justify-center gap-1.5 font-medium text-blue-400 mb-1"><StatusIcon status="locked" /> Funds held in escrow</p>
                 <p className="text-sm text-ink-300">Ganji verified the Lightning hold. The freelancer can see that funding is committed.</p>
+                <p className="mt-1 text-xs text-ink-400">The hold is accepted but not settled, so the escrow wallet balance will not increase until payout.</p>
               </div>
             )}
 

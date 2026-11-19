@@ -2283,6 +2283,29 @@ func TestFundDealLocksAfterAcceptedHold(t *testing.T) {
 	}
 }
 
+func TestFundDealIsIdempotentWhenAlreadyLocked(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("already locked deal must not call linked wallet")
+	}))
+	defer wallet.Close()
+
+	checker := &sequenceAcceptedHoldChecker{results: []bool{false}}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: "http://localhost:1"}), WithAcceptedHoldChecker(checker))
+	result, err := service.FundDeal(context.Background(), deal.ShareToken, "", wallet.URL, "wallet-admin-key")
+	if err != nil {
+		t.Fatalf("expected already funded deal to succeed, got %v", err)
+	}
+	if result == nil || result.Status != StatusLocked {
+		t.Fatalf("expected locked public deal, got %+v", result)
+	}
+	if repo.deals[deal.ID].Status != StatusLocked {
+		t.Fatalf("expected deal to remain locked, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
 func TestFundDealWrapsWalletPaymentFailure(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")

@@ -1309,6 +1309,9 @@ func (s *Service) fundMilestoneHold(ctx context.Context, deal *Deal, shareToken 
 }
 
 func (s *Service) fundDealHold(ctx context.Context, deal *Deal, shareToken, walletURL, walletKey string) (*PublicDeal, error) {
+	if deal.Status == StatusLocked {
+		return s.GetPublicDeal(ctx, shareToken)
+	}
 	if deal.Status != StatusAwaitingPayment {
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusLocked)
 	}
