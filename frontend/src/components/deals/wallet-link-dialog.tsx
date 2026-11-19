@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 
 interface WalletLinkDialogProps {
   open: boolean;
@@ -57,12 +58,12 @@ export function WalletLinkDialog({
             onChange={(event) => onWalletURLChange(event.target.value)}
             placeholder="http://localhost:5000"
           />
-          <Input
+          <PasswordInput
             label={keyLabel}
-            type="password"
             value={walletKey}
             onChange={(event) => onWalletKeyChange(event.target.value)}
             placeholder={keyPlaceholder}
+            autoComplete="off"
           />
         </div>
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
