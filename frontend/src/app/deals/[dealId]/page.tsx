@@ -10,6 +10,7 @@ import { DealCard } from "@/components/deals/deal-card";
 import { api, type Artifact, type ArtifactKind, type DealView, type DealStatus, type DealDetailResponse, type SubmitWorkResponse, type DisputeDealResponse, type MilestoneView } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatCurrency } from "@/lib/utils/format";
+import { copyText } from "@/lib/utils/clipboard";
 
 export default function DealDetailPage() {
   const router = useRouter();
@@ -162,9 +163,13 @@ export default function DealDetailPage() {
   async function handleCopyShareLink() {
     if (!deal) return;
     const url = `${window.location.origin}/public/deals/${deal.share_token}`;
-    await navigator.clipboard.writeText(url);
-    setNotice("Share link copied to clipboard");
-    setTimeout(() => setNotice(null), 3000);
+    try {
+      await copyText(url);
+      setNotice("Share link copied to clipboard");
+      setTimeout(() => setNotice(null), 3000);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not copy share link");
+    }
   }
 
   async function handleApproveDeal() {

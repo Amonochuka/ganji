@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { DealView, DealStatus } from "@/lib/api/api-client";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { formatCurrency } from "@/lib/utils/format";
+import { copyText } from "@/lib/utils/clipboard";
 
 interface DealCardProps {
   deal: DealView;
@@ -20,13 +22,33 @@ const statusConfig: Record<DealStatus, { label: string; className: string }> = {
 };
 
 export function DealCard({ deal, onClick }: DealCardProps) {
+  const [copyMessage, setCopyMessage] = useState("");
   const config = statusConfig[deal.status];
   const amount = formatCurrency(deal.amount_sats);
 
+  async function copyShareLink() {
+    if (!deal.share_token) return;
+    try {
+      await copyText(`${window.location.origin}/public/deals/${deal.share_token}`);
+      setCopyMessage("Link copied");
+    } catch (error) {
+      setCopyMessage(error instanceof Error ? error.message : "Could not copy link");
+    }
+    window.setTimeout(() => setCopyMessage(""), 3000);
+  }
+
   return (
     <article
-      className={`vault-card p-6 cursor-pointer transition-all hover:border-gold-500/50 ${onClick ? "hover:shadow-[0_0_0_1px_rgba(196,150,50,0.2)]" : ""}`}
+      className={`vault-card p-6 transition-all hover:border-gold-500/50 ${onClick ? "cursor-pointer hover:shadow-[0_0_0_1px_rgba(196,150,50,0.2)]" : ""}`}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (onClick && (event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      role={onClick ? "link" : undefined}
+      tabIndex={onClick ? 0 : undefined}
     >
       <div className="flex items-start justify-between gap-4 mb-4">
         <div className="flex-1 min-w-0">
@@ -55,16 +77,18 @@ export function DealCard({ deal, onClick }: DealCardProps) {
         </p>
         {deal.share_token && (
           <button
+            type="button"
             className="text-xs text-gold-500 hover:text-gold-400 font-medium underline underline-offset-1"
             onClick={(e) => {
               e.stopPropagation();
-              navigator.clipboard.writeText(`${window.location.origin}/public/deals/${deal.share_token}`);
+              void copyShareLink();
             }}
           >
-            Copy share link
+            {copyMessage || "Copy share link"}
           </button>
         )}
       </div>
+      {copyMessage && <p className="mt-2 text-right text-xs text-ink-500" role="status">{copyMessage}</p>}
     </article>
   );
 }
