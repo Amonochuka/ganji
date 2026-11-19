@@ -2283,6 +2283,39 @@ func TestFundDealLocksAfterAcceptedHold(t *testing.T) {
 	}
 }
 
+func TestFundDealWrapsWalletPaymentFailure(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.Invoice = "lnbc-hold"
+	deal.PreimageHash = "aa"
+	deal.AmountSats = 5000
+
+	escrow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer escrow.Close()
+
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"detail":"insufficient balance"}`))
+	}))
+	defer wallet.Close()
+
+	checker := &sequenceAcceptedHoldChecker{results: []bool{false}}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: escrow.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(checker))
+
+	_, err := service.FundDeal(context.Background(), deal.ShareToken, "", wallet.URL, "wallet-admin-key")
+	if !errors.Is(err, ErrWalletPaymentFailed) {
+		t.Fatalf("expected wallet payment failure, got %v", err)
+	}
+	if repo.deals[deal.ID].Status != StatusAwaitingPayment {
+		t.Fatalf("failed payment must leave deal awaiting payment, got %s", repo.deals[deal.ID].Status)
+	}
+}
+
 func TestFundDealRefusesUnacceptedHold(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")

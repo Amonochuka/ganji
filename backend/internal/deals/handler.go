@@ -580,6 +580,8 @@ func (h *Handler) FundDeal(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrVerificationUnavailable):
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "escrow verification is not configured"})
+		case errors.Is(err, ErrWalletPaymentFailed):
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		default:

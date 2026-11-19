@@ -382,7 +382,12 @@ Look for the invoice with `amt: 50000` and `state: OPEN` (hold invoice accepted 
 
 The client funds the hold from a **linked LNbits wallet** through Ganji's public
 fund endpoint. That wallet must be backed by Bob's node (`polar-n3-Cl`), and
-Ganji pays the deal's hold invoice from it:
+Ganji pays the deal's hold invoice from it.
+
+The `:5001` LNbits wallet starts at `0 sats` even when `Cl` has channel funds.
+Before funding a deal, create a receive invoice in that wallet and pay it — from
+another Polar node, or from `Cl` itself with `payinvoice --allow_self_payment`.
+A node balance is not the same as its LNbits wallet balance.
 
 ```bash
 # From the public deal page, copy the share token (the UUID in the share URL)

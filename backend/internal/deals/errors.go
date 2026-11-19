@@ -12,6 +12,7 @@ var (
 	ErrNoCheckingID            = errors.New("deal has no checking id")
 	ErrMilestoneNotFound       = errors.New("milestone not found")
 	ErrVerificationUnavailable = errors.New("accepted-hold verification is not configured")
+	ErrWalletPaymentFailed     = errors.New("could not pay escrow invoice from linked wallet")
 	// ErrPayoutInFlight marks a payout whose outcome is unknown (an earlier
 	// attempt was recorded but never confirmed, or LNbits has not settled it
 	// either way). The deal needs manual reconciliation against LNbits

@@ -1289,7 +1289,7 @@ func (s *Service) fundMilestoneHold(ctx context.Context, deal *Deal, shareToken 
 
 	wallet := lnbits.NewClient(lnbits.Config{URL: walletURL, AdminKey: walletKey})
 	if _, err := wallet.PayInvoice(ctx, m.Invoice); err != nil {
-		return nil, fmt.Errorf("paying escrow invoice from linked wallet: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrWalletPaymentFailed, err)
 	}
 	accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, m.PreimageHash, m.AmountSats)
 	if err != nil {
@@ -1331,7 +1331,7 @@ func (s *Service) fundDealHold(ctx context.Context, deal *Deal, shareToken, wall
 
 	wallet := lnbits.NewClient(lnbits.Config{URL: walletURL, AdminKey: walletKey})
 	if _, err := wallet.PayInvoice(ctx, deal.Invoice); err != nil {
-		return nil, fmt.Errorf("paying escrow invoice from linked wallet: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrWalletPaymentFailed, err)
 	}
 	accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
 	if err != nil {
