@@ -80,6 +80,53 @@ func TestCreateHoldInvoice(t *testing.T) {
 	}
 }
 
+func TestCreateInvoiceSendsOutFalse(t *testing.T) {
+	client, requests := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "invoice-key" {
+			t.Errorf("expected invoice key, got %q", r.Header.Get("X-Api-Key"))
+		}
+
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		if req["out"] != false {
+			t.Errorf("expected out false, got %v", req["out"])
+		}
+		if req["unit"] != "sat" {
+			t.Errorf("expected default unit sat, got %v", req["unit"])
+		}
+		if req["amount"] != float64(1500) {
+			t.Errorf("expected amount 1500, got %v", req["amount"])
+		}
+		if req["memo"] != "Payout" {
+			t.Errorf("unexpected memo %v", req["memo"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"checking_id":"c2","payment_hash":"ph2","payment_request":"lnbc2"}`))
+	})
+
+	invoice, err := client.CreateInvoice(context.Background(), CreateInvoiceRequest{
+		Out:    true,
+		Amount: 1500,
+		Memo:   "Payout",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if invoice.CheckingID != "c2" || invoice.PaymentHash != "ph2" || invoice.PaymentRequest != "lnbc2" {
+		t.Fatalf("unexpected invoice: %+v", invoice)
+	}
+
+	if (*requests)[0] != "POST /api/v1/payments" {
+		t.Fatalf("unexpected request %q", (*requests)[0])
+	}
+}
+
 func TestCreateHoldInvoiceUsesConfiguredExpiry(t *testing.T) {
 	var expiry int64
 	var requests []string

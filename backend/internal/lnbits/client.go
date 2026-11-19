@@ -152,6 +152,7 @@ func (c *Client) CreateHoldInvoice(ctx context.Context, req CreateHoldInvoiceReq
 }
 
 func (c *Client) CreateInvoice(ctx context.Context, req CreateInvoiceRequest) (*Invoice, error) {
+	req.Out = false
 	if req.Unit == "" {
 		req.Unit = "sat"
 	}

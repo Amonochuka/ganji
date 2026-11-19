@@ -20,6 +20,7 @@ type CreateHoldInvoiceRequest struct {
 }
 
 type CreateInvoiceRequest struct {
+	Out    bool   `json:"out"`
 	Amount int64  `json:"amount"`
 	Memo   string `json:"memo"`
 	Unit   string `json:"unit,omitempty"`
