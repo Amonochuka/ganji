@@ -41,12 +41,6 @@ export default function Home() {
             <span className="text-gold-400">Lightning handles the trust.</span>
           </h1>
 
-          <p className="mx-auto mb-10 max-w-2xl text-lg md:text-xl text-ink-300 leading-relaxed">
-            Freelancers generate a payout invoice. Clients fund a Lightning hold from their linked wallet.
-            Ganji marks funds held only after the escrow node accepts that hold — then approval reveals
-            the secret and pays the freelancer directly.
-          </p>
-
           <div className="mt-6 mb-8 flex flex-col items-center justify-center gap-2">
             <div className="w-full max-w-32 h-1 bg-vault-border border-t border-vault-border rounded-t-lg rounded-b-lg" />
             <span className="text-xs text-ink-500 uppercase tracking-widest">Powered by Bitcoin Lightning</span>
@@ -107,50 +101,63 @@ function EscrowFlow() {
   return (
     <section aria-label="How Ganji escrow works" className="mx-auto mt-16 w-full max-w-4xl">
       <p className="mb-6 text-center text-[11px] font-medium uppercase tracking-[0.22em] text-ink-500">
-        Full Lightning flow
+        A simple, protected flow
       </p>
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+      <div className="relative grid grid-cols-1 gap-5 sm:grid-cols-5 sm:gap-2">
+        <div className="absolute bottom-10 left-6 top-6 w-px bg-gradient-to-b from-vault-border via-gold-500/50 to-vault-border sm:bottom-auto sm:left-[10%] sm:right-[10%] sm:top-6 sm:h-px sm:w-auto sm:bg-gradient-to-r" aria-hidden="true" />
         <FlowStep
-          label="Payout invoice"
-          detail="Freelancer generates the lnbc invoice"
+          label="Invoice ready"
+          detail="Freelancer shares a payout invoice"
           icon={<path d="m13 2-8 12h6l-1 8 8-12h-6l1-8Z" />}
         />
         <FlowStep
           label="Client funds"
-          detail="Linked wallet pays the hold invoice"
+          detail="Pays the Lightning hold"
           icon={<><path d="M3 7h18v12H3V7Z" /><path d="M3 11h18" /><path d="M16 15h2" /></>}
         />
         <FlowStep
-          label="Funds Held"
-          detail="Escrow node accepts the hold"
+          label="Work delivered"
+          detail="Funds stay held while work is reviewed"
           featured
-          icon={<path d="M7 10V7a5 5 0 0 1 10 0v3m-11 0h12v10H6V10Zm6 4v2" />}
+          icon={<><path d="M7 10V7a5 5 0 0 1 10 0v3m-11 0h12v10H6V10Z" /><path d="m9 15 2 2 4-4" /></>}
         />
         <FlowStep
-          label="Approve & pay"
-          detail="R is revealed; freelancer is paid"
+          label="Client approves"
+          detail="Escrow pays the freelancer"
           icon={<path d="m5 12 4 4L19 6" />}
         />
+        <FlowStep
+          label="Client rejects"
+          detail="Funds stay held for independent review"
+          alternate
+          icon={<path d="m7 7 10 10M17 7 7 17" />}
+        />
       </div>
+      <p className="mt-5 text-center text-xs text-ink-500">
+        Independent review resolves a rejection: funds are released to the freelancer or refunded to the client.
+      </p>
     </section>
   );
 }
 
-function FlowStep({ label, detail, icon, featured = false }: {
+function FlowStep({ label, detail, icon, featured = false, alternate = false }: {
   label: string;
   detail: string;
   icon: React.ReactNode;
   featured?: boolean;
+  alternate?: boolean;
 }) {
   return (
-    <div className="relative z-10 flex flex-col items-center text-center">
-      <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-full border bg-vault-bg ${featured ? "border-gold-500/60 text-gold-400 shadow-[0_0_24px_rgba(196,150,50,0.16)]" : "border-vault-border text-ink-300"}`}>
+    <div className="relative z-10 flex items-center gap-4 bg-vault-bg sm:flex-col sm:gap-0">
+      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border bg-vault-bg sm:mb-3 ${featured ? "border-gold-500/60 text-gold-400 shadow-[0_0_24px_rgba(196,150,50,0.16)]" : alternate ? "border-amber-700/50 text-amber-300" : "border-vault-border text-ink-300"}`}>
         <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           {icon}
         </svg>
       </div>
-      <p className={`text-sm font-medium ${featured ? "text-gold-400" : "text-ink-100"}`}>{label}</p>
-      <p className="mt-1 text-xs leading-relaxed text-ink-500">{detail}</p>
+      <div className="text-left sm:text-center">
+        <p className={`text-sm font-medium ${featured ? "text-gold-400" : alternate ? "text-amber-300" : "text-ink-100"}`}>{label}</p>
+        <p className="mt-1 text-xs leading-relaxed text-ink-500">{detail}</p>
+      </div>
     </div>
   );
 }
