@@ -92,7 +92,11 @@ npm install
 npm run dev
 ```
 
-Runs on `http://localhost:3000`.
+Runs on `http://localhost:3000`. Use `npm run dev:lan` when opening the dev
+server from another device; it detects the current private-LAN IP/hostname on
+every start, so Wi-Fi changes do not require editing `.env.local`. Stop any
+existing `npm run dev` process first—Next.js allows only one dev server per
+project directory.
 
 ## Build
 
@@ -106,7 +110,7 @@ npm run build   # production build (Turbopack)
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Backend API base URL |
 | `NEXT_PUBLIC_WS_URL` | — | WebSocket URL (not implemented yet) |
-| `GANJI_ALLOWED_DEV_ORIGINS` | — | Comma-separated LAN hostnames/IPs allowed to request Next.js dev resources; set this when opening the dev server from another device and restart `npm run dev` |
+| `GANJI_ALLOWED_DEV_ORIGINS` | — | Comma-separated LAN hostnames/IPs allowed to request Next.js dev resources; `npm run dev:lan` sets this automatically from the current network |
 
 ## Known Issues
 

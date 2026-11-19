@@ -24,6 +24,7 @@ type Config struct {
 	PreimageEncryptionKey     string
 	WebhookURL                string
 	FrontendURLs              []string
+	CORSAllowPrivateLAN       bool
 	HoldInvoiceExpirySeconds  int64
 	HoldSweepIntervalSeconds  int64
 	StoragePath               string
@@ -60,6 +61,7 @@ func Load() *Config {
 		PreimageEncryptionKey:     getEnv("PREIMAGE_ENCRYPTION_KEY", ""),
 		WebhookURL:                getEnv("WEBHOOK_URL", ""),
 		FrontendURLs:              getEnvListFallback("FRONTEND_URLS", "FRONTEND_URL"),
+		CORSAllowPrivateLAN:       getEnvBool("CORS_ALLOW_PRIVATE_LAN", false),
 		HoldInvoiceExpirySeconds:  getEnvInt("LNBITS_HOLD_INVOICE_EXPIRY_SECONDS", 2_592_000),
 		HoldSweepIntervalSeconds:  getEnvInt("LNBITS_HOLD_SWEEP_INTERVAL_SECONDS", 21_600),
 		StoragePath:               getEnv("STORAGE_PATH", "./uploads"),
@@ -150,6 +152,19 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	val, ok := os.LookupEnv(key)
+	if !ok || val == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		log.Printf("invalid boolean for %s (%q), using fallback %t", key, val, fallback)
+		return fallback
+	}
+	return parsed
 }
 
 func requireEnv(key string) string {

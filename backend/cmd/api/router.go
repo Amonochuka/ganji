@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"git.intruders.space/public/opentimestamps/verifyer"
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
 	"github.com/Amonochuka/ganji-backend/internal/auth"
@@ -33,12 +32,7 @@ import (
 func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage) (*gin.Engine, *deals.Service, *cv.Service, *auth.Service) {
 	router := gin.Default()
 
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     cfg.FrontendURLs,
-		AllowMethods:     []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		AllowCredentials: true,
-	}))
+	router.Use(middleware.NewCORSMiddleware(cfg.FrontendURLs, cfg.CORSAllowPrivateLAN))
 
 	tokenManager := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTRefreshSecret)
 

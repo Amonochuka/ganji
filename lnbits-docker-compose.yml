@@ -22,6 +22,48 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  lnbits-client:
+    image: lnbits/lnbits:latest
+    ports:
+      - "5001:5000"
+    environment:
+      - LNBITS_BACKEND_WALLET_CLASS=LndRestWallet
+      - LND_REST_ENDPOINT=https://polar-n3-Cl:8080
+      - LND_REST_CERT=/certs/tls.cert
+      - LND_REST_MACAROON=/certs/admin.macaroon
+      - LNBITS_ADMIN_UI=true
+      - LNBITS_ALLOW_PUBLIC_ACCOUNT_CREATION=true
+      - LNBITS_DATA_FOLDER=/data
+      - LNBITS_RESERVE_FEE_MIN=0
+      - LNBITS_RESERVE_FEE_PERCENT=0
+    volumes:
+      - lnbits-client-data:/data
+      - /home/amonoff/.polar/networks/3/volumes/lnd/Cl/tls.cert:/certs/tls.cert:ro
+      - /home/amonoff/.polar/networks/3/volumes/lnd/Cl/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+    networks:
+      - polar-network
+
+  lnbits-freelancer:
+    image: lnbits/lnbits:latest
+    ports:
+      - "5002:5000"
+    environment:
+      - LNBITS_BACKEND_WALLET_CLASS=LndRestWallet
+      - LND_REST_ENDPOINT=https://polar-n3-Fre:8080
+      - LND_REST_CERT=/certs/tls.cert
+      - LND_REST_MACAROON=/certs/admin.macaroon
+      - LNBITS_ADMIN_UI=true
+      - LNBITS_ALLOW_PUBLIC_ACCOUNT_CREATION=true
+      - LNBITS_DATA_FOLDER=/data
+      - LNBITS_RESERVE_FEE_MIN=0
+      - LNBITS_RESERVE_FEE_PERCENT=0
+    volumes:
+      - lnbits-freelancer-data:/data
+      - /home/amonoff/.polar/networks/3/volumes/lnd/Fre/tls.cert:/certs/tls.cert:ro
+      - /home/amonoff/.polar/networks/3/volumes/lnd/Fre/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+    networks:
+      - polar-network
+
 networks:
   polar-network:
     name: polar-network-3_default
@@ -31,3 +73,7 @@ volumes:
   lnbits-data:
     name: ganji_lnbits-data
     external: true
+  lnbits-client-data:
+    name: ganji_lnbits-client-data
+  lnbits-freelancer-data:
+    name: ganji_lnbits-freelancer-data

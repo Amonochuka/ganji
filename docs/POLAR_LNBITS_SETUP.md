@@ -173,6 +173,27 @@ docker compose -f ~/.polar/networks/3/docker-compose.yml up -d
 docker compose -f lnbits-docker-compose.yml up -d
 ```
 
+**3. Optional: full three-wallet topology test.** Start two more LNbits
+instances, backed by `Cl` and `Fre`:
+
+```bash
+docker compose -f lnbits-docker-compose.yml up -d
+```
+
+| URL | LND backend | Use |
+|---|---|---|
+| `http://localhost:5000` | `polar-n3-Es` | Ganji escrow wallet; backend `LNBITS_URL` |
+| `http://localhost:5001` | `polar-n3-Cl` | Client wallet; fund dialog URL |
+| `http://localhost:5002` | `polar-n3-Fre` | Freelancer wallet; invoice dialog URL |
+
+With only `:5000`, extra wallets are sub-accounts on Es and do not test real
+channel routing.
+
+Open each URL, log in, and create one test wallet where needed. Use the client
+wallet **admin key** from `:5001` in the fund dialog and the freelancer wallet
+**invoice key** from `:5002` in the generate-invoice dialog. Leave the backend's
+`LNBITS_*` keys pointing at the `:5000` escrow wallet.
+
 Our `lnbits-docker-compose.yml` joins Polar's network using an **external network**:
 
 ```yaml
@@ -272,8 +293,8 @@ docker compose -f lnbits-docker-compose.yml up -d
 # Terminal 1 — Backend
 cd backend && go run ./cmd/api
 
-# Terminal 2 — Frontend
-cd frontend && npm run dev
+# Terminal 2 — Frontend (use dev:lan when accessing from another device)
+cd frontend && npm run dev:lan
 ```
 
 **7. Test:** Sign up at `http://localhost:3000/signup`, generate the freelancer payout invoice, create a deal, and fund the hold from the client's linked wallet. The deal becomes `locked` (**Funds Held**) only after Es accepts the hold; work submission before that is invalid.

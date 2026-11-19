@@ -17,7 +17,8 @@ See `backend/.env.example` for the authoritative list; the critical ones:
 | `LND_REST_URL` | Direct LND REST endpoint on the escrow node Es (e.g., `https://localhost:8082`) |
 | `LND_REST_CERT_PATH` | Es TLS certificate path (e.g., `/home/amonoff/.polar/networks/3/volumes/lnd/Es/tls.cert`) |
 | `LND_REST_MACAROON_PATH` | Es admin macaroon path (e.g., `/home/amonoff/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon`) |
-| `FRONTEND_URLS` | CORS origins, comma-separated (e.g., `http://localhost:3000`). Add every browser-visible dev origin when accessing the frontend from a LAN IP/hostname (e.g., `http://192.168.1.149:3000`), then restart the backend. Singular `FRONTEND_URL` still accepted as a fallback. |
+| `FRONTEND_URLS` | CORS origins, comma-separated (e.g., `http://localhost:3000`). Add stable browser-visible dev origins here; singular `FRONTEND_URL` still accepted as a fallback. |
+| `CORS_ALLOW_PRIVATE_LAN` | Dev only. When `true`, allow any private-LAN `http://host:3000` origin so Wi‑Fi IP changes do not require editing `FRONTEND_URLS`. Never enable in production. |
 | `OPERATOR_EMAILS` | Comma-separated emails promoted to arbitration operators at boot (`is_operator` claim). Empty by default; no operator means disputes can be raised but not resolved. |
 
 Escrow holds live on `polar-n3-Es` (Alice1/Es). The client is Bob/`polar-n3-Cl`,

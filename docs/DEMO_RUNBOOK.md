@@ -161,6 +161,16 @@ docker logs ganji-lnbits-1 --tail 8 2>&1 | grep -iE "LndRestWallet|connected|Voi
 Expect: `✔️ Backend LndRestWallet connected and with a balance of ~9991530000 msat`
 If you see `VoidWallet`, see `docs/POLAR_LNBITS_SETUP.md` → "Troubleshooting".
 
+For a full topology test, also start the client and freelancer LNbits instances:
+
+```bash
+docker compose -f lnbits-docker-compose.yml up -d
+```
+
+Use `http://localhost:5001` in the client fund dialog and
+`http://localhost:5002` in the freelancer invoice dialog. Keep the backend on
+`http://localhost:5000`.
+
 ### 1.4 Start Backend (Go API, port 8080)
 
 ```bash
@@ -176,7 +186,7 @@ Expect: `{"db":"connected","lnbits":"connected","status":"ok"}`
 ```bash
 cd ~/Projects/ganji/frontend
 fuser -k 3000/tcp 2>/dev/null
-setsid nohup npm run dev > /tmp/ganji-frontend.log 2>&1 < /dev/null & disown
+setsid nohup npm run dev:lan > /tmp/ganji-frontend.log 2>&1 < /dev/null & disown
 sleep 10
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
 ```
