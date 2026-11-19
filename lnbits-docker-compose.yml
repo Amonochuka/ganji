@@ -72,7 +72,6 @@ networks:
 volumes:
   lnbits-data:
     name: ganji_lnbits-data
-    external: true
   lnbits-client-data:
     name: ganji_lnbits-client-data
   lnbits-freelancer-data:

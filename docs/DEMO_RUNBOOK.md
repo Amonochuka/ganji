@@ -76,7 +76,7 @@ These are the containers created by this repo's Compose files. The backend and f
 | `ganji-api-1` | `api` | `docker-compose.yml` | `8080:8080`, volume `ganji_uploads` | Ganji Go API. Defined locally; currently not created. |
 | `ganji-frontend-1` | `frontend` | `docker-compose.yml` | `3000:3000` | Ganji Next.js frontend. Defined locally; currently not created. |
 
-Polar network 3 is an external dependency, not created by Ganji: `polar-n3-backend1` (regtest Bitcoin), `polar-n3-es` (Alice1, escrow LND node), `polar-n3-cl` (Bob, demo client node), `polar-n3-fre` (freelancer node), and optionally `polar-n3-pay` (route-only Es → Fre hop). Ganji's LNbits joins `polar-network-3_default` and mounts Es's TLS cert and admin macaroon read-only.
+Polar network 3 is an external dependency, not created by Ganji: `polar-n3-backend1` (regtest Bitcoin), `polar-n3-Es` (Alice1, escrow LND node), `polar-n3-Cl` (Bob, demo client node), `polar-n3-Fre` (freelancer node), and optionally `polar-n3-Pay` (route-only Es → Fre hop). Ganji's LNbits joins `polar-network-3_default` and mounts Es's TLS cert and admin macaroon read-only.
 
 List all Ganji-owned containers:
 
@@ -87,7 +87,7 @@ docker compose -f docker-compose.yml ps -a
 docker compose -f lnbits-docker-compose.yml ps -a
 ```
 
-Both Compose files share the project name `ganji`. Avoid `docker compose -f docker-compose.yml down --remove-orphans` while LNbits is needed — it also removes `ganji-lnbits-1`. Use `docker compose -f lnbits-docker-compose.yml down` to stop LNbits while preserving its external volume.
+Both Compose files share the project name `ganji`. Avoid `docker compose -f docker-compose.yml down --remove-orphans` while LNbits is needed — it also removes `ganji-lnbits-1`. Use `docker compose -f lnbits-docker-compose.yml down` to stop LNbits while preserving its volumes; add `-v` to wipe all three LNbits databases.
 
 ### Where to see escrow in each UI
 
