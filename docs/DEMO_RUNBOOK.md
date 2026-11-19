@@ -192,6 +192,20 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
 ```
 Expect: `200`
 
+### 1.6 Three-Wallet Full Flow Check
+
+1. Open `http://localhost:5000`, `http://localhost:5001`, and
+   `http://localhost:5002`. Keep the backend's `LNBITS_*` keys on `:5000`.
+2. Create one client wallet in `:5001` and copy its **admin key**. Create one
+   freelancer wallet in `:5002` and copy its **invoice key**.
+3. Log in as the freelancer, use **Generate payout invoice** with `:5002` and
+   the freelancer invoice key, then create the deal with that `lnbc...` invoice.
+4. Open the public deal link as the client, choose **Pay hold invoice**, and use
+   `:5001` with the client admin key.
+5. Confirm the deal shows **Funds Held** only after Es accepts the hold.
+6. Submit work as the freelancer, then approve as the client; confirm payout to
+   the freelancer invoice.
+
 ---
 
 ## Part 2 — Fund Bob (Cl) & Open Channel to Es (ONE-TIME setup)
