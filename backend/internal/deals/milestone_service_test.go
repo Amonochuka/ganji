@@ -71,7 +71,11 @@ func (m *milestoneLN) handler() http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"checking_id":"chk-pay-` + fmt.Sprint(atomic.LoadInt32(&m.payCount)) + `","payment_request":"lnbc-pay"}`))
+		id := "chk-pay-" + fmt.Sprint(atomic.LoadInt32(&m.payCount))
+		if _, ok := m.payoutStatusByID[id]; !ok {
+			m.payoutStatusByID[id] = "SETTLED"
+		}
+		_, _ = w.Write([]byte(`{"checking_id":"` + id + `","payment_request":"lnbc-pay"}`))
 	})
 	mux.HandleFunc("/api/v1/payments/settle", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&m.settleCount, 1)
@@ -358,6 +362,27 @@ func TestReleaseMilestoneFailedPayoutClearsAndRetries(t *testing.T) {
 	}
 	if atomic.LoadInt32(&ln.payCount) != 1 {
 		t.Fatalf("expected 1 fresh payout, got %d", atomic.LoadInt32(&ln.payCount))
+	}
+}
+
+func TestReleaseMilestoneFailsWhenFreshPayoutFails(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+	deal := milestoneTestDeal(repo, "deal-1")
+	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneWorkSubmitted)
+	ln.holdStatusByID["chk-hold-ms-1"] = "SETTLED"
+	ln.payoutStatusByID["chk-pay-1"] = "FAILED"
+
+	_, err := service.ReleaseMilestone(context.Background(), deal, "ms-1")
+	if !errors.Is(err, ErrPayoutFailed) {
+		t.Fatalf("expected ErrPayoutFailed, got %v", err)
+	}
+	if repo.milestones["ms-1"].Status == MilestoneReleased {
+		t.Fatal("a failed payout must never mark the milestone released")
+	}
+	if repo.milestones["ms-1"].PayoutAttemptedAt.Valid || repo.milestones["ms-1"].PayoutCheckingID != "" {
+		t.Fatal("a failed payout must clear its tracking so a later retry is legal")
 	}
 }
 

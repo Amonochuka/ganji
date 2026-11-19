@@ -673,6 +673,28 @@ func (s *Service) releaseEscrow(ctx context.Context, dealID string, opts release
 			return nil, fmt.Errorf("%w: paying freelancer for deal %s: %v", ErrPayoutInFlight, deal.ID, err)
 		}
 		payoutCheckingID = id
+
+		confirmedPayout, failedPayout, checkErr := s.checkOutgoingPayout(ctx, id)
+		switch {
+		case checkErr != nil:
+			if recordErr := s.repo.UpdatePayoutCheckingID(ctx, deal.ID, id); recordErr != nil {
+				log.Printf("recording payout %s for deal %s: %v", id, deal.ID, recordErr)
+			}
+			return nil, fmt.Errorf("%w: verifying payout %s for deal %s: %v",
+				ErrPayoutInFlight, id, deal.ID, checkErr)
+		case failedPayout:
+			if clearErr := s.clearPayoutAttempt(ctx, deal.ID); clearErr != nil {
+				log.Printf("clearing payout attempt for deal %s: %v", deal.ID, clearErr)
+			}
+			return nil, fmt.Errorf("%w: payout %s for deal %s was refused by LNbits",
+				ErrPayoutFailed, id, deal.ID)
+		case !confirmedPayout:
+			if recordErr := s.repo.UpdatePayoutCheckingID(ctx, deal.ID, id); recordErr != nil {
+				log.Printf("recording payout %s for deal %s: %v", id, deal.ID, recordErr)
+			}
+			return nil, fmt.Errorf("%w: payout %s for deal %s is not confirmed",
+				ErrPayoutInFlight, id, deal.ID)
+		}
 	}
 
 	// Phase 3: re-lock and finalize. Another actor may have moved the deal
@@ -2506,6 +2528,22 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 			return nil, fmt.Errorf("%w: paying freelancer for milestone %s: %v", ErrPayoutInFlight, m.ID, err)
 		}
 		payoutCheckingID = id
+
+		confirmedPayout, failedPayout, checkErr := s.checkOutgoingPayout(ctx, id)
+		switch {
+		case checkErr != nil:
+			_ = s.repo.UpdateMilestonePayout(ctx, m.ID, id)
+			return nil, fmt.Errorf("%w: verifying milestone payout %s for %s: %v",
+				ErrPayoutInFlight, id, m.ID, checkErr)
+		case failedPayout:
+			_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+			return nil, fmt.Errorf("%w: milestone payout %s for %s was refused by LNbits",
+				ErrPayoutFailed, id, m.ID)
+		case !confirmedPayout:
+			_ = s.repo.UpdateMilestonePayout(ctx, m.ID, id)
+			return nil, fmt.Errorf("%w: milestone payout %s for %s is not confirmed",
+				ErrPayoutInFlight, id, m.ID)
+		}
 	}
 
 	// Phase 3: finalize under lock. Another actor may have moved the

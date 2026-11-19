@@ -298,6 +298,10 @@ func (h *Handler) ApproveDeal(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutFailed):
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutInFlight):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -391,6 +395,10 @@ func (h *Handler) ResolveDispute(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutFailed):
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutInFlight):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -633,6 +641,10 @@ func (h *Handler) PublicApproveDeal(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrDealNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutFailed):
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrPayoutInFlight):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
 			log.Printf("public approve failed: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{

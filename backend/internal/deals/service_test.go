@@ -1,6 +1,7 @@
 package deals
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -686,7 +688,17 @@ func escrowDeal(repo *fakeDealRepo, id, freelancerID, clientEmail string) *Deal 
 	return deal
 }
 
-func newLNbitsClient(t *testing.T, handler http.HandlerFunc) *lnbits.Client {
+type captureResponseWriter struct {
+	http.ResponseWriter
+	body bytes.Buffer
+}
+
+func (w *captureResponseWriter) Write(p []byte) (int, error) {
+	w.body.Write(p)
+	return w.ResponseWriter.Write(p)
+}
+
+func newLNbitsClientRaw(t *testing.T, handler http.HandlerFunc) *lnbits.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Helper()
@@ -701,6 +713,42 @@ func newLNbitsClient(t *testing.T, handler http.HandlerFunc) *lnbits.Client {
 	}))
 	t.Cleanup(server.Close)
 	return lnbits.NewClient(lnbits.Config{URL: server.URL, APIKey: "invoice-key", AdminKey: "admin-key"})
+}
+
+func newLNbitsClient(t *testing.T, handler http.HandlerFunc) *lnbits.Client {
+	t.Helper()
+	var mu sync.Mutex
+	payoutIDs := map[string]bool{}
+	return newLNbitsClientRaw(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/payments" {
+			cw := &captureResponseWriter{ResponseWriter: w}
+			handler(cw, r)
+			var resp struct {
+				CheckingID string `json:"checking_id"`
+			}
+			_ = json.Unmarshal(cw.body.Bytes(), &resp)
+			if resp.CheckingID != "" {
+				mu.Lock()
+				payoutIDs[resp.CheckingID] = true
+				mu.Unlock()
+			}
+			return
+		}
+
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/payments/") {
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/payments/")
+			mu.Lock()
+			known := payoutIDs[id]
+			mu.Unlock()
+			if known {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"paid":true,"details":{"checking_id":%q,"status":"SETTLED"}}`, id)
+				return
+			}
+		}
+
+		handler(w, r)
+	})
 }
 
 func TestApproveDealAsClient(t *testing.T) {
@@ -1831,6 +1879,38 @@ func TestApproveDealClearsConfirmedFailedPayoutAndRepays(t *testing.T) {
 	}
 	if repo.deals[deal.ID].PayoutCheckingID != "oc2" {
 		t.Fatalf("expected the new payout id to be recorded, got %q", repo.deals[deal.ID].PayoutCheckingID)
+	}
+}
+
+func TestApproveDealFailsWhenFreshPayoutFails(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusWorkSubmitted
+
+	service := NewService(repo, newLNbitsClientRaw(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/payments/settle":
+			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
+		case "/api/v1/payments":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"checking_id":"oc1"}`))
+		case "/api/v1/payments/oc1":
+			_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"oc1","status":"FAILED"}}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+
+	_, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
+	if !errors.Is(err, ErrPayoutFailed) {
+		t.Fatalf("expected ErrPayoutFailed, got %v", err)
+	}
+	if repo.deals[deal.ID].Status == StatusReleased {
+		t.Fatal("a failed payout must never mark the deal released")
+	}
+	if repo.deals[deal.ID].PayoutAttemptedAt.Valid || repo.deals[deal.ID].PayoutCheckingID != "" {
+		t.Fatal("a failed payout must clear its tracking so a later retry is legal")
 	}
 }
 
