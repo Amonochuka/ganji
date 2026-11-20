@@ -42,16 +42,19 @@ export default function DealDetailPage() {
     fetchArtifacts();
   }, [authLoading, tokens, dealId, router]);
 
-  async function fetchDeal() {
+  async function fetchDeal(silent = false) {
     if (!tokens) return;
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const res = await api.getDeal(dealId, tokens.access_token);
       setDeal(res.deal);
+      if (!silent) setLoadError(null);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load deal");
+      const message = err instanceof Error ? err.message : "Failed to load deal";
+      if (!silent) setLoadError(message);
+      else setActionError(message);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }
 
@@ -184,8 +187,26 @@ export default function DealDetailPage() {
     if (!window.confirm("Exit this deal? Mid-milestone exit (not submitted/approved) cancels that milestone hold per redesign.")) return;
     await handleAction("exit deal", async () => {
       await api.exitDeal(dealId, tokens!.access_token);
-      await fetchDeal();
+      await fetchDeal(true);
       await fetchMilestones();
+    });
+  }
+
+  async function handleRefreshEscrowStatus() {
+    await handleAction("refresh escrow status", async () => {
+      await fetchDeal(true);
+      await fetchMilestones();
+      await fetchArtifacts();
+    });
+  }
+
+  async function handleCheckPayment() {
+    if (!tokens) return;
+    await handleAction("check payment", async () => {
+      const res = await api.checkPayment(dealId, tokens.access_token);
+      setDeal(res.deal);
+      await fetchMilestones();
+      await fetchArtifacts();
     });
   }
 
@@ -449,6 +470,24 @@ export default function DealDetailPage() {
                         Rotate Share Link
                       </Button>
                     )}
+                    {deal.status === "awaiting_payment" && (
+                      <Button
+                        variant="outline"
+                        onClick={handleCheckPayment}
+                        disabled={actionLoading === "check payment"}
+                        isLoading={actionLoading === "check payment"}
+                      >
+                        Check Payment
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      onClick={handleRefreshEscrowStatus}
+                      disabled={actionLoading === "refresh escrow status"}
+                      isLoading={actionLoading === "refresh escrow status"}
+                    >
+                      Check Escrow Status
+                    </Button>
                     {deal.status !== "released" && deal.status !== "refunded" && (
                       <Button
                         variant="outline"
@@ -514,6 +553,14 @@ export default function DealDetailPage() {
                         <StatusIcon status="refunded" /> Escrow refunded
                       </span>
                     )}
+                    <Button
+                      variant="ghost"
+                      onClick={handleRefreshEscrowStatus}
+                      disabled={actionLoading === "refresh escrow status"}
+                      isLoading={actionLoading === "refresh escrow status"}
+                    >
+                      Check Escrow Status
+                    </Button>
                     {deal.status !== "released" && deal.status !== "refunded" && (
                       <Button
                         variant="danger"

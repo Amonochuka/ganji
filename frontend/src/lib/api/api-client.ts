@@ -174,6 +174,10 @@ export const api = {
     return this.get<DealDetailResponse>(`/deals/${dealId}`, token);
   },
 
+  checkPayment(dealId: string, token: string) {
+    return this.get<DealDetailResponse>(`/deals/${dealId}/payment`, token);
+  },
+
   submitWork(dealId: string, token: string) {
     return this.post<SubmitWorkResponse>(`/deals/${dealId}/submit`, {}, token);
   },
