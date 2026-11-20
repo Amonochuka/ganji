@@ -13,6 +13,7 @@ var (
 	ErrMilestoneNotFound       = errors.New("milestone not found")
 	ErrVerificationUnavailable = errors.New("accepted-hold verification is not configured")
 	ErrWalletPaymentFailed     = errors.New("could not pay escrow invoice from linked wallet")
+	ErrWalletInvoiceFailed     = errors.New("could not generate invoice with linked wallet")
 	ErrPayoutFailed            = errors.New("payout failed")
 	// ErrPayoutInFlight marks a payout whose outcome is unknown (an earlier
 	// attempt was recorded but never confirmed, or LNbits has not settled it

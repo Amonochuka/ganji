@@ -554,6 +554,9 @@ func (h *Handler) GenerateInvoice(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrWalletInvoiceFailed):
+			log.Printf("generate invoice failed: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		default:
 			log.Printf("generate invoice failed: %v", err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": "could not generate invoice with linked wallet"})

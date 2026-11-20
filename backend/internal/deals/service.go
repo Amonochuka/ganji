@@ -1231,7 +1231,11 @@ func (s *Service) GenerateInvoice(ctx context.Context, walletURL, walletKey stri
 		memo = "Ganji payout"
 	}
 	wallet := lnbits.NewClient(lnbits.Config{URL: endpoint, APIKey: key})
-	return wallet.CreateInvoice(ctx, lnbits.CreateInvoiceRequest{Amount: amountSats, Memo: memo})
+	invoice, err := wallet.CreateInvoice(ctx, lnbits.CreateInvoiceRequest{Amount: amountSats, Memo: memo})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrWalletInvoiceFailed, err)
+	}
+	return invoice, nil
 }
 
 func (s *Service) FundDeal(ctx context.Context, shareToken, milestoneID, walletURL, walletKey string) (*PublicDeal, error) {

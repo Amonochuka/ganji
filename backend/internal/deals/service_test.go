@@ -2498,3 +2498,20 @@ func TestGenerateInvoiceUsesLinkedWallet(t *testing.T) {
 		t.Fatalf("unexpected invoice request: %+v", body)
 	}
 }
+
+func TestGenerateInvoiceWrapsLinkedWalletFailure(t *testing.T) {
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail":"invalid key"}`))
+	}))
+	defer wallet.Close()
+
+	service := newTestService(newFakeDealRepo())
+	_, err := service.GenerateInvoice(context.Background(), wallet.URL, "bad-key", 1500, "payout")
+	if !errors.Is(err, ErrWalletInvoiceFailed) {
+		t.Fatalf("expected ErrWalletInvoiceFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid key") {
+		t.Fatalf("expected upstream error detail, got %v", err)
+	}
+}
