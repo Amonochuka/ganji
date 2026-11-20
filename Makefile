@@ -260,6 +260,14 @@ dev: db-up ## Start dev stack (db only), run backend/frontend locally
 	@echo "Starting dev stack..."
 	@echo "Run 'make run' in one terminal, 'make frontend-dev' in another"
 
+.PHONY: local-stack
+local-stack: ## Start Polar, LNbits, DB, backend, and frontend for local testing
+	@./scripts/start-local-stack.sh
+
+.PHONY: local-stack-stop
+local-stack-stop: ## Stop backend/frontend started by local-stack
+	@./scripts/stop-local-stack.sh
+
 .PHONY: clean
 clean: ## Clean build artifacts
 	rm -rf $(BACKEND_DIR)/bin

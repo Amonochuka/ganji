@@ -256,6 +256,10 @@ Phoenixd (ACINQ's wallet) settles all invoices automatically — there's no "hol
 
 ### Fresh Setup (from scratch)
 
+For a one-command local test stack, run `make local-stack` from the repository root. It starts Polar, waits for LND sync, starts all three LNbits UIs, PostgreSQL, the backend, and the frontend. Use `make local-stack-stop` to stop the backend and frontend.
+
+The manual steps below remain useful for debugging individual pieces.
+
 **1. Start Polar network:**
 ```bash
 docker compose -f ~/.polar/networks/3/docker-compose.yml up -d
