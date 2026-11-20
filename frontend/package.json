@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "PORT=3000 next dev",
+    "dev": "node scripts/dev-lan.mjs",
     "dev:lan": "node scripts/dev-lan.mjs",
     "build": "next build",
     "start": "next start"
