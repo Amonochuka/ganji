@@ -5,12 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
-	"net/mail"
 	"net/url"
 	"strings"
 	"sync"
@@ -1780,21 +1778,6 @@ func (s *Service) RotateShareLink(ctx context.Context, userID, dealID string) (*
 // link. 32 random bytes (~256 bits of entropy) base64url-encoded without
 // padding. It is independent of the preimage and the deal id: rotating it
 // revokes the old link with no effect on the escrow.
-func generateShareToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// isValidEmail does a light syntactic check using the standard library. The
-// authoritative validation happens when the client actually registers with
-// this email (auth.Service lowercases + enforces a stricter pattern).
-func isValidEmail(s string) bool {
-	addr, err := mail.ParseAddress(s)
-	return err == nil && addr.Address == s && strings.Contains(s, "@")
-}
 
 // MilestoneService provides milestone-related operations for a deal.
 func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amountSats int64, order int) (*Milestone, error) {
