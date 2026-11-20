@@ -8,19 +8,20 @@ Update this table after each approved refactor step (do not start steps without 
 
 | Step | Scope | Status | Commit(s) | Verification | Deviations / notes |
 |---|---|---|---|---|---|
-| 0 | Baseline checks + split plan documented | done | `27543eb` | 2026-11-20: `go vet ./...` clean, `go test ./...` pass, `npx tsc --noEmit` clean | Baseline recorded in this doc; no code moved. |
-| 1 | Split `backend/internal/deals/service.go` (same package, mechanical) | not started | — | — | — |
+| 0 | Baseline checks + split plan documented | done | `27543eb`, `3f51f74` | 2026-11-20: `go vet ./...` clean, `go test ./...` pass, `npx tsc --noEmit` clean | Baseline recorded; progress tracker added. No production code moved. |
+| 1 | Split `backend/internal/deals/service.go` (same package, mechanical) | in progress | (this step, substep 1a) | 2026-11-20: extracted artifacts/verifications/helpers to `service_artifacts.go`; `cd backend && go test ./internal/deals` ok, `go vet ./...` ok, `go test ./...` ok. | Substep 1a done: moved `MaxUploadBytes`, artifact upload/delete/download/list (authed+public), artifact storage helpers, verifications, `canResetDealPayoutAttempt`, `canResetMilestonePayoutAttempt` into `backend/internal/deals/service_artifacts.go`; removed unused `io`/`path/filepath` imports from `service.go`. Remaining service clusters not split yet. |
 | 2 | Split `backend/internal/deals/handler.go` | not started | — | — | — |
 | 3 | Split `backend/internal/deals/repository.go` | not started | — | — | — |
 | 4 | Split `frontend/src/lib/api/api-client.ts` (compatibility barrel) | not started | — | — | — |
 | 5 | Extract frontend deal/public-deal page sections | not started | — | — | — |
 | 6 | Optional: split large test files | not started | — | — | — |
+| F1 | Feature (separate): freelancer-configurable milestone build/funding days and per-milestone expiry/deadlines | planned | — | — | **Not a mechanical split** — involves schema/API/behavior changes; implement in dedicated step(s), not mixed into split commits. See [Planned feature: milestone funding/build timing](#planned-feature-milestone-fundingbuild-timing-f1). |
 
 **How to use:**
-- **Status:** `not started` → `in progress` → `done` (or `blocked`/`skipped` with reason).
+- **Status:** `not started` → `in progress` → `done` (or `blocked`/`skipped`/`planned` with reason).
 - **Commit(s):** record the commit hash(es) for that step.
 - **Verification:** record commands run and outcome (e.g. `go test ./...`, `go vet ./...`, `npx tsc --noEmit`, `npm run build`, smoke checks) with date.
-- **Deviations / notes:** record any file-boundary differences from the proposed grouping, unexpected issues, or decisions made during the step.
+- **Deviations / notes:** record any file-boundary differences from the proposed grouping, unexpected issues, or decisions made during the step. For feature steps, note design decisions and migration/API changes.
 
 ## Baseline (verified 2026-11-20)
 - `go vet ./...` clean
@@ -123,6 +124,27 @@ Stop after any step if verification fails or scope drifts.
 - Adding tests for `cmd/api`, `config`, `db`, `health`, `websocket` (valuable, but separate task).
 - Removing websocket stubs or changing documented milestone TODOs.
 - Committing `backend/uploads/`.
+
+## Planned feature: milestone funding/build timing (F1)
+
+**Context/problem:** escrow hold invoices are currently created with a fixed `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (default 30 days) from hold creation. For M1 this starts at deal/milestone creation, so different milestones cannot have different build/funding windows and the timer is not aligned to “when payable/funded” in the way desired. Goal: freelancer can set days/time per milestone (how long it will take to build / be fundable), and funded escrows must not be auto-cancelled by the app.
+
+**Planned behavior (to refine during implementation):**
+- Freelancer sets **days to build / funding window** per milestone at creation (e.g. `build_days` or equivalent, integer > 0). Different milestones may have different values.
+- Hold invoice expiry/funding deadline for each milestone is based on that milestone’s configured days (instead of a single global 30-day-from-creation value for M1 semantics).
+  - M1: hold created/fundable at deal creation with expiry derived from M1’s configured days.
+  - M2+: hold created when milestone becomes payable/fundable (after previous released/accepted) with expiry derived from that milestone’s configured days.
+- After a hold is funded/accepted (`HOLD/ACCEPTED/SETTLED`), Ganji must not auto-cancel/refund it via sweep; sweep continues to reconcile only unfunded/expired/cancelled holds as today.
+- UI/API must expose and accept the per-milestone timing fields (create deal/milestone payloads, deal/milestone views).
+
+**Implementation impact (separate from mechanical split):**
+- DB migration(s): add timing fields to `milestones` (and legacy deal handling if needed).
+- Types/models/repo/service/handler: plumb new fields and use them in `CreateHoldInvoice`/hold preparation and validation.
+- Frontend: deal creation and milestone display/edit flows to set/show days/dates.
+- Tests: update/add coverage for per-milestone expiry/funding windows and no auto-cancel after funded.
+- Docs: update lifecycle/env/API docs to reflect per-milestone timing.
+
+**Execution:** do as dedicated step(s) after or interleaved with approved refactor steps, but never mixed into mechanical split commits. Record design decisions and deviations in the progress tracker.
 
 ## Review notes for approver
 - Highest-risk steps are **1 (funding/release code movement)** and **5 (React page extraction/state boundaries)**.
