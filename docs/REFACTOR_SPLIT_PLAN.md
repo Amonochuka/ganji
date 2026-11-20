@@ -9,7 +9,7 @@ Update this table after each approved refactor step (do not start steps without 
 | Step | Scope | Status | Commit(s) | Verification | Deviations / notes |
 |---|---|---|---|---|---|
 | 0 | Baseline checks + split plan documented | done | `27543eb`, `3f51f74` | 2026-11-20: `go vet ./...` clean, `go test ./...` pass, `npx tsc --noEmit` clean | Baseline recorded; progress tracker added. No production code moved. |
-| 1 | Split `backend/internal/deals/service.go` (same package, mechanical) | in progress | `aac1c94` (1a), `46fed96` (1b), `9f81c2e` (1c), `49042ad` (1d), `386bfab` (1e), `33b1572` (1f), `e3ba5d5` (1g), `d7f25f2` (1h) | 2026-11-20: 1a-1h mechanical extractions (`service_artifacts.go`, `service_notify.go`, `service_helpers.go`, `service_views.go`, `service_share.go`, `service_milestone_crud.go`, `service_public.go`); each substep `go test ./internal/deals`, `go vet ./...`, `go test ./...` ok. | 1a artifacts/verif/storage moved (`canReset*` kept in `service.go`, used by `types.go`). 1b notify, 1c share-token/email, 1d view helpers, 1e `RotateShareLink`, 1f stale comment cleanup, 1g milestone CRUD/read/status-guard moved, 1h `GetPublicDeal` moved to `service_public.go`. Earlier bad cuts of notify/views/GetPublicDeal were reverted then completed. Remaining: funding/release/approve/dispute/exit/public action clusters (money-sensitive). |
+| 1 | Split `backend/internal/deals/service.go` (same package, mechanical) | in progress | `aac1c94` (1a), `46fed96` (1b), `9f81c2e` (1c), `49042ad` (1d), `386bfab` (1e), `33b1572` (1f), `e3ba5d5` (1g), `e38c0d0` (1h), this commit (1i) | 2026-11-20: 1a-1h committed extractions (`service_artifacts.go`, `service_notify.go`, `service_helpers.go`, `service_views.go`, `service_share.go`, `service_milestone_crud.go`, `service_public.go`); 1i moved `GetDealByID`/`ListByUser` → `service_reads.go`. Each verified substep `go test ./internal/deals && go vet ./... && go test ./...` ok. | 1a artifacts/verif/storage (`canReset*` kept in `service.go`, used by `types.go`). 1b notify, 1c share-token/email, 1d view helpers, 1e `RotateShareLink`, 1f stale comment cleanup, 1g milestone CRUD/read/status-guard, 1h `GetPublicDeal`, 1i read helpers. UI-1 pending in working tree (tracked below). Earlier bad cuts reverted then completed. Remaining in `service.go`: money-sensitive/public-action clusters (funding, release/payout/settle/cancel/reconcile/reset, approve/dispute/resolve/exit, submit/status/update/payee, lock/wallet helpers). |
 | 2 | Split `backend/internal/deals/handler.go` | not started | — | — | — |
 | 3 | Split `backend/internal/deals/repository.go` | not started | — | — | — |
 | 4 | Split `frontend/src/lib/api/api-client.ts` (compatibility barrel) | not started | — | — | — |
@@ -145,6 +145,15 @@ Stop after any step if verification fails or scope drifts.
 - Docs: update lifecycle/env/API docs to reflect per-milestone timing.
 
 **Execution:** do as dedicated step(s) after or interleaved with approved refactor steps, but never mixed into mechanical split commits. Record design decisions and deviations in the progress tracker.
+
+
+## UI ideas / UX improvements (tracked)
+
+Document UI changes/ideas here as they are implemented or planned, especially when they affect deal status visibility and escrow/payment workflows.
+
+| Item | Scope | Status | Notes |
+|---|---|---|---|
+| UI-1 | Authed deal page (`frontend/src/app/deals/[dealId]/page.tsx`) status refresh controls | implemented (pending commit) | Added two explicit actions instead of requiring full page refresh: **Check Payment** (freelancer, shown when deal is `awaiting_payment`) calls `GET /deals/:dealID/payment` via `api.checkPayment` to re-check LNbits/accepted-hold state and refresh milestones/artifacts; **Check Escrow Status** (freelancer and client) re-fetches deal, milestones, and artifacts from backend (`GET /deals/:dealID` + list endpoints) for current escrow/workflow state. `frontend/src/lib/api/api-client.ts` now exposes `checkPayment(dealId, token)`. Verified `cd frontend && npx tsc --noEmit` clean. Public deal page already polls/fetches deal status periodically; no raw hold settle/cancel controls added. |
 
 ## Review notes for approver
 - Highest-risk steps are **1 (funding/release code movement)** and **5 (React page extraction/state boundaries)**.
