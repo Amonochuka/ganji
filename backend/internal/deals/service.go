@@ -426,27 +426,7 @@ func (s *Service) settleHoldGuarded(ctx context.Context, deal *Deal) error {
 }
 
 // checkOutgoingPayout classifies a previously-initiated payout by its LNbits
-// status. It reports:
-//   - confirmed=true when the payout is verifiably done (paid + a terminal
-//     success status);
-//   - failed=true when the payout is verifiably NOT done (a terminal failure
-//     status);
-//   - otherwise ambiguous — the payout may still be in flight.
-func (s *Service) checkOutgoingPayout(ctx context.Context, payoutCheckingID string) (confirmed, failed bool, err error) {
-	payment, err := s.lnbits.CheckPayment(ctx, payoutCheckingID)
-	if err != nil {
-		return false, false, err
-	}
-	if payment.Paid && isPayoutConfirmed(payment.Details.Status) {
-		return true, false, nil
-	}
-	if isPayoutFailed(payment.Details.Status) {
-		return false, true, nil
-	}
-	return false, false, nil
-}
-
-// ResolveDispute is the arbiter's verdict on a frozen dispute. It is the only
+// status. It reports:// ResolveDispute is the arbiter's verdict on a frozen dispute. It is the only
 // path out of 'disputed' that moves money, and it is operator-only (enforced
 // by middleware.OperatorRequired at the route):
 //
