@@ -522,13 +522,6 @@ func (s *Service) DisputeDeal(ctx context.Context, email, dealID, reason string)
 	return deal, nil
 }
 
-// ListDisputes returns the arbitration queue: every deal frozen in the
-// disputed state, oldest dispute first. Route access is operator-only; the
-// service returns the full deal rows an operator needs to adjudicate.
-func (s *Service) ListDisputes(ctx context.Context) ([]Deal, error) {
-	return s.repo.ListDisputed(ctx)
-}
-
 // ResolveDispute is the arbiter's verdict on a frozen dispute. It is the only
 // path out of 'disputed' that moves money, and it is operator-only (enforced
 // by middleware.OperatorRequired at the route):
