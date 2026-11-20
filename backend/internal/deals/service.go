@@ -1683,11 +1683,6 @@ func (s *Service) PublicResetPayout(ctx context.Context, shareToken, milestoneID
 	return s.GetPublicDeal(ctx, shareToken)
 }
 
-// generateShareToken returns a URL-safe random token for the public payment
-// link. 32 random bytes (~256 bits of entropy) base64url-encoded without
-// padding. It is independent of the preimage and the deal id: rotating it
-// revokes the old link with no effect on the escrow.
-
 // MilestoneService provides milestone-related operations for a deal.
 func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amountSats int64, order int) (*Milestone, error) {
 	title = strings.TrimSpace(title)
