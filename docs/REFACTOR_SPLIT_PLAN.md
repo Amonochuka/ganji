@@ -1,6 +1,26 @@
 # Refactor Split Plan (behavior-preserving)
 
-Status: **planning only**. No production-logic changes in this document; implementation starts only after explicit approval, step by step.
+Status: **planning only**. No production-logic changes in this document; implementation starts only after explicit approval, step by step. Track progress in [Progress tracker](#progress-tracker).
+
+## Progress tracker
+
+Update this table after each approved refactor step (do not start steps without approval).
+
+| Step | Scope | Status | Commit(s) | Verification | Deviations / notes |
+|---|---|---|---|---|---|
+| 0 | Baseline checks + split plan documented | done | `27543eb` | 2026-11-20: `go vet ./...` clean, `go test ./...` pass, `npx tsc --noEmit` clean | Baseline recorded in this doc; no code moved. |
+| 1 | Split `backend/internal/deals/service.go` (same package, mechanical) | not started | — | — | — |
+| 2 | Split `backend/internal/deals/handler.go` | not started | — | — | — |
+| 3 | Split `backend/internal/deals/repository.go` | not started | — | — | — |
+| 4 | Split `frontend/src/lib/api/api-client.ts` (compatibility barrel) | not started | — | — | — |
+| 5 | Extract frontend deal/public-deal page sections | not started | — | — | — |
+| 6 | Optional: split large test files | not started | — | — | — |
+
+**How to use:**
+- **Status:** `not started` → `in progress` → `done` (or `blocked`/`skipped` with reason).
+- **Commit(s):** record the commit hash(es) for that step.
+- **Verification:** record commands run and outcome (e.g. `go test ./...`, `go vet ./...`, `npx tsc --noEmit`, `npm run build`, smoke checks) with date.
+- **Deviations / notes:** record any file-boundary differences from the proposed grouping, unexpected issues, or decisions made during the step.
 
 ## Baseline (verified 2026-11-20)
 - `go vet ./...` clean
