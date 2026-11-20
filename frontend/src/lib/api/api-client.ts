@@ -234,6 +234,25 @@ export const api = {
     return this.get<{ milestones: MilestoneView[] }>(`/public/deals/${shareToken}/milestones`);
   },
 
+  listPublicArtifacts(shareToken: string) {
+    return this.get<{ artifacts: Artifact[] }>(`/public/deals/${shareToken}/artifacts`);
+  },
+
+  async downloadPublicArtifact(shareToken: string, artifactId: string): Promise<Blob> {
+    const res = await fetchWithSession(`/public/deals/${shareToken}/artifacts/${artifactId}/download`);
+    if (!res.ok) {
+      let message = "Failed to download artifact";
+      try {
+        const data = await res.json();
+        message = data.error || data.message || message;
+      } catch {
+        message = res.statusText || message;
+      }
+      throw new ApiError(message, res.status);
+    }
+    return res.blob();
+  },
+
   fundPublicDeal(shareToken: string, data: FundDealRequest) {
     return this.post<FundDealResponse>(`/public/deals/${shareToken}/fund`, data);
   },

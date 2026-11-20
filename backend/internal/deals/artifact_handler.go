@@ -207,6 +207,58 @@ func (h *Handler) DownloadArtifact(c *gin.Context) {
 	)
 }
 
+func (h *Handler) ListPublicArtifacts(c *gin.Context) {
+	shareToken := c.Param("shareToken")
+
+	artifacts, err := h.service.ListPublicArtifacts(c.Request.Context(), shareToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"artifacts": artifacts})
+}
+
+func (h *Handler) DownloadPublicArtifact(c *gin.Context) {
+	shareToken := c.Param("shareToken")
+	artifactID := c.Param("artifactID")
+
+	artifact, reader, size, err := h.service.DownloadPublicArtifact(c.Request.Context(), shareToken, artifactID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrArtifactNotFound), errors.Is(err, ErrDealNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+	defer reader.Close()
+
+	writeArtifactDownload(c, artifact, reader, size)
+}
+
+func writeArtifactDownload(c *gin.Context, artifact *Artifact, reader io.Reader, size int64) {
+	c.DataFromReader(
+		http.StatusOK,
+		size,
+		contentTypeFor(artifact.StorageKey),
+		reader,
+		map[string]string{
+			"Content-Disposition": `attachment; filename="` + filepath.Base(artifact.StorageKey) + `"`,
+		},
+	)
+}
+
 // contentTypeFor guesses a download Content-Type from the storage key's
 // extension (which is sanitized at upload time), falling back to
 // application/octet-stream.
@@ -246,4 +298,11 @@ func RegisterArtifactRoutes(router gin.IRouter, h *Handler) {
 	group.GET("/:artifactID", h.GetArtifactByID)
 	group.GET("/:artifactID/download", h.DownloadArtifact)
 	group.DELETE("/:artifactID", h.DeleteArtifact)
+}
+
+func RegisterPublicArtifactRoutes(router gin.IRouter, h *Handler) {
+	group := router.Group("/deals/:shareToken/artifacts")
+
+	group.GET("", h.ListPublicArtifacts)
+	group.GET("/:artifactID/download", h.DownloadPublicArtifact)
 }

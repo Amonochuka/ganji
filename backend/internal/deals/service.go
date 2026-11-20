@@ -1669,21 +1669,76 @@ func (s *Service) DownloadArtifact(ctx context.Context, userID, email, dealID, a
 		return nil, nil, 0, ErrForbidden
 	}
 
+	reader, size, err := s.openStoredArtifact(ctx, artifact)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	return artifact, reader, size, nil
+}
+
+func (s *Service) openStoredArtifact(ctx context.Context, artifact *Artifact) (io.ReadCloser, int64, error) {
+	if s.storage == nil {
+		return nil, 0, fmt.Errorf("%w: artifact storage is not configured", ErrInvalidInput)
+	}
+
 	reader, err := s.storage.Open(ctx, artifact.StorageKey)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return nil, nil, 0, ErrArtifactNotFound
+			return nil, 0, ErrArtifactNotFound
 		}
-		return nil, nil, 0, fmt.Errorf("opening stored artifact: %w", err)
+		return nil, 0, fmt.Errorf("opening stored artifact: %w", err)
 	}
 
 	size, err := s.storage.Size(ctx, artifact.StorageKey)
 	if err != nil {
 		_ = reader.Close()
 		if errors.Is(err, storage.ErrNotFound) {
-			return nil, nil, 0, ErrArtifactNotFound
+			return nil, 0, ErrArtifactNotFound
 		}
-		return nil, nil, 0, fmt.Errorf("sizing stored artifact: %w", err)
+		return nil, 0, fmt.Errorf("sizing stored artifact: %w", err)
+	}
+
+	return reader, size, nil
+}
+
+func (s *Service) ListPublicArtifacts(ctx context.Context, shareToken string) ([]Artifact, error) {
+	if strings.TrimSpace(shareToken) == "" {
+		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.repo.ListArtifactsByDeal(ctx, deal.ID, nil)
+}
+
+func (s *Service) DownloadPublicArtifact(ctx context.Context, shareToken, artifactID string) (*Artifact, io.ReadCloser, int64, error) {
+	if strings.TrimSpace(shareToken) == "" {
+		return nil, nil, 0, fmt.Errorf("%w: share token is required", ErrInvalidInput)
+	}
+	if strings.TrimSpace(artifactID) == "" {
+		return nil, nil, 0, fmt.Errorf("%w: artifact id is required", ErrInvalidInput)
+	}
+
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	artifact, err := s.repo.GetArtifactByID(ctx, artifactID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if artifact.DealID != deal.ID {
+		return nil, nil, 0, ErrArtifactNotFound
+	}
+
+	reader, size, err := s.openStoredArtifact(ctx, artifact)
+	if err != nil {
+		return nil, nil, 0, err
 	}
 
 	return artifact, reader, size, nil

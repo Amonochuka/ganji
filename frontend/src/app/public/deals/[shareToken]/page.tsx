@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { WalletLinkDialog } from "@/components/deals/wallet-link-dialog";
 import { StatusIcon } from "@/components/ui/status-icon";
-import { api, type PublicDeal, type DealStatus, type MilestoneView } from "@/lib/api/api-client";
+import { api, type PublicDeal, type DealStatus, type MilestoneView, type Artifact } from "@/lib/api/api-client";
 import { formatCurrency } from "@/lib/utils/format";
 
 export default function PublicDealPage() {
@@ -18,6 +18,7 @@ export default function PublicDealPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [fundTarget, setFundTarget] = useState<{ milestoneId?: string; label: string } | null>(null);
   const [walletURL, setWalletURL] = useState("");
   const [walletKey, setWalletKey] = useState("");
@@ -40,10 +41,20 @@ export default function PublicDealPage() {
       const res = await api.getPublicDeal(shareToken);
       setDeal(res.deal);
       setError(null);
+      void fetchArtifacts(silent);
     } catch (err) {
       if (!silent) setError(err instanceof Error ? err.message : "Failed to load deal");
     } finally {
       if (!silent) setIsLoading(false);
+    }
+  }
+
+  async function fetchArtifacts(silent = true) {
+    try {
+      const res = await api.listPublicArtifacts(shareToken);
+      setArtifacts(res.artifacts);
+    } catch (err) {
+      if (!silent) setActionError(err instanceof Error ? err.message : "Failed to load deliverables");
     }
   }
 
@@ -140,6 +151,26 @@ export default function PublicDealPage() {
     await runAction("exit", async () => {
       await api.publicExitDeal(shareToken);
     });
+  }
+
+  async function handleDownloadArtifact(artifact: Artifact) {
+    setActionLoading(`download-${artifact.id}`);
+    setActionError(null);
+    try {
+      const blob = await api.downloadPublicArtifact(shareToken, artifact.id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = artifact.storage_key.split("/").pop() || "artifact";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to download artifact");
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   if (isLoading) {
@@ -341,6 +372,36 @@ export default function PublicDealPage() {
                     : "Exit before approval: this single-step deal is not paid to the freelancer; funds are refunded/cancelled per policy. Same symmetry applies to freelancer exits."}
                 </p>
               </div>
+            )}
+          </div>
+
+          <div className="vault-card p-6 vault-seam">
+            <h2 className="font-display text-lg font-semibold text-ink-100 mb-1">Deliverables</h2>
+            <p className="text-xs text-ink-500 mb-4">Files uploaded by the freelancer for this deal.</p>
+            {artifacts.length === 0 ? (
+              <p className="text-sm text-ink-500">No deliverables attached yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {artifacts.map((artifact) => (
+                  <li key={artifact.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-vault-border bg-vault-raised px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-sm text-ink-200">{artifact.storage_key.split("/").pop()}</p>
+                      <p className="text-xs text-ink-500">
+                        {artifact.kind} • {new Date(artifact.uploaded_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDownloadArtifact(artifact)}
+                      isLoading={actionLoading === `download-${artifact.id}`}
+                      disabled={!!actionLoading}
+                    >
+                      Download
+                    </Button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 

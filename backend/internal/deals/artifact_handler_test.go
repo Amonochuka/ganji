@@ -286,6 +286,46 @@ func TestCreateArtifactNonPartyForbidden(t *testing.T) {
 	}
 }
 
+func TestPublicArtifactRoutesUseShareToken(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	st, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("new local storage: %v", err)
+	}
+	defer st.Close()
+
+	service := NewService(repo, &lnbits.Client{}, WithStorage(st, 1024))
+	artifact := uploadFixture(t, service, deal.ID, "public deliverable content")
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	public := router.Group("/public")
+	RegisterPublicArtifactRoutes(public, NewHandler(service))
+
+	list := doGet(t, router, "/public/deals/"+deal.ShareToken+"/artifacts", nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", list.Code, list.Body.String())
+	}
+	if !strings.Contains(list.Body.String(), artifact.ID) {
+		t.Errorf("expected artifact in list response, got %s", list.Body.String())
+	}
+
+	download := doGet(t, router, "/public/deals/"+deal.ShareToken+"/artifacts/"+artifact.ID+"/download", nil)
+	if download.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", download.Code, download.Body.String())
+	}
+	if download.Body.String() != "public deliverable content" {
+		t.Errorf("unexpected body %q", download.Body.String())
+	}
+
+	wrong := doGet(t, router, "/public/deals/wrong-token/artifacts", nil)
+	if wrong.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for wrong share token, got %d", wrong.Code)
+	}
+}
+
 func doGet(t *testing.T, router http.Handler, path string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, body)

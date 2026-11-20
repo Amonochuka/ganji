@@ -124,6 +124,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	publicDeals.POST("/deals/:shareToken/milestones/:milestoneID/accept-next", dealHandler.PublicAcceptNextMilestone)
 	publicDeals.POST("/deals/:shareToken/milestones/:milestoneID/reject", dealHandler.PublicRejectMilestone)
 	publicDeals.POST("/deals/:shareToken/exit", dealHandler.PublicExitDeal)
+	deals.RegisterPublicArtifactRoutes(publicDeals, dealHandler)
 	deals.RegisterArtifactRoutes(protected, dealHandler)
 	deals.RegisterVerificationRoutes(protected, dealHandler)
 
