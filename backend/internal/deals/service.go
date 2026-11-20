@@ -560,27 +560,6 @@ func (s *Service) ReconcilePayout(ctx context.Context, operatorEmail, dealID str
 	}
 }
 
-// cancelEscrowHold returns held funds to the client by cancelling the hold
-// invoice on the network (the network-level refund). Idempotent: if LNbits
-// refuses because the hold is already gone, we confirm the payment is no
-// longer committed (UNPAID/EXPIRED/CANCELLED) and treat that as success — the
-// sats have already returned to the payer. Anything still held/settled that we
-// could not cancel is surfaced as an error so the deal stays disputed.
-func (s *Service) cancelEscrowHold(ctx context.Context, deal *Deal) error {
-	if deal.PreimageHash == "" {
-		return fmt.Errorf("%w: cannot refund a deal without a preimage hash", ErrInvalidInput)
-	}
-
-	if _, err := s.lnbits.CancelHold(ctx, deal.PreimageHash); err != nil {
-		payment, checkErr := s.lnbits.CheckPayment(ctx, deal.CheckingID)
-		if checkErr != nil || !isHoldReleased(payment.Details.Status) {
-			return fmt.Errorf("cancelling escrow for deal %s: %w", deal.ID, err)
-		}
-	}
-
-	return nil
-}
-
 // CheckPayment queries the escrow node for an accepted hold on a deal's
 // invoice. LNbits paid=true is not proof that funds are locked, so the deal
 // only transitions from awaiting_payment to locked after the escrow node
