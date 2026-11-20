@@ -931,24 +931,6 @@ func (s *Service) SweepExpiredHolds(ctx context.Context, cutoff time.Time) (int,
 
 	return swept, nil
 }
-func canResetDealPayoutAttempt(deal *Deal) bool {
-	return deal != nil &&
-		(deal.Status == StatusLocked || deal.Status == StatusWorkSubmitted) &&
-		deal.PayoutCheckingID == "" &&
-		deal.PayoutAttemptedAt.Valid
-}
-
-func canResetMilestonePayoutAttempt(m *Milestone) bool {
-	if m == nil || m.PayoutCheckingID != "" || !m.PayoutAttemptedAt.Valid {
-		return false
-	}
-	switch m.Status {
-	case MilestoneFunded, MilestoneInProgress, MilestoneWorkSubmitted, MilestoneCompleted:
-		return true
-	default:
-		return false
-	}
-}
 
 // PublicApproveDeal allows a client to approve a deal from the public share link.
 // Sequential milestone mode: releases the active milestone escrow (if present) and advances/funds next; final milestone completes deal.
