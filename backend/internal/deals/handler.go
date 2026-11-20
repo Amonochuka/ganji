@@ -10,18 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type MilestoneView struct {
-	ID                   string    `json:"id"`
-	Title                string    `json:"title"`
-	AmountSats           int64     `json:"amount_sats"`
-	Order                int       `json:"order"`
-	Status               string    `json:"status"`
-	Invoice              string    `json:"invoice,omitempty"`
-	CompletedAt          *string   `json:"completed_at,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
-	PayoutResetAvailable bool      `json:"payout_reset_available,omitempty"`
-}
-
 type Handler struct {
 	service *Service
 }
@@ -1047,13 +1035,4 @@ func (h *Handler) PublicExitDeal(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deal exited", "deal": deal})
-}
-
-func milestoneViewFrom(m Milestone) MilestoneView {
-	var completed *string
-	if m.CompletedAt.Valid {
-		s := m.CompletedAt.Time.Format(time.RFC3339)
-		completed = &s
-	}
-	return MilestoneView{ID: m.ID, Title: m.Title, AmountSats: m.AmountSats, Order: m.Order, Status: string(m.Status), Invoice: m.Invoice, CompletedAt: completed, CreatedAt: m.CreatedAt}
 }
