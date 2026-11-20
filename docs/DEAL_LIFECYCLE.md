@@ -61,6 +61,31 @@ by the DB `CHECK` constraint in
 `awaiting_payment → work_submitted` is not legal: work submission requires
 `locked` (**Funds Held**), which requires accepted-hold verification on Es.
 
+### Funding race / idempotency
+
+`POST /public/deals/:shareToken/fund` can overlap with the LNbits webhook and
+with the public page's status poll. Both paths call the same accepted-hold
+checker and may move `awaiting_payment → locked` first. The old guarded-update
+error reported the caller's stale status, so funding could return
+`invalid status transition: awaiting_payment → locked` even after the hold was
+accepted and the sats were safely held on Es. That made a successful fund look
+like a failure, and the UI kept showing "awaiting payment".
+
+Funding is now idempotent:
+
+- A deal already `locked` returns the current public deal without paying the
+  invoice again (`backend/internal/deals/service.go:1338`).
+- After accepted-hold verification or a refresh, an already-`locked` deal is
+  treated as success (`backend/internal/deals/service.go:1357`).
+- If the guarded `awaiting_payment → locked` update loses a race, the row is
+  re-read and only a non-`locked` status is an error
+  (`backend/internal/deals/service.go:1380`).
+- Regression tests cover both the refresh-lock and webhook-lock races in
+  `backend/internal/deals/service_test.go`.
+
+The accepted LND hold on Es remains the source of truth; no second wallet
+payment is attempted on a retry.
+
 ## Milestone Lifecycle (sequential per-milestone escrow)
 
 Deals may instead (or additionally) carry `milestones` rows (migration `000008`, one escrow leg per milestone). In milestone mode the deal-level flow above is mirrored, not replaced: `deal.Invoice`/`deal.CheckingID` mirror the active milestone's hold for compatibility, and the deal becomes `released` only when its final milestone is `released`.

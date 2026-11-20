@@ -35,6 +35,7 @@ funding changes — several notes below are historical and reflect the older
 | 26 | Refresh-token cleanup query referenced nonexistent `revoked` column → hourly cleanup failed | 2026-11-04 (query now filters only `expires_at < now()`) |
 | 27 | `Repository.WithTx` dropped `preimageKey`, disabling AES-GCM preimage encryption on the create-deal path | 2026-11-04 (key propagated through `WithTx`) |
 | 28 | Rate limiter could divide by zero when `window/rate` underflowed | 2026-11-04 (guard `perToken <= 0`) |
+| 29 | Funding reported `invalid status transition: awaiting_payment → locked` when the webhook/status poll accepted the hold first | 2026-11-20 (commit `261a364`) |
 
 ## Remaining Issues
 
