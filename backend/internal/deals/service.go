@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -447,33 +446,6 @@ func (s *Service) checkOutgoingPayout(ctx context.Context, payoutCheckingID stri
 	return false, false, nil
 }
 
-func isHoldSettled(status string) bool {
-	switch strings.ToUpper(status) {
-	case "SETTLED", "SUCCESS", "COMPLETE", "SUCCEEDED", "PAID":
-		return true
-	default:
-		return false
-	}
-}
-
-// isPayoutConfirmed reports whether an outgoing payment status means the
-// freelancer got paid. LNbits backends report the underlying backend status
-// verbatim, so we accept the common set instead of hard-coding one backend.
-func isPayoutConfirmed(status string) bool {
-	return isHoldSettled(status)
-}
-
-// isPayoutFailed reports whether an outgoing payment status definitively means
-// nothing was sent.
-func isPayoutFailed(status string) bool {
-	switch strings.ToUpper(status) {
-	case "FAILED", "UNPAID", "CANCELLED", "EXPIRED":
-		return true
-	default:
-		return false
-	}
-}
-
 // clearPayoutAttempt resets the payout tracking (autocommit, off the money
 // path). Only called when the payout is provably not in flight.
 func (s *Service) clearPayoutAttempt(ctx context.Context, dealID string) error {
@@ -760,17 +732,6 @@ func (s *Service) cancelEscrowHold(ctx context.Context, deal *Deal) error {
 	return nil
 }
 
-// isHoldReleased reports whether an LNbits payment status means the funds are
-// no longer committed to the escrow (already returned to the payer).
-func isHoldReleased(status string) bool {
-	switch status {
-	case "UNPAID", "EXPIRED", "CANCELLED":
-		return true
-	default:
-		return false
-	}
-}
-
 // CheckPayment queries the escrow node for an accepted hold on a deal's
 // invoice. LNbits paid=true is not proof that funds are locked, so the deal
 // only transitions from awaiting_payment to locked after the escrow node
@@ -842,17 +803,6 @@ func (s *Service) lockFund(dealID string) func() {
 	lock.Lock()
 	return lock.Unlock
 }
-
-func validateWalletEndpoint(raw string) (string, error) {
-	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
-	if err != nil || parsed.Host == "" || parsed.User != nil ||
-		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
-		parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("%w: invalid wallet URL", ErrInvalidInput)
-	}
-	return strings.TrimRight(parsed.String(), "/"), nil
-}
-
 func (s *Service) GenerateInvoice(ctx context.Context, walletURL, walletKey string, amountSats int64, memo string) (*lnbits.Invoice, error) {
 	if amountSats <= 0 {
 		return nil, fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
