@@ -1354,6 +1354,9 @@ func (s *Service) fundDealHold(ctx context.Context, deal *Deal, shareToken, wall
 	if err != nil {
 		return nil, err
 	}
+	if deal.Status == StatusLocked {
+		return s.GetPublicDeal(ctx, shareToken)
+	}
 	if deal.Status != StatusAwaitingPayment {
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusLocked)
 	}
@@ -1374,7 +1377,14 @@ func (s *Service) fundDealHold(ctx context.Context, deal *Deal, shareToken, wall
 		return nil, err
 	}
 	if !transitioned {
-		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusLocked)
+		current, getErr := s.repo.GetDealByID(ctx, deal.ID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if current.Status != StatusLocked {
+			return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, current.Status, StatusLocked)
+		}
+		return s.GetPublicDeal(ctx, shareToken)
 	}
 	deal.Status = StatusLocked
 	s.notifyPaymentLocked(deal)

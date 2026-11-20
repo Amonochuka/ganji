@@ -2386,6 +2386,79 @@ func TestFundDealIsIdempotentWhenAlreadyLocked(t *testing.T) {
 	}
 }
 
+func TestFundDealSucceedsWhenRefreshAlreadyLocked(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.Invoice = "lnbc-hold"
+	deal.PreimageHash = "aa"
+	deal.AmountSats = 5000
+
+	escrow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer escrow.Close()
+
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("already accepted hold must not call linked wallet")
+	}))
+	defer wallet.Close()
+
+	checker := &sequenceAcceptedHoldChecker{results: []bool{true}}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: escrow.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(checker))
+
+	publicDeal, err := service.FundDeal(context.Background(), deal.ShareToken, "", wallet.URL, "wallet-admin-key")
+	if err != nil {
+		t.Fatalf("expected refresh lock to be idempotent, got %v", err)
+	}
+	if publicDeal.Status != StatusLocked || repo.deals[deal.ID].Status != StatusLocked {
+		t.Fatalf("expected locked deal, got public=%s stored=%s", publicDeal.Status, repo.deals[deal.ID].Status)
+	}
+	if checker.calls != 1 {
+		t.Fatalf("expected one hold check, got %d", checker.calls)
+	}
+}
+
+func TestFundDealSucceedsWhenWebhookAlreadyLocked(t *testing.T) {
+	repo := newFakeDealRepo()
+	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	deal.Status = StatusAwaitingPayment
+	deal.CheckingID = "checking-1"
+	deal.Invoice = "lnbc-hold"
+	deal.PreimageHash = "aa"
+	deal.AmountSats = 5000
+
+	escrow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"paid":false}`))
+	}))
+	defer escrow.Close()
+
+	const walletKey = "wallet-admin-key"
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/payments" {
+			t.Errorf("unexpected wallet request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"checking_id":"out-1"}`))
+	}))
+	defer wallet.Close()
+
+	checker := &sequenceAcceptedHoldChecker{results: []bool{false, true}}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: escrow.URL, APIKey: "invoice-key"}), WithAcceptedHoldChecker(checker))
+	repo.raceMoveTo = StatusLocked
+
+	publicDeal, err := service.FundDeal(context.Background(), deal.ShareToken, "", wallet.URL, walletKey)
+	if err != nil {
+		t.Fatalf("expected funding to tolerate webhook lock, got %v", err)
+	}
+	if publicDeal.Status != StatusLocked || repo.deals[deal.ID].Status != StatusLocked {
+		t.Fatalf("expected locked deal, got public=%s stored=%s", publicDeal.Status, repo.deals[deal.ID].Status)
+	}
+}
+
 func TestFundDealWrapsWalletPaymentFailure(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
