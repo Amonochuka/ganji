@@ -492,6 +492,16 @@ export default function DealDetailPage() {
                         Check Payment
                       </Button>
                     )}
+                    {deal.status === "locked" && (
+                      <Button
+                        variant="ghost"
+                        onClick={handleRefreshEscrowStatus}
+                        disabled={actionLoading === "refresh escrow status"}
+                        isLoading={actionLoading === "refresh escrow status"}
+                      >
+                        Check Escrow Status
+                      </Button>
+                    )}
                     {(deal.status === "work_submitted" || deal.status === "released") && (
                       <>
                         <Button variant="ghost" onClick={handleCheckFreelancerStatus} disabled={actionLoading === "check freelancer status"} isLoading={actionLoading === "check freelancer status"}>
