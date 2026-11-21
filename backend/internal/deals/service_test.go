@@ -1842,8 +1842,8 @@ func TestApproveDealAmbiguousPayoutBlocked(t *testing.T) {
 }
 
 func TestApproveDealClearsConfirmedFailedPayoutAndRepays(t *testing.T) {
-	// payout_checking_id is set but LNbits definitively reports FAILED: the
-	// earlier attempt never sent money, so clearing it and re-paying is safe.
+	// payout_checking_id is set but LNbits definitively reports FAILED: if hold
+	// is already settled, funds are in escrow wallet and a fresh payout is safe.
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusWorkSubmitted
@@ -1856,12 +1856,16 @@ func TestApproveDealClearsConfirmedFailedPayoutAndRepays(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/payments/oc1":
 			_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"oc1","status":"FAILED"}}`))
+		case "/api/v1/payments/" + deal.CheckingID:
+			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"` + deal.CheckingID + `","status":"SETTLED"}}`))
 		case "/api/v1/payments/settle":
 			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
 		case "/api/v1/payments":
 			paidOut = true
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"payment_hash":"o2","checking_id":"oc2"}`))
+		case "/api/v1/payments/oc2":
+			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"oc2","status":"SETTLED"}}`))
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -1897,6 +1901,8 @@ func TestApproveDealFailsWhenFreshPayoutFails(t *testing.T) {
 			_, _ = w.Write([]byte(`{"checking_id":"oc1"}`))
 		case "/api/v1/payments/oc1":
 			_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"oc1","status":"FAILED"}}`))
+		case "/api/v1/payments/" + deal.CheckingID:
+			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"` + deal.CheckingID + `","status":"SETTLED"}}`))
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -1909,22 +1915,27 @@ func TestApproveDealFailsWhenFreshPayoutFails(t *testing.T) {
 	if repo.deals[deal.ID].Status == StatusReleased {
 		t.Fatal("a failed payout must never mark the deal released")
 	}
-	if repo.deals[deal.ID].PayoutAttemptedAt.Valid || repo.deals[deal.ID].PayoutCheckingID != "" {
-		t.Fatal("a failed payout must clear its tracking so a later retry is legal")
+	if !repo.deals[deal.ID].PayoutAttemptedAt.Valid {
+		t.Fatal("settled-hold failed payout must keep attempt marker for reconciliation")
 	}
 }
 
 func TestApproveDealBlocksUnconfirmedCrashWindow(t *testing.T) {
 	// payout_attempted_at is set but no payout_checking_id was ever recorded —
-	// the exact crash-window between PayInvoice and the release update. The
-	// system must refuse to auto-resend (money may have moved). An empty LNbits
-	// URL proves zero network calls happen.
+	// crash window. If hold is not settled, we must refuse to auto-resend.
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusWorkSubmitted
 	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
 
-	service := NewService(repo, &lnbits.Client{})
+	service := NewService(repo, newLNbitsClientRaw(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/payments/"+deal.CheckingID {
+			_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"` + deal.CheckingID + `","status":"ACCEPTED"}}`))
+			return
+		}
+		t.Errorf("unexpected path %s", r.URL.Path)
+	}))
 
 	_, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
 	if !errors.Is(err, ErrPayoutInFlight) {
@@ -1935,14 +1946,12 @@ func TestApproveDealBlocksUnconfirmedCrashWindow(t *testing.T) {
 	}
 }
 
-func TestApproveDealRefusedPayoutRetriesLater(t *testing.T) {
-	// A 4xx from LNbits is a provable non-send: the marker is cleared so a later
-	// approve can legally re-run the payout. The second attempt succeeds.
+func TestApproveDealRefusedPayoutOnSettledHoldKeepsMarker(t *testing.T) {
+	// After settle, a provably refused payout must keep attempt marker to
+	// prevent unsafe auto-retry; funds may already be in escrow wallet.
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusWorkSubmitted
-
-	payCalls := 0
 
 	service := NewService(repo, newLNbitsClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1950,35 +1959,23 @@ func TestApproveDealRefusedPayoutRetriesLater(t *testing.T) {
 		case "/api/v1/payments/settle":
 			_, _ = w.Write([]byte(`{"ok":true,"checking_id":"bb"}`))
 		case "/api/v1/payments":
-			payCalls++
-			if payCalls == 1 {
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = w.Write([]byte(`{"detail":"insufficient balance"}`))
-				return
-			}
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"payment_hash":"o1","checking_id":"oc1"}`))
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"detail":"invoice expired"}`))
+		case "/api/v1/payments/" + deal.CheckingID:
+			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"` + deal.CheckingID + `","status":"SETTLED"}}`))
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
 	}))
 
-	if _, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID); !errors.Is(err, lnbits.ErrPayoutRefused) {
-		t.Fatalf("expected refused payout error, got %v", err)
+	if _, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID); !errors.Is(err, ErrPayoutFailed) {
+		t.Fatalf("expected ErrPayoutFailed, got %v", err)
 	}
-	if repo.deals[deal.ID].PayoutAttemptedAt.Valid {
-		t.Fatal("expected the attempt marker to be cleared after a definite refusal")
+	if !repo.deals[deal.ID].PayoutAttemptedAt.Valid {
+		t.Fatal("expected attempt marker to remain for settled-hold refused payout")
 	}
 	if repo.deals[deal.ID].Status == StatusReleased {
 		t.Fatal("expected the deal to stay unreleased")
-	}
-
-	updated, err := service.ApproveDeal(context.Background(), "client@example.com", deal.ID)
-	if err != nil {
-		t.Fatalf("expected the retry to succeed, got %v", err)
-	}
-	if updated.Status != StatusReleased {
-		t.Fatalf("expected released after retry, got %s", updated.Status)
 	}
 }
 

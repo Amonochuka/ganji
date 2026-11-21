@@ -75,17 +75,33 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 		case ok:
 			confirmed = true
 		case failed:
-			if err := repo.ClearMilestonePayoutTracking(ctx, m.ID); err != nil {
-				return nil, fmt.Errorf("resetting milestone payout tracking %s: %w", m.ID, err)
+			settled, settleErr := s.isMilestoneHoldSettled(ctx, m)
+			if settleErr != nil {
+				return nil, fmt.Errorf("%w: verifying settled hold for milestone %s: %v", ErrPayoutInFlight, m.ID, settleErr)
 			}
-			payoutCheckingID = ""
-			m.PayoutCheckingID = ""
-			m.PayoutAttemptedAt = sql.NullTime{}
+			if settled {
+				if err := repo.ClearMilestonePayoutTracking(ctx, m.ID); err != nil {
+					return nil, fmt.Errorf("resetting milestone payout tracking %s: %w", m.ID, err)
+				}
+				payoutCheckingID = ""
+				m.PayoutCheckingID = ""
+				m.PayoutAttemptedAt = sql.NullTime{}
+			} else {
+				return nil, fmt.Errorf("%w: milestone payout %s for %s was refused by LNbits", ErrPayoutFailed, m.PayoutCheckingID, m.ID)
+			}
 		default:
 			return nil, fmt.Errorf("%w: milestone payout %s for %s is not confirmed", ErrPayoutInFlight, m.PayoutCheckingID, m.ID)
 		}
 	case m.PayoutAttemptedAt.Valid:
-		return nil, fmt.Errorf("%w: milestone %s has an unconfirmed payout attempt", ErrPayoutInFlight, m.ID)
+		settled, settleErr := s.isMilestoneHoldSettled(ctx, m)
+		if settleErr != nil {
+			return nil, fmt.Errorf("%w: verifying settled hold for milestone %s: %v", ErrPayoutInFlight, m.ID, settleErr)
+		}
+		if !settled {
+			return nil, fmt.Errorf("%w: milestone %s has an unconfirmed payout attempt", ErrPayoutInFlight, m.ID)
+		}
+		confirmed = false
+		payoutCheckingID = ""
 	}
 
 	if !confirmed {
@@ -122,8 +138,8 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 		id, err := s.lnbits.PayInvoice(ctx, payee)
 		if err != nil {
 			if errors.Is(err, lnbits.ErrPayoutRefused) {
-				_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
-				return nil, fmt.Errorf("paying freelancer for milestone %s: %w", m.ID, err)
+				// Keep attempt marker: hold may be settled and funds are in escrow.
+				return nil, fmt.Errorf("%w: paying freelancer for milestone %s: %v", ErrPayoutFailed, m.ID, err)
 			}
 			return nil, fmt.Errorf("%w: paying freelancer for milestone %s: %v", ErrPayoutInFlight, m.ID, err)
 		}
@@ -136,7 +152,7 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 			return nil, fmt.Errorf("%w: verifying milestone payout %s for %s: %v",
 				ErrPayoutInFlight, id, m.ID, checkErr)
 		case failedPayout:
-			_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+			// Keep marker: escrow may already be settled; explicit reconciliation needed.
 			return nil, fmt.Errorf("%w: milestone payout %s for %s was refused by LNbits",
 				ErrPayoutFailed, id, m.ID)
 		case !confirmedPayout:

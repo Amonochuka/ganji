@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
@@ -91,7 +92,7 @@ func (s *Service) fundMilestoneHold(ctx context.Context, deal *Deal, shareToken 
 	if _, err := wallet.PayInvoice(ctx, m.Invoice); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrWalletPaymentFailed, err)
 	}
-	accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, m.PreimageHash, m.AmountSats)
+	accepted, err := s.waitForAcceptedHold(ctx, m.PreimageHash, m.AmountSats)
 	if err != nil {
 		return nil, fmt.Errorf("verifying accepted hold: %w", err)
 	}
@@ -106,6 +107,36 @@ func (s *Service) fundMilestoneHold(ctx context.Context, deal *Deal, shareToken 
 	}
 	_, _ = s.repo.UpdateStatusIfCurrent(ctx, deal.ID, StatusAwaitingPayment, StatusLocked)
 	return s.GetPublicDeal(ctx, shareToken)
+}
+
+func (s *Service) waitForAcceptedHold(ctx context.Context, paymentHash string, amountSats int64) (bool, error) {
+	const attempts = 15
+	const delay = 2 * time.Second
+
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, paymentHash, amountSats)
+		if err != nil {
+			lastErr = err
+		} else if accepted {
+			return true, nil
+		}
+		if i == attempts-1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return false, lastErr
+			}
+			return false, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	if lastErr != nil {
+		return false, lastErr
+	}
+	return false, nil
 }
 
 func (s *Service) fundDealHold(ctx context.Context, deal *Deal, shareToken, walletURL, walletKey string) (*PublicDeal, error) {
@@ -128,7 +159,7 @@ func (s *Service) fundDealHold(ctx context.Context, deal *Deal, shareToken, wall
 	if _, err := wallet.PayInvoice(ctx, deal.Invoice); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrWalletPaymentFailed, err)
 	}
-	accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
+	accepted, err := s.waitForAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
 	if err != nil {
 		return nil, fmt.Errorf("verifying accepted hold: %w", err)
 	}

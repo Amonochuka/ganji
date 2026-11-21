@@ -48,3 +48,25 @@ func (s *Service) checkOutgoingPayout(ctx context.Context, payoutCheckingID stri
 	}
 	return false, false, nil
 }
+
+func (s *Service) isDealHoldSettled(ctx context.Context, deal *Deal) (bool, error) {
+	if deal == nil || deal.CheckingID == "" {
+		return false, fmt.Errorf("%w: deal has no escrow invoice", ErrInvalidInput)
+	}
+	payment, err := s.lnbits.CheckPayment(ctx, deal.CheckingID)
+	if err != nil {
+		return false, err
+	}
+	return isHoldSettled(payment.Details.Status), nil
+}
+
+func (s *Service) isMilestoneHoldSettled(ctx context.Context, m *Milestone) (bool, error) {
+	if m == nil || m.CheckingID == "" {
+		return false, fmt.Errorf("%w: milestone has no escrow invoice", ErrInvalidInput)
+	}
+	payment, err := s.lnbits.CheckPayment(ctx, m.CheckingID)
+	if err != nil {
+		return false, err
+	}
+	return isHoldSettled(payment.Details.Status), nil
+}

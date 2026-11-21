@@ -173,20 +173,40 @@ func (s *Service) releaseEscrow(ctx context.Context, dealID string, opts release
 		case ok:
 			confirmed = true
 		case failed:
-			// Definitively not sent — reset the stale tracking and re-try below.
-			if err := repo.ClearPayoutTracking(ctx, deal.ID); err != nil {
-				return nil, fmt.Errorf("resetting payout tracking for deal %s: %w", deal.ID, err)
+			settled, settleErr := s.isDealHoldSettled(ctx, deal)
+			if settleErr != nil {
+				return nil, fmt.Errorf("%w: verifying settled hold for deal %s: %v", ErrPayoutInFlight, deal.ID, settleErr)
 			}
-			payoutCheckingID = ""
+			if settled {
+				// Hold settled but prior payout definitively failed: funds remain in
+				// escrow wallet. Clear failed tracking so payout leg can be retried.
+				if err := repo.ClearPayoutTracking(ctx, deal.ID); err != nil {
+					return nil, fmt.Errorf("resetting payout tracking for deal %s: %w", deal.ID, err)
+				}
+				payoutCheckingID = ""
+			} else {
+				return nil, fmt.Errorf("%w: payout %s for deal %s was refused by LNbits", ErrPayoutFailed, deal.PayoutCheckingID, deal.ID)
+			}
 		default:
 			// Still pending/in flight with no verdict. Do not resend.
 			return nil, fmt.Errorf("%w: payout %s for deal %s is not confirmed",
 				ErrPayoutInFlight, deal.PayoutCheckingID, deal.ID)
 		}
 	case deal.PayoutAttemptedAt.Valid:
-		// A previous release recorded an attempt but never confirmed it. This is
-		// exactly the crash window — money may or may not have moved.
-		return nil, fmt.Errorf("%w: deal %s has an unconfirmed payout attempt", ErrPayoutInFlight, deal.ID)
+		// A previous release recorded an attempt but never confirmed payout.
+		// If the escrow hold is already settled, funds are in escrow wallet and
+		// we may safely retry only the payout leg (settle is idempotent/guarded).
+		// If hold state is unknown/not settled, keep this ambiguous to avoid
+		// double-paying or releasing without settlement.
+		settled, settleErr := s.isDealHoldSettled(ctx, deal)
+		if settleErr != nil {
+			return nil, fmt.Errorf("%w: verifying settled hold for deal %s: %v", ErrPayoutInFlight, deal.ID, settleErr)
+		}
+		if !settled {
+			return nil, fmt.Errorf("%w: deal %s has an unconfirmed payout attempt", ErrPayoutInFlight, deal.ID)
+		}
+		confirmed = false
+		payoutCheckingID = ""
 	}
 
 	if !confirmed {
@@ -213,12 +233,11 @@ func (s *Service) releaseEscrow(ctx context.Context, dealID string, opts release
 		id, err := s.lnbits.PayInvoice(ctx, deal.PayeeInvoice)
 		if err != nil {
 			if errors.Is(err, lnbits.ErrPayoutRefused) {
-				// Provably not sent (rejected by LNbits before any payment):
-				// reset the marker so a later approve is legal.
-				if clearErr := s.clearPayoutAttempt(ctx, deal.ID); clearErr != nil {
-					log.Printf("clearing payout attempt for deal %s: %v", deal.ID, clearErr)
-				}
-				return nil, fmt.Errorf("paying freelancer for deal %s: %w", deal.ID, err)
+				// Payout provably not sent, but escrow hold may already be settled
+				// (e.g. expired/canceled payee invoice after settle). Keep the
+				// attempt marker to prevent unsafe auto-resend/release ambiguity;
+				// operator/freelancer must fix payee destination and retry reconcile.
+				return nil, fmt.Errorf("%w: paying freelancer for deal %s: %v", ErrPayoutFailed, deal.ID, err)
 			}
 			// Ambiguous (5xx / timeout): may have been sent. Keep the marker.
 			return nil, fmt.Errorf("%w: paying freelancer for deal %s: %v", ErrPayoutInFlight, deal.ID, err)
@@ -234,9 +253,9 @@ func (s *Service) releaseEscrow(ctx context.Context, dealID string, opts release
 			return nil, fmt.Errorf("%w: verifying payout %s for deal %s: %v",
 				ErrPayoutInFlight, id, deal.ID, checkErr)
 		case failedPayout:
-			if clearErr := s.clearPayoutAttempt(ctx, deal.ID); clearErr != nil {
-				log.Printf("clearing payout attempt for deal %s: %v", deal.ID, clearErr)
-			}
+			// Definitively failed payout after an attempt was recorded. Keep the
+			// attempt marker when escrow may already be settled; this blocks
+			// unsafe implicit retries and forces explicit reconciliation/retry.
 			return nil, fmt.Errorf("%w: payout %s for deal %s was refused by LNbits",
 				ErrPayoutFailed, id, deal.ID)
 		case !confirmedPayout:

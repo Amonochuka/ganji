@@ -339,13 +339,12 @@ func TestReleaseMilestoneConfirmedPayoutDoesNotRepay(t *testing.T) {
 	}
 }
 
-func TestReleaseMilestoneFailedPayoutClearsAndRetries(t *testing.T) {
+func TestReleaseMilestoneFailedPayoutSettledHoldRetries(t *testing.T) {
 	repo := newFakeDealRepo()
 	ln := newMilestoneLN(t)
 	service, _ := newMilestoneService(t, repo, ln)
 	deal := milestoneTestDeal(repo, "deal-1")
 	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneWorkSubmitted)
-	// Seed a failed prior attempt so the retry must clear tracking and re-pay.
 	m0 := repo.milestones["ms-1"]
 	m0.PayoutCheckingID = "chk-old-failed"
 	m0.PayoutAttemptedAt.Valid = true
@@ -355,13 +354,38 @@ func TestReleaseMilestoneFailedPayoutClearsAndRetries(t *testing.T) {
 
 	rm, err := service.ReleaseMilestone(context.Background(), deal, "ms-1")
 	if err != nil {
-		t.Fatalf("failed-payout retry must succeed, got %v", err)
+		t.Fatalf("settled-hold failed-payout retry must succeed, got %v", err)
 	}
 	if rm.Status != MilestoneReleased || rm.PayoutCheckingID != "chk-pay-1" {
 		t.Fatalf("expected released with fresh payout id, got %+v", rm)
 	}
 	if atomic.LoadInt32(&ln.payCount) != 1 {
 		t.Fatalf("expected 1 fresh payout, got %d", atomic.LoadInt32(&ln.payCount))
+	}
+}
+
+func TestReleaseMilestoneFailedPayoutUnsettledHoldFails(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+	deal := milestoneTestDeal(repo, "deal-1")
+	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneWorkSubmitted)
+	m0 := repo.milestones["ms-1"]
+	m0.PayoutCheckingID = "chk-old-failed"
+	m0.PayoutAttemptedAt.Valid = true
+	m0.PayoutAttemptedAt.Time = m0.CreatedAt
+	ln.payoutStatusByID["chk-old-failed"] = "FAILED"
+	ln.holdStatusByID["chk-hold-ms-1"] = "ACCEPTED"
+
+	_, err := service.ReleaseMilestone(context.Background(), deal, "ms-1")
+	if !errors.Is(err, ErrPayoutFailed) {
+		t.Fatalf("expected ErrPayoutFailed, got %v", err)
+	}
+	if repo.milestones["ms-1"].Status == MilestoneReleased {
+		t.Fatal("failed payout must never mark released")
+	}
+	if atomic.LoadInt32(&ln.payCount) != 0 {
+		t.Fatal("must not send fresh payout when hold not settled")
 	}
 }
 
@@ -381,8 +405,8 @@ func TestReleaseMilestoneFailsWhenFreshPayoutFails(t *testing.T) {
 	if repo.milestones["ms-1"].Status == MilestoneReleased {
 		t.Fatal("a failed payout must never mark the milestone released")
 	}
-	if repo.milestones["ms-1"].PayoutAttemptedAt.Valid || repo.milestones["ms-1"].PayoutCheckingID != "" {
-		t.Fatal("a failed payout must clear its tracking so a later retry is legal")
+	if !repo.milestones["ms-1"].PayoutAttemptedAt.Valid {
+		t.Fatal("failed payout on settled hold must keep attempt marker for reconciliation")
 	}
 }
 
@@ -413,13 +437,35 @@ func TestReleaseMilestoneCrashWindowBlocks(t *testing.T) {
 	deal := milestoneTestDeal(repo, "deal-1")
 	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneWorkSubmitted)
 	repo.milestones["ms-1"].PayoutAttemptedAt.Valid = true // attempt recorded, no ID — crash window
+	ln.holdStatusByID["chk-hold-ms-1"] = "ACCEPTED"
 	_, err := service.ReleaseMilestone(context.Background(), deal, "ms-1")
 	if !errors.Is(err, ErrPayoutInFlight) {
 		t.Fatalf("expected ErrPayoutInFlight on crash window, got %v", err)
 	}
 }
 
-func TestReleaseMilestoneRefusedPayoutClearsTracking(t *testing.T) {
+func TestReleaseMilestoneCrashWindowSettledHoldRetriesPayout(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+	deal := milestoneTestDeal(repo, "deal-1")
+	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneWorkSubmitted)
+	repo.milestones["ms-1"].PayoutAttemptedAt.Valid = true
+	ln.holdStatusByID["chk-hold-ms-1"] = "SETTLED"
+
+	rm, err := service.ReleaseMilestone(context.Background(), deal, "ms-1")
+	if err != nil {
+		t.Fatalf("settled crash-window retry must pay out, got %v", err)
+	}
+	if rm.Status != MilestoneReleased || rm.PayoutCheckingID != "chk-pay-1" {
+		t.Fatalf("expected released with payout, got %+v", rm)
+	}
+	if atomic.LoadInt32(&ln.payCount) != 1 {
+		t.Fatalf("expected 1 payout, got %d", atomic.LoadInt32(&ln.payCount))
+	}
+}
+
+func TestReleaseMilestoneRefusedPayoutAfterSettledHoldKeepsTracking(t *testing.T) {
 	repo := newFakeDealRepo()
 	ln := newMilestoneLN(t)
 	ln.payErr = lnbits.ErrPayoutRefused
@@ -428,14 +474,11 @@ func TestReleaseMilestoneRefusedPayoutClearsTracking(t *testing.T) {
 	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneWorkSubmitted)
 	ln.holdStatusByID["chk-hold-ms-1"] = "SETTLED"
 	_, err := service.ReleaseMilestone(context.Background(), deal, "ms-1")
-	if !errors.Is(err, lnbits.ErrPayoutRefused) && err == nil {
-		t.Fatalf("expected refused error, got %v", err)
+	if !errors.Is(err, ErrPayoutFailed) {
+		t.Fatalf("expected ErrPayoutFailed, got %v", err)
 	}
-	if err == nil {
-		t.Fatal("expected error on refused payout")
-	}
-	if repo.milestones["ms-1"].PayoutAttemptedAt.Valid {
-		t.Fatal("refused payout must clear the durable attempt marker")
+	if !repo.milestones["ms-1"].PayoutAttemptedAt.Valid {
+		t.Fatal("refused payout after settled hold must keep attempt marker")
 	}
 	if repo.milestones["ms-1"].Status == MilestoneReleased {
 		t.Fatal("refused payout must never mark released")
