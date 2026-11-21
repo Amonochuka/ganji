@@ -65,10 +65,8 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 		case errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			log.Printf("create deal failed: %v", err)
-			c.JSON(http.StatusBadGateway, gin.H{
-				"error": "payment provider error: could not create escrow (deal or milestone). Your LNbits wallet must support hold (HODL) invoices — see backend/.env LNBITS_URL.",
-			})
+			log.Printf("create deal failed (user=%s): %v", userID, err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": "Could not create the deal. Check backend logs for the underlying error before retrying."})
 		}
 		return
 	}

@@ -190,6 +190,20 @@ func TestCreateHoldInvoiceError(t *testing.T) {
 	}
 }
 
+func TestCreateHoldInvoiceRejectsIncompleteSuccessResponse(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"checking_id":"c1","payment_hash":"ph1"}`))
+	})
+
+	_, err := client.CreateHoldInvoice(context.Background(), CreateHoldInvoiceRequest{
+		Amount: 5000, Memo: "Build a site", PaymentHash: "ph1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing payment_request") {
+		t.Fatalf("expected incomplete response error, got %v", err)
+	}
+}
+
 func TestSettleHoldUsesAdminKey(t *testing.T) {
 	client, requests := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Api-Key") != "admin-key" {

@@ -143,6 +143,9 @@ func (c *Client) CreateHoldInvoice(ctx context.Context, req CreateHoldInvoiceReq
 	if err := c.postJSON(ctx, "/api/v1/payments", c.apiKey, req, &resp); err != nil {
 		return nil, fmt.Errorf("create hold invoice: %w", err)
 	}
+	if resp.PaymentRequest == "" || resp.CheckingID == "" || resp.PaymentHash == "" {
+		return nil, fmt.Errorf("create hold invoice: LNbits response is missing payment_request, checking_id, or payment_hash")
+	}
 
 	return &Invoice{
 		PaymentRequest: resp.PaymentRequest,
@@ -159,6 +162,9 @@ func (c *Client) CreateInvoice(ctx context.Context, req CreateInvoiceRequest) (*
 	var resp CreateInvoiceResponse
 	if err := c.postJSON(ctx, "/api/v1/payments", c.apiKey, req, &resp); err != nil {
 		return nil, fmt.Errorf("create invoice: %w", err)
+	}
+	if resp.PaymentRequest == "" || resp.CheckingID == "" || resp.PaymentHash == "" {
+		return nil, fmt.Errorf("create invoice: LNbits response is missing payment_request, checking_id, or payment_hash")
 	}
 	return &Invoice{
 		PaymentRequest: resp.PaymentRequest,

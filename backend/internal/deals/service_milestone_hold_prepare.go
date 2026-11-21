@@ -30,7 +30,12 @@ func (s *Service) prepareMilestoneHold(ctx context.Context, deal *Deal, m *Miles
 		Out: false, Amount: m.AmountSats, Memo: fmt.Sprintf("%s — M%d: %s", deal.Title, m.Order, m.Title), PaymentHash: m.PreimageHash,
 	})
 	if err != nil {
+		s.cancelOrphanHold(ctx, m.PreimageHash)
 		return fmt.Errorf("creating milestone hold invoice: %w", err)
+	}
+	if hold.PaymentHash != m.PreimageHash {
+		s.cancelOrphanHold(ctx, m.PreimageHash)
+		return fmt.Errorf("creating milestone hold invoice: provider returned a payment hash that does not match the escrow preimage")
 	}
 	m.Invoice = hold.PaymentRequest
 	m.CheckingID = hold.CheckingID

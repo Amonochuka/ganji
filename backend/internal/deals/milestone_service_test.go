@@ -53,7 +53,7 @@ func (m *milestoneLN) handler() http.Handler {
 			}
 			atomic.AddInt32(&m.createHoldCount, 1)
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"checking_id":"chk-hold-` + fmt.Sprint(atomic.LoadInt32(&m.createHoldCount)) + `","payment_hash":"hash","payment_request":"lnbc-hold"}`))
+			_, _ = w.Write([]byte(`{"checking_id":"chk-hold-` + fmt.Sprint(atomic.LoadInt32(&m.createHoldCount)) + `","payment_hash":"` + body["payment_hash"].(string) + `","payment_request":"lnbc-hold"}`))
 			return
 		}
 		atomic.AddInt32(&m.payCount, 1)

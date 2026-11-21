@@ -97,7 +97,12 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 			Out: false, Amount: deal.AmountSats, Memo: deal.Title, PaymentHash: deal.PreimageHash,
 		})
 		if err != nil {
+			s.cancelOrphanHold(ctx, deal.PreimageHash)
 			return fmt.Errorf("creating LNBits hold invoice: %w", err)
+		}
+		if hold.PaymentHash != deal.PreimageHash {
+			s.cancelOrphanHold(ctx, deal.PreimageHash)
+			return fmt.Errorf("creating LNBits hold invoice: provider returned a payment hash that does not match the escrow preimage")
 		}
 		deal.Invoice = hold.PaymentRequest
 		deal.CheckingID = hold.CheckingID
