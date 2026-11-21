@@ -349,12 +349,9 @@ docker compose -f lnbits-docker-compose.yml down         # Stop (keeps data)
 
 ### LNbits says "This backend does nothing... VoidWallet"
 
-**Cause:** LNbits couldn't initialize `LndRestWallet`, so it silently fell back to a do-nothing wallet. Check the logs:
-```bash
-docker logs ganji-lnbits-1 2>&1 | grep -iE "error initializing|void"
-```
+**Cause:** LNbits couldn't initialize `LndRestWallet`, or lost its funding-source connection and fell back to VoidWallet. Symptoms: logs show `This backend does nothing... VoidWallet` / `VoidWallet cannot create invoices`, and `POST /api/v1/payments` fails.
 
-**Common cause:** The DB (`system_settings`) has stale hardcoded LND paths that **override environment variables**. Check:
+**Common cause A (stale DB settings override env):** Check DB settings:
 ```bash
 docker run --rm -v ganji_lnbits-data:/data python:3-alpine python3 -c "
 import sqlite3
@@ -362,8 +359,7 @@ c=sqlite3.connect('/data/database.sqlite3')
 for r in c.execute(\"SELECT id,value FROM system_settings WHERE id LIKE '%lnd%'\"): print(r)
 "
 ```
-
-**Fix:** Update the DB settings (note: values are JSON-encoded strings, so use `json.dumps`):
+Fix stale paths (values are JSON-encoded strings), then restart:
 ```bash
 docker run --rm -v ganji_lnbits-data:/data python:3-alpine python3 -c "
 import sqlite3,json
@@ -379,7 +375,16 @@ c.commit()
 "
 docker restart ganji-lnbits-1
 ```
-Expected log: `✔️ Backend LndRestWallet connected and with a balance of ~9991530000 msat`
+
+**Common cause B (settings correct, process stuck after Polar/LND restart):** `docker compose up -d` can be a no-op for unchanged running containers. Restart the LNbits process:
+```bash
+docker restart ganji-lnbits-1 ganji-lnbits-client-1 ganji-lnbits-freelancer-1
+```
+Verify each instance can create an invoice (expect 201/pending, not VoidWallet error):
+```bash
+docker exec ganji-lnbits-1 sh -lc 'KEY=$(python3 -c "import sqlite3;c=sqlite3.connect(\"/data/database.sqlite3\");print(c.execute(\"select inkey from wallets limit 1\").fetchone()[0])"); curl -s --max-time 20 -X POST http://localhost:5000/api/v1/payments -H "Content-Type: application/json" -H "X-Api-Key: $KEY" -d "{\"out\":false,\"amount\":100,\"memo\":\"probe\"}"'
+```
+Expected log: `Funding source: LndRestWallet ... ✔️ Backend LndRestWallet connected...`
 
 ### LNbits redirects all API calls to `/first_install`
 
