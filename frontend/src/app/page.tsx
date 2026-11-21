@@ -66,18 +66,18 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <FeatureCard
               icon={<path d="M7 10V7a5 5 0 0 1 10 0v3m-11 0h12v10H6V10Zm6 4v2" />}
-              title="Client-Approved Release"
-              description="Funds stay held on Lightning until the client explicitly approves delivery. No disputes, no chargebacks."
+              title="Protection for Both Sides"
+              description="The client funds escrow before work begins. The freelancer gets paid when work is approved; disputes keep funds held for review."
             />
             <FeatureCard
               icon={<><path d="M9 15H7a5 5 0 0 1 0-10h2" /><path d="M15 9h2a5 5 0 0 1 0 10h-2" /><path d="M8 10h8" /></>}
-              title="Hash-Verified Reputation"
-              description="Every completed deal anchors a cryptographic proof to Bitcoin via OpenTimestamps. Your Live CV is immutable."
+              title="Verifiable Work History"
+              description="Completed deals can add a timestamped proof to a freelancer’s Live CV, helping clients verify their track record."
             />
             <FeatureCard
               icon={<path d="m13 2-8 12h6l-1 8 8-12h-6l1-8Z" />}
               title="Lightning Native"
-              description="Built on Bitcoin Lightning. Instant settlements, sub-cent fees, no bank account required. Global from day one."
+              description="Pay and receive bitcoin over Lightning, with fast settlement and no bank account required."
             />
           </div>
         </div>
