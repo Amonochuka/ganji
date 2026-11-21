@@ -47,6 +47,7 @@ export type DealView = {
   checking_id: string;
   share_token: string;
   status: DealStatus;
+  payout_reset_available?: boolean;
   dispute_reason: string;
   disputed_at: string | null;
   resolved_at: string | null;

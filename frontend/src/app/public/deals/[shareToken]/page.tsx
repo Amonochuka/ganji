@@ -118,6 +118,16 @@ export default function PublicDealPage() {
     });
   }
 
+  async function handleCheckFreelancerStatus() {
+    setActionError(null);
+    setActionLoading("check freelancer status");
+    try {
+      await fetchDeal(true);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleResetPayout(milestoneId?: string) {
     const message = milestoneId
       ? "Clear the failed payout attempt for this milestone? This only removes the internal attempt marker. It does not move funds, settle escrow, or change the milestone status. Continue only after confirming the freelancer was not paid."
@@ -251,7 +261,7 @@ export default function PublicDealPage() {
             {isPaid && (
               <div className="mb-6 p-4 rounded-lg bg-green-600/10 border border-green-600/30 text-center">
                 <p className="flex items-center justify-center gap-1.5 font-medium text-green-400 mb-1"><StatusIcon status="released" /> Payment Released</p>
-                <p className="text-sm text-ink-300">Escrow released to the freelancer.</p>
+                <p className="text-sm text-ink-300">Payment confirmed to the freelancer.</p>
               </div>
             )}
             {isRefunded && (
@@ -269,6 +279,23 @@ export default function PublicDealPage() {
             )}
 
             {actionError && <p className="mb-4 text-sm text-red-400">{actionError}</p>}
+
+            {(deal.status === "work_submitted" || deal.status === "released") && (
+              <Button
+                variant="outline"
+                className="mb-4 w-full"
+                onClick={handleCheckFreelancerStatus}
+                isLoading={actionLoading === "check freelancer status"}
+                disabled={!!actionLoading}
+              >
+                Check Freelancer Status
+              </Button>
+            )}
+            {deal.payout_reset_available && !hasMilestones && (
+              <p className="mb-4 rounded-lg border border-yellow-600/30 bg-yellow-600/10 p-3 text-sm text-yellow-300">
+                Payout outcome needs confirmation. Checking account status refreshes the deal; it will not resend payment.
+              </p>
+            )}
 
             {!terminal && !isDisputed && (
               <div className="space-y-4">

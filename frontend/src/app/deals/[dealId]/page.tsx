@@ -211,6 +211,17 @@ export default function DealDetailPage() {
     });
   }
 
+  async function handleCheckFreelancerStatus() {
+    if (!tokens) return;
+    setActionError(null);
+    setActionLoading("check freelancer status");
+    try {
+      await Promise.all([fetchDeal(true), fetchMilestones(), fetchArtifacts()]);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   if (isLoading) {
     return (
       <main className="flex min-h-screen flex-col bg-vault-bg">
@@ -481,14 +492,24 @@ export default function DealDetailPage() {
                         Check Payment
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      onClick={handleRefreshEscrowStatus}
-                      disabled={actionLoading === "refresh escrow status"}
-                      isLoading={actionLoading === "refresh escrow status"}
-                    >
-                      Check Escrow Status
-                    </Button>
+                    {deal.status === "awaiting_payment" && (
+                      <Button
+                        variant="ghost"
+                        onClick={handleRefreshEscrowStatus}
+                        disabled={actionLoading === "refresh escrow status"}
+                        isLoading={actionLoading === "refresh escrow status"}
+                      >
+                        Check Escrow Status
+                      </Button>
+                    )}
+                    {(deal.status === "work_submitted" || deal.status === "released") && (
+                      <>
+                        <Button variant="ghost" onClick={handleCheckFreelancerStatus} disabled={actionLoading === "check freelancer status"} isLoading={actionLoading === "check freelancer status"}>
+                          Check Freelancer Status
+                        </Button>
+                        {deal.payout_reset_available && <span className="flex items-center px-3 py-2 text-sm text-yellow-400">Payout needs operator confirmation before retry.</span>}
+                      </>
+                    )}
                     {deal.status !== "released" && deal.status !== "refunded" && (
                       <Button
                         variant="outline"
@@ -546,22 +567,32 @@ export default function DealDetailPage() {
                     )}
                     {deal.status === "released" && (
                       <span className="flex items-center px-3 py-2 text-sm text-green-400 bg-green-600/10 rounded-lg border border-green-600/30">
-                        <StatusIcon status="released" /> Payment released to the freelancer
+                        <StatusIcon status="released" /> Payment confirmed to the freelancer
                       </span>
+                    )}
+                    {(deal.status === "work_submitted" || deal.status === "released") && (
+                      <>
+                        <Button variant="ghost" onClick={handleCheckFreelancerStatus} disabled={actionLoading === "check freelancer status"} isLoading={actionLoading === "check freelancer status"}>
+                          Check Freelancer Status
+                        </Button>
+                        {deal.payout_reset_available && <span className="flex items-center px-3 py-2 text-sm text-yellow-400">Payout needs operator confirmation before retry.</span>}
+                      </>
                     )}
                     {deal.status === "refunded" && (
                       <span className="flex items-center px-3 py-2 text-sm text-gray-400 bg-gray-600/10 rounded-lg border border-gray-600/30">
                         <StatusIcon status="refunded" /> Escrow refunded
                       </span>
                     )}
-                    <Button
-                      variant="ghost"
-                      onClick={handleRefreshEscrowStatus}
-                      disabled={actionLoading === "refresh escrow status"}
-                      isLoading={actionLoading === "refresh escrow status"}
-                    >
-                      Check Escrow Status
-                    </Button>
+                    {deal.status === "awaiting_payment" && (
+                      <Button
+                        variant="ghost"
+                        onClick={handleRefreshEscrowStatus}
+                        disabled={actionLoading === "refresh escrow status"}
+                        isLoading={actionLoading === "refresh escrow status"}
+                      >
+                        Check Escrow Status
+                      </Button>
+                    )}
                     {deal.status !== "released" && deal.status !== "refunded" && (
                       <Button
                         variant="danger"

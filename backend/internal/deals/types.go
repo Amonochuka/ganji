@@ -128,23 +128,24 @@ type MilestoneInput struct {
 // Everything else is surfaced to both the freelancer and the client (the
 // client is authorized by email match). See explained.md §10 #1.
 type DealView struct {
-	ID             string     `json:"id"`
-	FreelancerID   string     `json:"freelancer_id"`
-	ClientEmail    string     `json:"client_email"`
-	Title          string     `json:"title"`
-	AmountSats     int64      `json:"amount_sats"`
-	SourcePlatform string     `json:"source_platform"`
-	PreimageHash   string     `json:"preimage_hash"`
-	Invoice        string     `json:"invoice"`
-	CheckingID     string     `json:"checking_id"`
-	ShareToken     string     `json:"share_token"`
-	Status         Status     `json:"status"`
-	DisputeReason  string     `json:"dispute_reason"`
-	DisputedAt     *time.Time `json:"disputed_at"`
-	ResolvedAt     *time.Time `json:"resolved_at"`
-	ResolvedBy     string     `json:"resolved_by,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	VerifiedAt     *time.Time `json:"verified_at"`
+	ID                   string     `json:"id"`
+	FreelancerID         string     `json:"freelancer_id"`
+	ClientEmail          string     `json:"client_email"`
+	Title                string     `json:"title"`
+	AmountSats           int64      `json:"amount_sats"`
+	SourcePlatform       string     `json:"source_platform"`
+	PreimageHash         string     `json:"preimage_hash"`
+	Invoice              string     `json:"invoice"`
+	CheckingID           string     `json:"checking_id"`
+	ShareToken           string     `json:"share_token"`
+	Status               Status     `json:"status"`
+	PayoutResetAvailable bool       `json:"payout_reset_available,omitempty"`
+	DisputeReason        string     `json:"dispute_reason"`
+	DisputedAt           *time.Time `json:"disputed_at"`
+	ResolvedAt           *time.Time `json:"resolved_at"`
+	ResolvedBy           string     `json:"resolved_by,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	VerifiedAt           *time.Time `json:"verified_at"`
 	// Milestones carries per-milestone truth in milestone mode (empty in
 	// legacy single-hold mode). Order by Order asc. Invoice/CheckingID/Status
 	// on the view mirror the active milestone (first non-terminal) for
@@ -168,23 +169,24 @@ func nullTime(nt sql.NullTime) *time.Time {
 // View redacts a deal for API responses (see DealView).
 func (d *Deal) View() DealView {
 	return DealView{
-		ID:             d.ID,
-		FreelancerID:   d.FreelancerID,
-		ClientEmail:    d.ClientEmail,
-		Title:          d.Title,
-		AmountSats:     d.AmountSats,
-		SourcePlatform: d.SourcePlatform,
-		PreimageHash:   d.PreimageHash,
-		Invoice:        d.Invoice,
-		CheckingID:     d.CheckingID,
-		ShareToken:     d.ShareToken,
-		Status:         d.Status,
-		DisputeReason:  d.DisputeReason,
-		DisputedAt:     nullTime(d.DisputedAt),
-		ResolvedAt:     nullTime(d.ResolvedAt),
-		ResolvedBy:     d.ResolvedBy,
-		CreatedAt:      d.CreatedAt,
-		VerifiedAt:     nullTime(d.VerifiedAt),
+		ID:                   d.ID,
+		FreelancerID:         d.FreelancerID,
+		ClientEmail:          d.ClientEmail,
+		Title:                d.Title,
+		AmountSats:           d.AmountSats,
+		SourcePlatform:       d.SourcePlatform,
+		PreimageHash:         d.PreimageHash,
+		Invoice:              d.Invoice,
+		CheckingID:           d.CheckingID,
+		ShareToken:           d.ShareToken,
+		Status:               d.Status,
+		PayoutResetAvailable: canResetDealPayoutAttempt(d),
+		DisputeReason:        d.DisputeReason,
+		DisputedAt:           nullTime(d.DisputedAt),
+		ResolvedAt:           nullTime(d.ResolvedAt),
+		ResolvedBy:           d.ResolvedBy,
+		CreatedAt:            d.CreatedAt,
+		VerifiedAt:           nullTime(d.VerifiedAt),
 	}
 }
 
