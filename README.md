@@ -70,6 +70,17 @@ Each package's purpose is documented in [`docs/ARCHITECTURE.md`](./docs/ARCHITEC
 
 **Design System:** Vault (near-black matte) + Gold accents, Orbitron/Share Tech Mono for GNJ logo, CSS variables for all colors/fonts
 
+### Local Lightning dev (Polar + LNbits)
+
+For real hold-invoice escrow testing, use the three-wallet local stack: escrow LNbits `:5000` (Es), client `:5001` (Cl), freelancer `:5002` (Fre). Setup and recovery are in [`docs/POLAR_LNBITS_SETUP.md`](./docs/POLAR_LNBITS_SETUP.md).
+
+```bash
+docker compose -f ~/.polar/networks/3/docker-compose.yml up -d   # Polar
+docker compose -f lnbits-docker-compose.yml up -d                # LNbits
+```
+
+If LNbits falls into `VoidWallet` / `VoidWallet cannot create invoices`, `docker compose up -d` may be a no-op; restart the LNbits process(es) and probe invoice creation as documented in [`docs/POLAR_LNBITS_SETUP.md`](./docs/POLAR_LNBITS_SETUP.md#lnbits-says-this-backend-does-nothing-voidwallet).
+
 ---
 
 ## Pivot: Offline work and non-software jobs
@@ -166,24 +177,31 @@ migrate -path migrations -database "$DATABASE_URL" up
 go run ./cmd/api
 ```
 
-Backend runs on `http://localhost:8080` by default.
+Backend runs on `http://localhost:8080` by default. Restart it after backend code changes.
 
 ### Frontend
 
 ```bash
 cd frontend
-cp .env.example .env.local   # set NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL
+cp .env.example .env.local   # set NEXT_PUBLIC_API_URL
 npm install
 npm run dev
 ```
 
 Frontend runs on `http://localhost:3000`.
 
+### Checks
+
+```bash
+cd backend && gofmt -w <changed-go-files> && go test ./internal/deals && go vet ./... && go test ./...
+cd frontend && npx tsc --noEmit && npm run build
+```
+
 ### Required environment variables
 
-At minimum the backend needs `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `LNBITS_URL`, `LNBITS_API_KEY`, and `LNBITS_ADMIN_KEY`. `LNBITS_ADMIN_KEY` is the router's **admin** key — it is required for the escrow money moves (settle/cancel/payout); the invoice key alone can only create the hold invoice. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (default 30 days) must comfortably exceed a deal's lifetime. `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` (default 6 hours) controls how often a background job reconciles stale open deals against LNbits. If webhook signing is enabled in LNbits, set `LNBITS_WEBHOOK_SECRET` to the wallet's webhook secret so the backend verifies the `LNbits-Signature` header. `OPERATOR_EMAILS` (comma-separated) promotes those accounts to arbitration operators at boot. Frontend needs `NEXT_PUBLIC_API_URL` pointed at the running backend; `NEXT_PUBLIC_WS_URL` is for real-time updates (the WebSocket server is not built yet). OpenTimestamps anchoring of CV entries is on by default against the public calendar pools; set `OTS_ESPLORA_URL` (e.g. `https://blockstream.info/api`) to also verify proofs against the live Bitcoin chain, and `OTS_UPGRADE_INTERVAL_SECONDS` to change the proof-upgrade worker cadence (default 6 hours). See [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) for a plain-English + jargon breakdown of the whole anchor/verify pipeline.
+At minimum the backend needs `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `LNBITS_URL`, `LNBITS_API_KEY`, and `LNBITS_ADMIN_KEY`. `LNBITS_ADMIN_KEY` is the router's **admin** key — it is required for the escrow money moves (settle/cancel/payout); the invoice key alone can only create the hold invoice. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (default 30 days) must comfortably exceed a deal's lifetime. `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` (default 6 hours) controls how often a background job reconciles stale open deals against LNbits. If webhook signing is enabled in LNbits, set `LNBITS_WEBHOOK_SECRET` to the wallet's webhook secret so the backend verifies the `LNbits-Signature` header. `OPERATOR_EMAILS` (comma-separated) promotes those accounts to arbitration operators at boot. Frontend needs `NEXT_PUBLIC_API_URL` pointed at the running backend. OpenTimestamps anchoring of CV entries is on by default against the public calendar pools; set `OTS_ESPLORA_URL` (e.g. `https://blockstream.info/api`) to also verify proofs against the live Bitcoin chain, and `OTS_UPGRADE_INTERVAL_SECONDS` to change the proof-upgrade worker cadence (default 6 hours). See [`docs/OTS_ANCHORING.md`](./docs/OTS_ANCHORING.md) for a plain-English + jargon breakdown of the whole anchor/verify pipeline.
 
-See `backend/.env.example` and `frontend/.env.example` for the full annotated list. For Lightning testing, run LNbits against a Bitcoin Core regtest node — do not point dev environments at mainnet. Any hold invoice drawn to a given wallet belongs to that wallet's pool, so use the dedicated Ganji wallet/keys and never paste an admin key somewhere public.
+See `backend/.env.example`, `frontend/.env.example`, and [`docs/ENVIRONMENT.md`](./docs/ENVIRONMENT.md) for the full annotated list. For Lightning testing, run LNbits against Polar/regtest LND — do not point dev environments at mainnet. Use dedicated wallet keys; never expose/paste admin keys.
 
 ---
 
@@ -199,4 +217,6 @@ Never edit a migration already applied to a shared environment — write a new o
 
 ## Status
 
-🚧 Pre-launch. See [`docs/BACKEND_STATUS.md`](./docs/BACKEND_STATUS.md) for what's built and [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) for workflow and team ownership. See [`docs/FRONTEND_REPORT.md`](./docs/FRONTEND_REPORT.md) for frontend implementation status.
+🚧 Pre-launch. See [`docs/BACKEND_STATUS.md`](./docs/BACKEND_STATUS.md) for what's built, [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) for bugs/limits, and [`docs/REFACTOR_SPLIT_PLAN.md`](./docs/REFACTOR_SPLIT_PLAN.md) for active refactor/bugfix tracking. For deal behavior, see [`docs/DEAL_LIFECYCLE.md`](./docs/DEAL_LIFECYCLE.md) and [`docs/MONEY_FLOW.md`](./docs/MONEY_FLOW.md).
+
+Recent hardening: BF-1 keeps settled-hold payout state when payout is refused/failed/ambiguous after settle (no unsafe resend/clear on ambiguous hold). If `POST /deals` returns 502, check backend logs and LNbits funding-source health before retrying.
