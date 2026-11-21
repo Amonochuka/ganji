@@ -63,8 +63,13 @@ Each package's purpose is documented in [`docs/ARCHITECTURE.md`](./docs/ARCHITEC
 | `/deals/new` | Create Deal | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc) |
 | `/deals/[id]` | Deal Detail | Full view, timeline, actions (submit/dispute/rotate/approve), share link, verification |
 | `/public/deals/[shareToken]` | Public Deal | Client-facing: invoice to pay, approve flow (no account needed) |
+| `/settings` | Settings | Profile, default payee invoice, password |
+| `/cv/[slug]` | Live CV | Public verified work and trust score |
+| `/cv/[slug]/verify/[entryId]` | Verify Entry | Work hash and OpenTimestamps verification |
+| `/operator/disputes` | Dispute Queue | Operator review and resolution |
+| `/operator/deals/[id]/reconcile` | Payout Reconciliation | Operator reconciliation of an uncertain payout |
 
-**Core Components:** `Button` (4 variants, 3 sizes), `Input`, `FormBanner`, `AuthShell`, `DealCard`, `format` utils
+**Core Components:** `Button` (4 variants, 3 sizes), `Input`, `PasswordInput`, `FormBanner`, `AuthShell`, `DealCard`, `StatusIcon`, `WalletLinkDialog`, `format` utils
 
 **API Client:** `lib/api/api-client.ts` — full TypeScript coverage for auth + all deal endpoints
 

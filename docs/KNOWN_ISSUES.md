@@ -41,32 +41,18 @@ funding changes — several notes below are historical and reflect the older
 
 ### Minor / Hardening
 
-**15. `/health` Ping ignores context timeout.**
-Fixed in `db.Open`'s `pingWithRetry` (now uses `PingContext` with a 3s timeout).
-The health handler already used `PingContext`.
+The following items in the original audit are fixed; they are retained here as
+history rather than active blockers:
 
-**16. Notifications.** Now sent to both freelancer and client via `notifyBoth`.
-Goroutines bounded by a semaphore (capacity 10).
-
-**17. Dead code / stale stubs.**
-`pkg/hash` and `pkg/sanitize` removed; `ErrPaymentNotPaid` removed.
-
-### Minor / Hardening (continued)
-
-**18. Orphaned files in storage.**
-Artifacts can now be deleted via `DELETE /deals/:dealID/artifacts/:artifactID`
-(blob removed too). Verifications/deals still lack deletion endpoints.
-
-**19. Preimage storage security.**
-Fixed: optional AES-GCM encryption at rest via `PREIMAGE_ENCRYPTION_KEY`
-(env). Plaintext retained when key unset (dev).
-
-**20. Slug generation collision handling.**
-Fixed: base slug checked first, then random 6-hex suffix (5 attempts) instead of
-100 sequential retries.
-
-**21. Unbounded notification goroutines.**
-Fixed: bounded by semaphore (capacity 10).
+- `/health` and DB startup use context-bounded `PingContext` checks.
+- Notifications are sent to both parties and bounded by a semaphore (capacity 10).
+- Removed dead `pkg/hash`, `pkg/sanitize`, and `ErrPaymentNotPaid` code.
+- Artifacts can be deleted with `DELETE /deals/:dealID/artifacts/:artifactID`;
+  there are no user-facing deal or verification deletion endpoints.
+- Preimages support optional AES-GCM encryption at rest. When
+  `PREIMAGE_ENCRYPTION_KEY` is unset, development deployments retain plaintext.
+- Slug generation checks the base slug then uses a random suffix (up to five
+  attempts).
 
 ## Not Built / Next
 
@@ -74,13 +60,12 @@ Fixed: bounded by semaphore (capacity 10).
 
 - **Arbitration (next): operator workflow polish.** The endpoints exist but
   there is no request–response round between arbiter and parties (evidence,
-  counter-claims), no notifications on dispute/resolution, and no audit
-  history beyond the single `resolved_by`/`resolved_at`.
+  counter-claims) and no audit history beyond the single
+  `resolved_by`/`resolved_at`. Notifications are sent on dispute, release, and
+  refund transitions.
 - **WebSocket** (`internal/websocket/`): stub — real-time deal updates planned.
-- **Deletion endpoints.** There is no user-facing way to delete a deal, an
-  artifact, or a verification — artifacts in particular accumulate forever.
-- **Refresh-token GC.** Hourly cleanup worker now removes expired/revoked rows;
-  table no longer grows unbounded.
+- **Deletion endpoints.** There is no user-facing way to delete a deal or a
+  verification. Users can delete artifacts, which also removes the stored blob.
 - **Structured logging.** Everything is `log.Printf`; no `slog` / leveled
   loggers / request correlation IDs.
 - **Hardening (future): `client_email` masking.** Already excluded from the

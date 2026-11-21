@@ -262,7 +262,7 @@ blockchain.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `OTS_ESPLORA_URL` | empty (offline only) | The "library": any esplora-compatible API (`https://blockstream.info/api`, your own mempool: `https://mempool.space/api`). Empty = receipts are checked offline only. |
+| `OTS_ESPLORA_URL` | empty at runtime (offline verification only) | The "library": any esplora-compatible API (`https://blockstream.info/api`, your own mempool: `https://mempool.space/api`). `backend/.env.example` sets Blockstream's API, so copying that example enables live-chain checks unless you clear the variable. |
 | `OTS_ESPLORA_TIMEOUT_SECONDS` | `10` | Per esplora request timeout. |
 | `OTS_UPGRADE_INTERVAL_SECONDS` | `21600` (6 h) | How often the worker asks calendars "mined yet?". Calendars mine on their own schedule, so this only needs to be faster than calendar cadence. |
 

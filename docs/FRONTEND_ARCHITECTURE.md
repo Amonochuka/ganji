@@ -64,13 +64,15 @@ app/
 
 ## API Client (`lib/api/api-client.ts`)
 
-Typed wrapper around `fetch` with two export styles:
+Compatibility barrel re-exporting `types.ts`, `session.ts`, and `client.ts`.
+The typed API wrapper around `fetch` supports two import styles:
 
 ```typescript
 // Functional API
 api.listDeals(token)
 api.createDeal(data, token)          // data may include milestones[]
 api.getDeal(id, token)
+api.checkPayment(id, token)          // GET /deals/:dealID/payment; freelancer accepted-hold check
 api.listArtifacts(id, token)
 api.uploadArtifact(id, kind, file, token)
 api.downloadArtifact(id, artifactId, token)
@@ -107,7 +109,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 
 - `login(credentials)` → `POST /auth/login`
 - `signup(data)` → `POST /auth/signup`
-- `logout()` → client-side only (revokes refresh token)
+- `logout()` → clears local auth state and stored tokens; it does not call the backend logout endpoint or revoke the refresh token
 - `getMe(token)` → `GET /auth/me` — returns user profile without tokens
 
 ### Deal Methods
@@ -147,8 +149,8 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - `DealStatus` — `"awaiting_payment" | "locked" | "work_submitted" | "reviewing" | "released" | "disputed" | "refunded"`
 - `MilestoneStatus` — `"pending" | "awaiting_payment" | "funded" | "in_progress" | "work_submitted" | "completed" | "released" | "exited" | "rejected" | "refunded" | "disputed"` (`released` = paid, `completed` = payout pending, `disputed`/`rejected` = hold stays in review)
 - `MilestoneView` — `id`, `title`, `amount_sats`, `order`, `status`, `invoice?`, `completed_at`, `created_at`
-- `DealView` — full deal with all fields except `preimage`, `payee_invoice`, `verified_at` (redacted); in milestone mode `invoice`/`checking_id`/`status` mirror the active milestone — use `listMilestones` for per-milestone truth
-- `PublicDeal` — limited view: `title`, `amount_sats`, `source_platform`, `invoice`, `status`, `dispute_reason`, `created_at`, `milestones?`
+- `DealView` — authenticated safe view. It includes `preimage_hash` and `verified_at`, but omits the raw `preimage`, `payee_invoice`, and internal payout tracking fields. It includes `payout_reset_available`; in milestone mode `invoice`/`checking_id`/`status` mirror the active milestone, so use `listMilestones` for per-milestone truth.
+- `PublicDeal` — share-link view: `title`, `amount_sats`, `source_platform`, `invoice`, `status`, `dispute_reason`, `created_at`, optional `milestones`, and optional `payout_reset_available`. It omits internal IDs, client/freelancer identity, preimage and payout destination.
 - `FundDealRequest` — `{wallet_url, wallet_key, milestone_id?}`; `GenerateInvoiceRequest` — `{wallet_url, wallet_key, amount_sats, memo?}`. Wallet URLs must be http/https hosts only (no userinfo/query/fragment, no allowlist); keys are never stored or logged.
 - `CreateDealRequest.milestones?` — `{title, amount_sats}[]`; when present, `amount_sats` on the deal is derived as the sum
 - `CVProfile` — `display_name`, `slug`, `trust_score`, `entries: CVEntry[]`
@@ -180,7 +182,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 ## Error Handling
 
 - `ApiError` class — wraps fetch errors with `message`, `status`, and `data`
-- All endpoints return `401` (unauth) or `403` (forbidden) for auth issues
+- Protected endpoints can return `401` for missing/invalid authentication and `403` for an authenticated user without access; public endpoints do not require auth
 - `404` for not-found deals, artifacts, verifications
 - `500` for unexpected server errors
 - UI shows vault-styled error banners inline
@@ -192,5 +194,6 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - Milestone status transitions mirrored from the same doc's milestone table (`released` = paid; `completed` = payout pending, never paid; `disputed`/`rejected` = hold stays in review)
 - UI disables actions invalid per state (e.g., freelancer cannot set `locked`/`released`/`disputed`/`refunded` status directly)
 - Freelancer-driven transitions: `locked → work_submitted`, `work_submitted → reviewing`. Work submission requires a `locked` deal; `awaiting_payment → work_submitted` is invalid.
+- Deal detail refresh controls are stage- and role-specific: the freelancer gets **Check Payment** while `awaiting_payment`, then **Check Escrow Status** while `locked`; after submission, **Check Freelancer Status** refreshes the recorded payout/deal state. The client gets **Check Escrow Status** while `awaiting_payment` and **Check Freelancer Status** after submission. These refresh controls do not resend payments.
 - Backend-only money states (`locked`, `released`, `disputed`, `refunded`) set by accepted-hold verification, approve, dispute, and arbitration; milestone `released` is set only by the canonical payout path and can never be set without escrow ("fund it first")
 - Approve/release reveals R and pays the freelancer directly; rejecting after `work_submitted` reveals no R and leaves the hold untouched; arbiter reveals R to pay or cancels/waits for expiry to refund (refund never uses R).

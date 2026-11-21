@@ -59,12 +59,16 @@ Next.js 16 (App Router) + TypeScript + Tailwind v4 frontend for the Ganji Lightn
 
 ## API Client
 
-`lib/api/api-client.ts` — central fetch wrapper with:
+`lib/api/api-client.ts` is a compatibility barrel. The implementation is split
+between `lib/api/client.ts` (API methods), `lib/api/session.ts` (fetch, token
+refresh, and `ApiError`), and `lib/api/types.ts` (request/response types).
+The `api` object provides:
 
 ```typescript
 api.listDeals(token)
 api.createDeal(data, token)
 api.getDeal(id, token)
+api.checkPayment(id, token)
 api.listArtifacts(id, token)
 api.uploadArtifact(id, kind, file, token)
 api.downloadArtifact(id, artifactId, token)
@@ -81,7 +85,7 @@ api.publicApproveDeal(shareToken)
 api.publicResetPayout(shareToken, milestoneId?)
 ```
 
-Full TypeScript interfaces for all requests/responses: `DealView`, `DealStatus`, `PublicDeal`, `CreateDealRequest`, etc.
+Full TypeScript interfaces for all requests/responses: `DealView`, `DealStatus`, `PublicDeal`, `CreateDealRequest`, etc. `logout()` currently clears client-side state and local storage; although the backend has a logout endpoint, the frontend does not call it.
 
 ## Local Development
 
@@ -97,6 +101,12 @@ server from another device; it detects the current private-LAN IP/hostname on
 every start, so Wi-Fi changes do not require editing `.env.local`. Stop any
 existing `npm run dev` process first—Next.js allows only one dev server per
 project directory.
+
+For a phone/tablet, set `NEXT_PUBLIC_API_URL` to the computer's reachable LAN
+address and backend port (for example, `http://192.168.1.149:8080`) before
+starting Next.js. `localhost` on the phone points to the phone itself, and
+`dev:lan` only configures Next.js dev origins; it does not rewrite the API URL.
+The backend must also allow the browser origin through its CORS configuration.
 
 ## Build
 

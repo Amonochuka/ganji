@@ -1,6 +1,6 @@
 # Ganji Frontend — Implementation Report
 
-**Last updated:** 2026-11-18<br>
+**Last updated:** 2026-11-22<br>
 **Branch:** main  
 **Commit:** post-`22c915b` (milestone redesign + accepted-hold funding)
 
@@ -15,7 +15,7 @@
 | **Signup** | `/signup` | Registration with validation, redirects to dashboard | `POST /auth/signup` |
 | **Dashboard** | `/dashboard` | Authenticated deal list with status cards, empty state, create CTA | `GET /deals` |
 | **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title + sats each); generate the freelancer payout invoice from a linked wallet | `POST /deals` (with `milestones[]`), `POST /deals/wallet/invoice` |
-| **Deal Detail** | `/deals/[id]` | Full deal view, timeline, actions (submit/dispute/rotate), share link, verification status; milestone list + per-milestone actions incl. symmetric exit | `GET /deals/:id`, `POST /submit`, `POST /dispute`, `POST /share-link`, `POST /approve`, `POST /exit`, milestone endpoints |
+| **Deal Detail** | `/deals/[id]` | Full deal view, timeline, deliverables, share link, milestone actions and stage-specific payment/escrow/payout status refresh controls | `GET /deals/:id`, `GET /deals/:id/payment`, submit/dispute/share/approve/exit, artifact and milestone endpoints |
 | **Public Deal** | `frontend/src/app/public/deals/[shareToken]/page.tsx` | Client-facing view: fund buttons on the deal and each milestone using a linked wallet, invoice to pay, approve/reset/accept/reject/exit actions wired to public endpoints; `locked` shown as "Funds Held" | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/fund`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/payout/reset`, public milestone actions |
 
 ---
@@ -43,7 +43,7 @@
 **Auth:**
 - `login(credentials)` → `POST /auth/login`
 - `signup(data)` → `POST /auth/signup` (fixed from `/register`)
-- `logout()` → client-side only
+- `logout()` → clears client-side auth state and local storage; the frontend does not call backend `POST /auth/logout`
 
 **Deals:**
 - `listDeals(token)` → `GET /deals`
@@ -183,10 +183,10 @@ frontend/
 
 - [x] `docs/FRONTEND_ARCHITECTURE.md` — Routing, auth flow, state management, and fund/invoice endpoints are documented
 - [x] `docs/FRONTEND_REPORT.md` — This report is current with accepted-hold funding and status icons
-- [ ] `README.md` — Add frontend setup, env vars (including `LND_REST_*`), page overview
-- [ ] `frontend/README.md` — Component library, design tokens, API client usage
-- [ ] `docs/DEAL_LIFECYCLE.md` — Map UI states to backend status transitions
-- [ ] `AGENTS.md` — Update with new component patterns
+- [x] `README.md` — Frontend routes and major component overview
+- [x] `frontend/README.md` — Component library, design tokens, API client modules and local setup
+- [x] `docs/DEAL_LIFECYCLE.md` — UI state transitions are mapped to backend lifecycle rules
+- [x] `frontend/AGENTS.md` — Component and API client patterns are documented
 
 ---
 
