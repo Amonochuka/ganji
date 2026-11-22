@@ -215,8 +215,12 @@ export const api = {
     return this.post<{ message: string; deal: DealView }>(`/disputes/${dealId}/resolve`, { resolution }, token);
   },
 
-  reconcileDeal(dealId: string, action: "confirm_payout" | "reset_payout", payoutCheckingId: string | undefined, token: string) {
-    return this.post<{ deal: DealView }>(`/deals/${dealId}/reconcile`, { action, payout_checking_id: payoutCheckingId }, token);
+  reconcileMilestonePayout(dealId: string, milestoneId: string, action: "confirm_payout" | "reset_payout", payoutCheckingId: string | undefined, token: string) {
+    return this.post<{ milestone: MilestoneView; milestone_id: string; status: string }>(
+      `/deals/${dealId}/milestones/${milestoneId}/reconcile`,
+      { action, payout_checking_id: payoutCheckingId },
+      token,
+    );
   },
 
   // Milestones

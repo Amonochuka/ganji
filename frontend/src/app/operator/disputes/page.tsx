@@ -111,7 +111,7 @@ export default function OperatorDisputesPage() {
                       Refund to client
                     </Button>
                     <Link href={`/operator/deals/${d.id}/reconcile`}>
-                      <Button variant="ghost" size="sm">Reconcile</Button>
+                      <Button variant="ghost" size="sm">Reconcile payout</Button>
                     </Link>
                   </div>
                 </div>
