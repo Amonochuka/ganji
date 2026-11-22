@@ -219,7 +219,7 @@ func (r *Repository) UpdateMilestoneEscrow(ctx context.Context, m *Milestone) er
 	if err != nil {
 		return fmt.Errorf("repository: encrypt milestone preimage: %w", err)
 	}
-	_, err = r.q.ExecContext(ctx, `UPDATE milestones SET preimage_hash=$1, preimage=$2, payee_invoice=$3, invoice=$4, checking_id=$5, status=$6, funded_at=CASE WHEN $6 IN ('funded','in_progress') THEN COALESCE(funded_at,NOW()) ELSE funded_at END WHERE id=$7;`,
+	_, err = r.q.ExecContext(ctx, `UPDATE milestones SET preimage_hash=$1, preimage=$2, payee_invoice=$3, invoice=$4, checking_id=$5, status=$6::text::milestone_status, funded_at=CASE WHEN $6::text IN ('funded','in_progress') THEN COALESCE(funded_at,NOW()) ELSE funded_at END WHERE id=$7;`,
 		nullString(m.PreimageHash), nullString(enc), nullString(m.PayeeInvoice), nullString(m.Invoice), nullString(m.CheckingID), m.Status, m.ID)
 	if err != nil {
 		return fmt.Errorf("repository: update milestone escrow: %w", err)
