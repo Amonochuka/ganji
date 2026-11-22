@@ -84,7 +84,7 @@ Must be reliable enough for UX but must not break money-path correctness (curren
 _Last updated: 2026-11-18 (branch `main`, post-`22c915b`; accepted-hold funding added)_
 
 ### Done
-- **Fresh migration (not in prod):** consolidated into `backend/migrations/000008_create_milestones_table.up.sql/.down.sql` only (no `000009/000010` patch files; harmonized into `000008`). Creates `milestones` with full per-milestone escrow/status columns (includes `disputed`) and makes `deals.preimage_hash`/`deals.invoice` nullable for milestone mode.
+- **Fresh migration (not in prod):** consolidated into `backend/migrations/000008_create_milestones_table.up.sql/.down.sql` only (legacy patch migration files harmonized into `000008`). Creates `milestones` with full per-milestone escrow/status columns (includes `disputed`) and makes `deals.preimage_hash`/`deals.invoice` nullable for milestone mode.
 - **Domain/repo:** `types.go`, `interface_types.go`, `repository.go`, `errors.go` — milestone statuses/transitions (incl. `disputed`), CRUD, escrow/payout tracking fields.
 - **Sequential escrow (core path wired):** `CreateDealWithMilestones` creates milestones, skips total upfront deal hold, **funds M1** (`FundMilestone` → hold invoice). Legacy single-hold flow preserved when `milestones` empty.
 - **Accepted-hold funding (current):** public `FundDeal` pays the hold from a client-supplied linked wallet and locks the deal only after LND on Es verifies the accepted hold; `paid=true` alone is not enough, and a missing checker returns 503. Payout invoices are generated through `POST /deals/wallet/invoice`. Tests in `service_test.go` / `milestone_service_test.go` cover lock, refusal, checker requirement, and linked-wallet calls.
