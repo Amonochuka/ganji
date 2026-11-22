@@ -24,4 +24,5 @@ CREATE TABLE milestones (
 CREATE INDEX idx_milestones_deal ON milestones(deal_id);
 
 ALTER TABLE artifacts ADD COLUMN milestone_id UUID REFERENCES milestones(id) ON DELETE SET NULL;
+CREATE INDEX idx_artifacts_milestone ON artifacts(milestone_id);
 ALTER TABLE verifications ADD COLUMN milestone_id UUID REFERENCES milestones(id) ON DELETE SET NULL;
