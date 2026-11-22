@@ -270,7 +270,7 @@ In milestone mode the endpoint releases the **active milestone's** hold via the 
 
 Public. Clears an internal payout-attempt marker when LNbits definitively refused a payout before sending it. This is a recovery action after failures such as an insufficient fee reserve; it **does not move money, settle/cancel escrow, or change deal/milestone status**. The share token is the authorization.
 
-Body is optional; omit or send `{"milestone_id": ""}` to clear the deal-level marker. Send `{"milestone_id": "<uuid>"}` to clear one milestone marker. Only non-terminal release-eligible states with `payout_attempted_at` set and no `payout_checking_id` are resettable. If a payout checking ID exists, the payout may have been sent and must be reconciled by an operator instead.
+Body is optional; send `{"milestone_id":"<uuid>"}` to target a specific milestone. If omitted, the service clears the single resettable milestone attempt when unambiguous. Only non-terminal release-eligible milestone states with `payout_attempted_at` set and no `payout_checking_id` are resettable. If a payout checking ID exists, the payout may have been sent and must be reconciled by an operator instead.
 
 **Response `200`**
 ```json

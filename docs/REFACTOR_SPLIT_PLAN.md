@@ -144,7 +144,7 @@ Stop after any step if verification fails or scope drifts.
 - Tests: update/add coverage for per-milestone expiry/funding windows and no auto-cancel after funded.
 - Docs: update lifecycle/env/API docs to reflect per-milestone timing.
 
-**Status (2026-11-22): implemented (per-milestone hold expiry).** `delivery_days` is collected per milestone (1–3650 days, default 7), stored in DB, and visible to both participants. Milestone hold invoices are created with `expiry = delivery_days * 86400` from that hold's creation time (M1 at deal creation, M2+ when fundable/funded). `due_at` is derived from `funded_at + delivery_days` after funding. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` is fallback/default for holds without per-milestone expiry. Sweep reconciles open deals by LNbits status (`UNPAID/EXPIRED/CANCELLED`) without a global age cutoff, because hold expiries now vary. See API reference and migration `000010`.
+**Status (2026-11-22): implemented (per-milestone hold expiry).** `delivery_days` is collected per milestone (1–3650 days, default 7), stored in DB, and visible to both participants. Milestone hold invoices are created with `expiry = delivery_days * 86400` from that hold's creation time (M1 at deal creation, M2+ when fundable/funded). `due_at` is derived from `funded_at + delivery_days` after funding. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` is fallback/default for holds without per-milestone expiry. Sweep reconciles open deals by LNbits status (`UNPAID/EXPIRED/CANCELLED`) without a global age cutoff, because hold expiries now vary. See API reference and migration `000008`.
 
 
 ## UI ideas / UX improvements (tracked)
