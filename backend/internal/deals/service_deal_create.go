@@ -2,15 +2,10 @@ package deals
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
 	"time"
-
-	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
 func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
@@ -42,32 +37,32 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		deal.Status = StatusAwaitingPayment
 	}
 
-	milestoneMode := len(milestones) > 0
-	if milestoneMode {
-		var total int64
-		for i, mi := range milestones {
-			if mi.DeliveryDays == 0 {
-				milestones[i].DeliveryDays = 7 // compatibility default for older API clients
-			} else if mi.DeliveryDays < 1 || mi.DeliveryDays > 3650 {
-				return fmt.Errorf("%w: milestone delivery days must be between 1 and 3650", ErrInvalidInput)
-			}
-			if strings.TrimSpace(mi.Title) == "" || mi.AmountSats <= 0 {
-				return fmt.Errorf("%w: each milestone needs a title and positive amount", ErrInvalidInput)
-			}
-			milestones[i].Title = strings.TrimSpace(mi.Title)
-			total += mi.AmountSats
-		}
-		deal.AmountSats = total
-		// No single upfront deal hold in sequential per-milestone mode.
-		deal.PreimageHash = ""
-		deal.Preimage = ""
-		deal.Invoice = ""
-		deal.CheckingID = ""
-	} else {
+	if len(milestones) == 0 {
 		if deal.AmountSats <= 0 {
 			return fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
 		}
+		milestones = []MilestoneInput{{Title: deal.Title, AmountSats: deal.AmountSats, DeliveryDays: 7}}
 	}
+
+	var total int64
+	for i, mi := range milestones {
+		if mi.DeliveryDays == 0 {
+			milestones[i].DeliveryDays = 7
+		} else if mi.DeliveryDays < 1 || mi.DeliveryDays > 3650 {
+			return fmt.Errorf("%w: milestone delivery days must be between 1 and 3650", ErrInvalidInput)
+		}
+		if strings.TrimSpace(mi.Title) == "" || mi.AmountSats <= 0 {
+			return fmt.Errorf("%w: each milestone needs a title and positive amount", ErrInvalidInput)
+		}
+		milestones[i].Title = strings.TrimSpace(mi.Title)
+		total += mi.AmountSats
+	}
+	deal.AmountSats = total
+	// Deal-level escrow fields mirror the active milestone; no single upfront hold.
+	deal.PreimageHash = ""
+	deal.Preimage = ""
+	deal.Invoice = ""
+	deal.CheckingID = ""
 
 	shareToken, err := generateShareToken()
 	if err != nil {
@@ -75,55 +70,24 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	}
 	deal.ShareToken = shareToken
 
-	var first *Milestone
-	if milestoneMode && len(milestones) > 0 {
-		first = &Milestone{
-			Title:        milestones[0].Title,
-			AmountSats:   milestones[0].AmountSats,
-			DeliveryDays: milestones[0].DeliveryDays,
-			Order:        1,
-			Status:       MilestonePending,
-		}
-		if err := s.prepareMilestoneHold(ctx, deal, first); err != nil {
-			return err
-		}
-		deal.Invoice = first.Invoice
-		deal.CheckingID = first.CheckingID
-		deal.Status = StatusAwaitingPayment
-	} else if !milestoneMode {
-		preimage := make([]byte, 32)
-		if _, err := rand.Read(preimage); err != nil {
-			return fmt.Errorf("generating escrow preimage: %w", err)
-		}
-		hash := sha256.Sum256(preimage)
-		deal.Preimage = hex.EncodeToString(preimage[:])
-		deal.PreimageHash = hex.EncodeToString(hash[:])
-
-		hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
-			Out:         false,
-			Amount:      deal.AmountSats,
-			Memo:        deal.Title,
-			PaymentHash: deal.PreimageHash,
-		})
-		if err != nil {
-			s.cancelOrphanHold(ctx, deal.PreimageHash)
-			return fmt.Errorf("creating LNBits hold invoice: %w", err)
-		}
-		if hold.PaymentHash != deal.PreimageHash {
-			s.cancelOrphanHold(ctx, deal.PreimageHash)
-			return fmt.Errorf("creating LNBits hold invoice: provider returned a payment hash that does not match the escrow preimage")
-		}
-		deal.Invoice = hold.PaymentRequest
-		deal.CheckingID = hold.CheckingID
+	first := &Milestone{
+		Title:        milestones[0].Title,
+		AmountSats:   milestones[0].AmountSats,
+		DeliveryDays: milestones[0].DeliveryDays,
+		Order:        1,
+		Status:       MilestonePending,
 	}
+	if err := s.prepareMilestoneHold(ctx, deal, first); err != nil {
+		return err
+	}
+	deal.Invoice = first.Invoice
+	deal.CheckingID = first.CheckingID
+	deal.Status = StatusAwaitingPayment
 
 	tx, err := s.repo.BeginTx(ctx)
 	if err != nil {
-		if first != nil && first.PreimageHash != "" {
+		if first.PreimageHash != "" {
 			s.cancelOrphanHold(ctx, first.PreimageHash)
-		}
-		if deal.PreimageHash != "" {
-			s.cancelOrphanHold(ctx, deal.PreimageHash)
 		}
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -131,18 +95,15 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	repo := s.repo.WithTx(tx)
 
 	if err := repo.CreateDeal(ctx, deal); err != nil {
-		if first != nil && first.PreimageHash != "" {
+		if first.PreimageHash != "" {
 			s.cancelOrphanHold(ctx, first.PreimageHash)
-		}
-		if deal.PreimageHash != "" {
-			s.cancelOrphanHold(ctx, deal.PreimageHash)
 		}
 		return err
 	}
 
 	for i, mi := range milestones {
 		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays, Order: i + 1, Status: MilestonePending}
-		if i == 0 && first != nil {
+		if i == 0 {
 			*m = *first
 			m.DealID = deal.ID
 		}
@@ -150,38 +111,26 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 			if m.PreimageHash != "" {
 				s.cancelOrphanHold(ctx, m.PreimageHash)
 			}
-			if deal.PreimageHash != "" {
-				s.cancelOrphanHold(ctx, deal.PreimageHash)
-			}
 			return err
 		}
 		if i == 0 {
 			if err := repo.UpdateMilestoneEscrow(ctx, m); err != nil {
 				s.cancelOrphanHold(ctx, m.PreimageHash)
-				if deal.PreimageHash != "" {
-					s.cancelOrphanHold(ctx, deal.PreimageHash)
-				}
 				return err
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		if deal.PreimageHash != "" {
-			s.cancelOrphanHold(ctx, deal.PreimageHash)
-		}
-		if first != nil && first.PreimageHash != "" {
+		if first.PreimageHash != "" {
 			s.cancelOrphanHold(ctx, first.PreimageHash)
 		}
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 
-	if first != nil {
-		deal.Invoice = first.Invoice
-		deal.CheckingID = first.CheckingID
-		deal.Status = StatusAwaitingPayment
-	}
-
+	deal.Invoice = first.Invoice
+	deal.CheckingID = first.CheckingID
+	deal.Status = StatusAwaitingPayment
 	return nil
 }
 

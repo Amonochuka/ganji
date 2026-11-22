@@ -86,7 +86,10 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 			return nil, fmt.Errorf("%w: submit requires at least one artifact", ErrInvalidInput)
 		}
 		if ms[idx].Status != MilestoneWorkSubmitted && ms[idx].Status != MilestoneReleased && ms[idx].Status != MilestoneCompleted {
-			_ = s.repo.UpdateMilestoneStatus(ctx, ms[idx].ID, MilestoneWorkSubmitted, nil)
+			if err := s.repo.UpdateMilestoneStatus(ctx, ms[idx].ID, MilestoneWorkSubmitted, nil); err != nil {
+				return nil, fmt.Errorf("update milestone status: %w", err)
+			}
+			ms[idx].Status = MilestoneWorkSubmitted
 		}
 		deal.Status = StatusWorkSubmitted
 		_ = s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted)

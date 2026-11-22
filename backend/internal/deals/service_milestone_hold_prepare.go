@@ -69,26 +69,25 @@ func (s *Service) refreshMilestonePayment(ctx context.Context, m *Milestone) err
 	if m.CheckingID == "" || m.Status != MilestoneAwaitingPayment {
 		return nil
 	}
-	payment, err := s.lnbits.CheckPayment(ctx, m.CheckingID)
+	if _, err := s.lnbits.CheckPayment(ctx, m.CheckingID); err != nil {
+		return err
+	}
+	if s.acceptedHolds == nil || m.PreimageHash == "" {
+		return ErrVerificationUnavailable
+	}
+
+	accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, m.PreimageHash, m.AmountSats)
 	if err != nil {
 		return err
 	}
-
-	funded := payment.Paid
-	if !funded && s.acceptedHolds != nil && m.PreimageHash != "" {
-		funded, err = s.acceptedHolds.IsAcceptedHold(ctx, m.PreimageHash, m.AmountSats)
-		if err != nil {
-			return err
-		}
+	if !accepted {
+		return nil
 	}
 
-	if funded {
-		m.Status = MilestoneFunded
-		if err := s.repo.UpdateMilestoneEscrow(ctx, m); err == nil {
-			// best-effort: move to in_progress if it was just funded
-			_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneInProgress, nil)
-			m.Status = MilestoneInProgress
-		}
+	m.Status = MilestoneFunded
+	if err := s.repo.UpdateMilestoneEscrow(ctx, m); err == nil {
+		_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneInProgress, nil)
+		m.Status = MilestoneInProgress
 	}
 	return nil
 }

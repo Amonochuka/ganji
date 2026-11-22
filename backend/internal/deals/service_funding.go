@@ -36,6 +36,14 @@ func (s *Service) FundDeal(ctx context.Context, shareToken, milestoneID, walletU
 	unlock := s.lockFund(deal.ID)
 	defer unlock()
 
+	ms, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ms) == 0 {
+		return nil, fmt.Errorf("%w: deal has no milestones", ErrInvalidTransition)
+	}
+
 	if milestoneID != "" {
 		m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
 		if err != nil {
@@ -44,19 +52,12 @@ func (s *Service) FundDeal(ctx context.Context, shareToken, milestoneID, walletU
 		return s.fundMilestoneHold(ctx, deal, shareToken, m, endpoint, key)
 	}
 
-	ms, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
-	if err != nil {
-		return nil, err
-	}
 	for i := range ms {
 		if ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending {
 			return s.fundMilestoneHold(ctx, deal, shareToken, &ms[i], endpoint, key)
 		}
 	}
-	if len(ms) > 0 {
-		return nil, fmt.Errorf("%w: no milestone is awaiting payment", ErrInvalidTransition)
-	}
-	return s.fundDealHold(ctx, deal, shareToken, endpoint, key)
+	return nil, fmt.Errorf("%w: no milestone is awaiting payment", ErrInvalidTransition)
 }
 
 func (s *Service) fundMilestoneHold(ctx context.Context, deal *Deal, shareToken string, m *Milestone, walletURL, walletKey string) (*PublicDeal, error) {
@@ -137,50 +138,4 @@ func (s *Service) waitForAcceptedHold(ctx context.Context, paymentHash string, a
 		return false, lastErr
 	}
 	return false, nil
-}
-
-func (s *Service) fundDealHold(ctx context.Context, deal *Deal, shareToken, walletURL, walletKey string) (*PublicDeal, error) {
-	if deal.Status == StatusLocked {
-		return s.GetPublicDeal(ctx, shareToken)
-	}
-	if deal.Status != StatusAwaitingPayment {
-		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, deal.Status, StatusLocked)
-	}
-	if deal.CheckingID == "" {
-		return nil, fmt.Errorf("%w: deal has no escrow invoice", ErrInvalidInput)
-	}
-	if err := s.refreshPaymentStatus(ctx, deal); err != nil {
-		return nil, fmt.Errorf("checking escrow hold: %w", err)
-	}
-	if deal.Status == StatusLocked {
-		return s.GetPublicDeal(ctx, shareToken)
-	}
-	wallet := lnbits.NewClient(lnbits.Config{URL: walletURL, AdminKey: walletKey})
-	if _, err := wallet.PayInvoice(ctx, deal.Invoice); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrWalletPaymentFailed, err)
-	}
-	accepted, err := s.waitForAcceptedHold(ctx, deal.PreimageHash, deal.AmountSats)
-	if err != nil {
-		return nil, fmt.Errorf("verifying accepted hold: %w", err)
-	}
-	if !accepted {
-		return nil, fmt.Errorf("%w: escrow node did not accept the hold", ErrInvalidTransition)
-	}
-	transitioned, err := s.repo.UpdateStatusIfCurrent(ctx, deal.ID, StatusAwaitingPayment, StatusLocked)
-	if err != nil {
-		return nil, err
-	}
-	if !transitioned {
-		current, getErr := s.repo.GetDealByID(ctx, deal.ID)
-		if getErr != nil {
-			return nil, getErr
-		}
-		if current.Status != StatusLocked {
-			return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, current.Status, StatusLocked)
-		}
-		return s.GetPublicDeal(ctx, shareToken)
-	}
-	deal.Status = StatusLocked
-	s.notifyPaymentLocked(deal)
-	return s.GetPublicDeal(ctx, shareToken)
 }

@@ -56,7 +56,7 @@ func TestDealResponsesRedactSecrets(t *testing.T) {
 			t.Errorf("deal response leaks %q: %s", secret, body)
 		}
 	}
-	for _, field := range []string{`"id":"deal-1"`, `"client_email":"client@example.com"`, `"status":"released"`, `"preimage_hash":"bb"`, `"share_token":"share-deal-1"`} {
+	for _, field := range []string{`"id":"deal-1"`, `"client_email":"client@example.com"`, `"preimage_hash":"bb"`, `"share_token":"share-deal-1"`} {
 		if !strings.Contains(body, field) {
 			t.Errorf("deal response missing %q: %s", field, body)
 		}

@@ -207,6 +207,7 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 		m2.PayoutCheckingID = payoutCheckingID
 	}
 	m2.CompletedAt = sql.NullTime{Time: now, Valid: true}
+	s.anchorReleasedDeal(ctx, deal)
 	return m2, nil
 }
 

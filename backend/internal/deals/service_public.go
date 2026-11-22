@@ -26,9 +26,6 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	if err != nil {
 		return nil, err
 	}
-	if deal.CheckingID != "" && deal.Status == StatusAwaitingPayment {
-		_ = s.refreshPaymentStatus(ctx, deal)
-	}
 	ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
 	for i := range ms {
 		_ = s.refreshMilestonePayment(ctx, &ms[i])
