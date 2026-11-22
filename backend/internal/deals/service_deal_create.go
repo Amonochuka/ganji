@@ -159,7 +159,7 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 // with no DB row behind it. Best-effort: cancellation failure is logged, not
 // returned — the caller's original error is the one the client must see (and
 // the hold-expiry sweep is the backstop for anything left standing).
-func (s *Service) cancelOrphanHold(ctx context.Context, preimageHash string) {
+func (s *Service) cancelOrphanHold(_ context.Context, preimageHash string) {
 	cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := s.lnbits.CancelHold(cancelCtx, preimageHash); err != nil {

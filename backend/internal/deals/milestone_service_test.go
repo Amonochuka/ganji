@@ -65,7 +65,7 @@ func (m *milestoneLN) handler() http.Handler {
 			}
 			m.lastHoldExpiry = expiry
 			m.holdExpiries = append(m.holdExpiries, expiry)
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"checking_id":"chk-hold-%d","payment_hash":"%s","payment_request":"lnbc-hold","expiry":%d}`, atomic.LoadInt32(&m.createHoldCount), body["payment_hash"].(string), expiry)))
+			_, _ = w.Write(fmt.Appendf(nil, `{"checking_id":"chk-hold-%d","payment_hash":"%s","payment_request":"lnbc-hold","expiry":%d}`, atomic.LoadInt32(&m.createHoldCount), body["payment_hash"].(string), expiry))
 			return
 		}
 		atomic.AddInt32(&m.payCount, 1)
@@ -114,7 +114,7 @@ func (m *milestoneLN) handler() http.Handler {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"amount_msat":%d,"payment_hash":"dec"}`, amount)))
+		_, _ = w.Write(fmt.Appendf(nil, `{"amount_msat":%d,"payment_hash":"dec"}`, amount))
 	})
 	mux.HandleFunc("/api/v1/payments/settle", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&m.settleCount, 1)

@@ -16,10 +16,6 @@ type createMilestoneRequest struct {
 	DeliveryDays int    `json:"delivery_days"`
 }
 
-type listMilestonesResponse struct {
-	Milestones []MilestoneView `json:"milestones"`
-}
-
 func (h *Handler) CreateMilestone(c *gin.Context) {
 	userID := c.GetString("userID")
 	dealID := c.Param("dealID")
@@ -70,11 +66,6 @@ func (h *Handler) CreateMilestone(c *gin.Context) {
 type milestoneStatusUpdateRequest struct {
 	Status      string `json:"status" binding:"required"`
 	CompletedAt string `json:"completed_at,omitempty"` // ISO 8601 or empty
-}
-
-type updateMilestoneResponse struct {
-	Message   string        `json:"message"`
-	Milestone MilestoneView `json:"milestone"`
 }
 
 func (h *Handler) ListMilestones(c *gin.Context) {

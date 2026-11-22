@@ -708,7 +708,7 @@ func newLNbitsClientRaw(t *testing.T, handler http.HandlerFunc) *lnbits.Client {
 				}
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"amount_msat":%d,"payment_hash":"dec"}`, amount)))
+			_, _ = w.Write(fmt.Appendf(nil, `{"amount_msat":%d,"payment_hash":"dec"}`, amount))
 			return
 		}
 		if r.Method == http.MethodGet {
