@@ -42,6 +42,22 @@ func (s *Service) UpdatePayeeInvoice(ctx context.Context, userID, dealID, bolt11
 		return deal, nil
 	}
 
+	ms, err := s.repo.GetMilestonesByDeal(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ms) == 0 {
+		return nil, fmt.Errorf("%w: deal has no milestones", ErrInvalidTransition)
+	}
+	for i := range ms {
+		if ms[i].Status == MilestoneReleased || ms[i].Status == MilestoneRefunded || ms[i].Status == MilestoneExited {
+			continue
+		}
+		if err := s.validatePayeeInvoiceAmount(ctx, bolt11, ms[i].AmountSats); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := s.repo.UpdatePayeeInvoice(ctx, dealID, bolt11); err != nil {
 		return nil, fmt.Errorf("updating payee invoice: %w", err)
 	}

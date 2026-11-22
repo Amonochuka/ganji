@@ -16,7 +16,7 @@ func TestCreateDealReportsInvoiceFailureClearly(t *testing.T) {
 	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: "http://127.0.0.1:1", APIKey: "invoice-key"}))
 	router := newTestDealRouter(t, service, "freelancer-1", "freelancer@example.com")
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/deals", strings.NewReader(`{"title":"Build a site","amount_sats":5000,"source_platform":"telegram","client_email":"client@example.com","payee_invoice":"lnbc1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/deals", strings.NewReader(`{"title":"Build a site","amount_sats":5000,"source_platform":"telegram","client_email":"client@example.com","payee_invoice":"lnbc5000payee"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 
@@ -31,6 +31,11 @@ func TestCreateDealReportsInvoiceFailureClearly(t *testing.T) {
 func TestCreateDealReportsPersistenceFailureAndCancelsOrphanHold(t *testing.T) {
 	var cancelled bool
 	lnbitsServer := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/payments/decode" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"amount_msat":5000000,"payment_hash":"dec"}`))
+			return
+		}
 		if r.URL.Path == "/api/v1/payments/cancel" {
 			cancelled = true
 			w.Header().Set("Content-Type", "application/json")
@@ -53,7 +58,7 @@ func TestCreateDealReportsPersistenceFailureAndCancelsOrphanHold(t *testing.T) {
 	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: lnbitsServer.URL, APIKey: "invoice-key", AdminKey: "admin-key"}))
 	router := newTestDealRouter(t, service, "freelancer-1", "freelancer@example.com")
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/deals", strings.NewReader(`{"title":"Build a site","amount_sats":5000,"source_platform":"telegram","client_email":"client@example.com","payee_invoice":"lnbc1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/deals", strings.NewReader(`{"title":"Build a site","amount_sats":5000,"source_platform":"telegram","client_email":"client@example.com","payee_invoice":"lnbc5000payee"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 
@@ -71,6 +76,11 @@ func TestCreateDealReportsPersistenceFailureAndCancelsOrphanHold(t *testing.T) {
 func TestCreateDealCancelsInvoiceWhenLNbitsSuccessResponseIsIncomplete(t *testing.T) {
 	var cancelledHash string
 	lnbitsServer := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/payments/decode" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"amount_msat":5000000,"payment_hash":"dec"}`))
+			return
+		}
 		if r.URL.Path == "/api/v1/payments/cancel" {
 			var body struct {
 				PaymentHash string `json:"payment_hash"`
@@ -97,7 +107,7 @@ func TestCreateDealCancelsInvoiceWhenLNbitsSuccessResponseIsIncomplete(t *testin
 	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: lnbitsServer.URL, APIKey: "invoice-key", AdminKey: "admin-key"}))
 	router := newTestDealRouter(t, service, "freelancer-1", "freelancer@example.com")
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/deals", strings.NewReader(`{"title":"Build a site","amount_sats":5000,"source_platform":"telegram","client_email":"client@example.com","payee_invoice":"lnbc1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/deals", strings.NewReader(`{"title":"Build a site","amount_sats":5000,"source_platform":"telegram","client_email":"client@example.com","payee_invoice":"lnbc5000payee"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(resp, req)
 

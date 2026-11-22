@@ -84,10 +84,13 @@ func (s *Service) refreshMilestonePayment(ctx context.Context, m *Milestone) err
 		return nil
 	}
 
-	m.Status = MilestoneFunded
-	if err := s.repo.UpdateMilestoneEscrow(ctx, m); err == nil {
-		_ = s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneInProgress, nil)
-		m.Status = MilestoneInProgress
+	if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneFunded, nil); err != nil {
+		return err
 	}
+	if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneInProgress, nil); err != nil {
+		return err
+	}
+	m.Status = MilestoneInProgress
+	_, _ = s.repo.UpdateDealStatusFromMilestones(ctx, m.DealID)
 	return nil
 }

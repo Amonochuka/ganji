@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ type milestoneLN struct {
 	payErr               error             // forced PayInvoice error (e.g. refused vs ambiguous)
 	cancelErr            error             // forced CancelHold error
 	overridden           bool
+	decodeAmountMsat     int64 // default decoded payee amount; 0 means infer from string
 }
 
 func newMilestoneLN(t *testing.T) *milestoneLN {
@@ -68,9 +70,6 @@ func (m *milestoneLN) handler() http.Handler {
 		}
 		atomic.AddInt32(&m.payCount, 1)
 		if m.payErr != nil {
-			// PayInvoice with out:true returning 400 -> ErrPayoutRefused;
-			// 500 -> ambiguous. Map: ErrPayoutRefused sentinel -> 400,
-			// transport/500 -> 500.
 			if errors.Is(m.payErr, lnbits.ErrPayoutRefused) {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = w.Write([]byte(`{"ok":false,"error_message":"invoice expired"}`))
@@ -86,6 +85,36 @@ func (m *milestoneLN) handler() http.Handler {
 			m.payoutStatusByID[id] = "SETTLED"
 		}
 		_, _ = w.Write([]byte(`{"checking_id":"` + id + `","payment_request":"lnbc-pay"}`))
+	})
+	mux.HandleFunc("/api/v1/payments/decode", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bolt11, _ := body["data"].(string)
+		amount := m.decodeAmountMsat
+		if amount == 0 {
+			switch {
+			case strings.Contains(bolt11, "5000"):
+				amount = 5000000
+			case strings.Contains(bolt11, "10000"):
+				amount = 10000000
+			case strings.Contains(bolt11, "3000"):
+				amount = 3000000
+			case strings.Contains(bolt11, "2000"):
+				amount = 2000000
+			case strings.Contains(bolt11, "1000"):
+				amount = 1000000
+			case strings.Contains(bolt11, "777"):
+				amount = 777000
+			case strings.Contains(bolt11, "500"):
+				amount = 500000
+			case strings.Contains(bolt11, "100"):
+				amount = 100000
+			default:
+				amount = 1000
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"amount_msat":%d,"payment_hash":"dec"}`, amount)))
 	})
 	mux.HandleFunc("/api/v1/payments/settle", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&m.settleCount, 1)
@@ -143,7 +172,7 @@ func escrowMilestone(dealID, id string, order int, status MilestoneStatus) *Mile
 		Status:       status,
 		Preimage:     "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44",
 		PreimageHash: "hash-" + id,
-		PayeeInvoice: "lnbc-payee",
+		PayeeInvoice: "lnbc1000payee",
 		Invoice:      "lnbc-hold",
 		CheckingID:   "chk-hold-" + id,
 	}
@@ -152,7 +181,7 @@ func escrowMilestone(dealID, id string, order int, status MilestoneStatus) *Mile
 func milestoneTestDeal(repo *fakeDealRepo, dealID string) *Deal {
 	deal := escrowDeal(repo, dealID, "freelancer-1", "client@example.com")
 	deal.Status = StatusWorkSubmitted
-	deal.PayeeInvoice = "lnbc-payee"
+	deal.PayeeInvoice = "lnbc1000payee"
 	for _, m := range repo.milestones {
 		if m.DealID == dealID {
 			m.Status = MilestoneWorkSubmitted
@@ -172,7 +201,7 @@ func TestCreateDealWithMilestonesFundsM1Only(t *testing.T) {
 		ClientEmail:    "client@example.com",
 		Title:          "Build a site",
 		SourcePlatform: "telegram",
-		PayeeInvoice:   "lnbc-payee",
+		PayeeInvoice:   "lnbc5000payee",
 	}
 	repo.deals[deal.ID] = deal
 	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
@@ -213,7 +242,7 @@ func TestFundMilestoneUsesPerMilestoneExpiry(t *testing.T) {
 	ln := newMilestoneLN(t)
 	service, _ := newMilestoneService(t, repo, ln)
 
-	deal := &Deal{ID: "deal-exp", FreelancerID: "f1", ClientEmail: "c@example.com", Title: "Job", SourcePlatform: "x", PayeeInvoice: "lnbc-payee"}
+	deal := &Deal{ID: "deal-exp", FreelancerID: "f1", ClientEmail: "c@example.com", Title: "Job", SourcePlatform: "x", PayeeInvoice: "lnbc1000payee"}
 	repo.deals[deal.ID] = deal
 	if err := service.CreateDealWithMilestones(context.Background(), deal, []MilestoneInput{{Title: "M1", AmountSats: 1000, DeliveryDays: 3}, {Title: "M2", AmountSats: 1000, DeliveryDays: 50}}); err != nil {
 		t.Fatalf("create: %v", err)
@@ -238,7 +267,7 @@ func TestCreateDealWithMilestonesDoesNotPersistOnHoldFailure(t *testing.T) {
 		ClientEmail:    "client@example.com",
 		Title:          "Build a site",
 		SourcePlatform: "telegram",
-		PayeeInvoice:   "lnbc-payee",
+		PayeeInvoice:   "lnbc5000payee",
 	}
 	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
 
@@ -264,7 +293,7 @@ func TestCreateDealWithMilestonesCancelsFirstHoldOnDBFailure(t *testing.T) {
 		ClientEmail:    "client@example.com",
 		Title:          "Build a site",
 		SourcePlatform: "telegram",
-		PayeeInvoice:   "lnbc-payee",
+		PayeeInvoice:   "lnbc5000payee",
 	}
 	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
 
@@ -808,7 +837,9 @@ func TestSubmitWorkMilestoneModeRequiresArtifact(t *testing.T) {
 	ln := newMilestoneLN(t)
 	service, _ := newMilestoneService(t, repo, ln)
 	deal := milestoneTestDeal(repo, "deal-1")
-	for k := range repo.milestones { delete(repo.milestones, k) }
+	for k := range repo.milestones {
+		delete(repo.milestones, k)
+	}
 	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneInProgress)
 	// No artifacts on the deal -> must fail with invalid input.
 	_, err := service.SubmitWork(context.Background(), "freelancer-1", deal.ID)
@@ -861,8 +892,8 @@ func TestDealViewIncludesMilestonesWithActiveMirror(t *testing.T) {
 	if view.Invoice != "lnbc-active" || view.CheckingID != "chk-active" {
 		t.Fatalf("expected active invoice/checking mirrored, got invoice=%q checking=%q", view.Invoice, view.CheckingID)
 	}
-	if view.Status != StatusWorkSubmitted {
-		t.Fatalf("expected mirrored work_submitted, got %s", view.Status)
+	if view.Status != StatusLocked {
+		t.Fatalf("expected mirrored locked, got %s", view.Status)
 	}
 	// MilestoneView must never carry preimage/payee secrets.
 	_ = full

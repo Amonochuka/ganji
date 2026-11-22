@@ -49,7 +49,9 @@ func (s *Service) dealViewWithMilestones(ctx context.Context, deal *Deal) DealVi
 			view.Status = StatusAwaitingPayment
 		case MilestoneDisputed, MilestoneRejected:
 			view.Status = StatusDisputed
-		case MilestoneWorkSubmitted, MilestoneCompleted, MilestoneFunded, MilestoneInProgress:
+		case MilestoneFunded, MilestoneInProgress:
+			view.Status = StatusLocked
+		case MilestoneWorkSubmitted, MilestoneCompleted:
 			view.Status = StatusWorkSubmitted
 		}
 	}

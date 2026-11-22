@@ -440,6 +440,11 @@ func TestCreateDealCreatesHoldInvoice(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode lnbits request: %v", err)
 		}
+		if r.URL.Path == "/api/v1/payments/decode" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"amount_msat":5000000,"payment_hash":"dec"}`))
+			return
+		}
 		received.out = body["out"].(bool)
 		received.amount = int64(body["amount"].(float64))
 		received.memo = body["memo"].(string)
@@ -508,7 +513,11 @@ func TestCreateDealCancelsHoldOnInsertFailure(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode lnbits request: %v", err)
 		}
-
+		if r.URL.Path == "/api/v1/payments/decode" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"amount_msat":5000000,"payment_hash":"dec"}`))
+			return
+		}
 		if r.URL.Path == "/api/v1/payments/cancel" {
 			if r.Header.Get("X-Api-Key") == "" {
 				t.Error("expected admin key on cancel")
@@ -664,7 +673,7 @@ func escrowDeal(repo *fakeDealRepo, id, freelancerID, clientEmail string) *Deal 
 		Status:       StatusLocked,
 		Preimage:     "aa",
 		PreimageHash: "bb",
-		PayeeInvoice: "lnbcpayee",
+		PayeeInvoice: "lnbc5000payee",
 		CheckingID:   "bb",
 		AmountSats:   5000,
 	}
@@ -687,6 +696,21 @@ func newLNbitsClientRaw(t *testing.T, handler http.HandlerFunc) *lnbits.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Helper()
+		if r.URL.Path == "/api/v1/payments/decode" {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			bolt11, _ := body["data"].(string)
+			amount := int64(1000)
+			for _, n := range []int64{10000, 5000, 3000, 2000, 1000, 777, 500, 100} {
+				if strings.Contains(bolt11, fmt.Sprint(n)) {
+					amount = n * 1000
+					break
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"amount_msat":%d,"payment_hash":"dec"}`, amount)))
+			return
+		}
 		if r.Method == http.MethodGet {
 			if got := r.Header.Get("X-Api-Key"); got != "invoice-key" {
 				t.Errorf("expected invoice key for %s, got %q", r.URL.Path, got)
@@ -766,7 +790,7 @@ func TestApproveDealAsClient(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode pay body: %v", err)
 			}
-			if req["out"] != true || req["bolt11"] != "lnbcpayee" {
+			if req["out"] != true || req["bolt11"] != "lnbc5000payee" {
 				t.Errorf("unexpected payout request: %v", req)
 			}
 			paidOut = true

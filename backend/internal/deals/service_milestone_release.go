@@ -135,6 +135,10 @@ func (s *Service) ReleaseMilestone(ctx context.Context, deal *Deal, milestoneID 
 		if payee == "" {
 			payee = deal.PayeeInvoice
 		}
+		if err := s.validatePayeeInvoiceAmount(ctx, payee, m.AmountSats); err != nil {
+			_ = s.repo.ClearMilestonePayoutTracking(ctx, m.ID)
+			return nil, fmt.Errorf("%w: %v", ErrPayoutFailed, err)
+		}
 		id, err := s.lnbits.PayInvoice(ctx, payee)
 		if err != nil {
 			if errors.Is(err, lnbits.ErrPayoutRefused) {

@@ -58,6 +58,26 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		total += mi.AmountSats
 	}
 	deal.AmountSats = total
+	// Validate payee invoice decodability; if all milestones share the same amount,
+	// require exact match now. Different-amount milestones are validated at payout time.
+	if len(milestones) > 0 {
+		sameAmount := true
+		for i := 1; i < len(milestones); i++ {
+			if milestones[i].AmountSats != milestones[0].AmountSats {
+				sameAmount = false
+				break
+			}
+		}
+		if sameAmount {
+			if err := s.validatePayeeInvoiceAmount(ctx, deal.PayeeInvoice, milestones[0].AmountSats); err != nil {
+				return err
+			}
+		} else {
+			if err := s.validatePayeeInvoiceDecodable(ctx, deal.PayeeInvoice); err != nil {
+				return err
+			}
+		}
+	}
 	// Deal-level escrow fields mirror the active milestone; no single upfront hold.
 	deal.PreimageHash = ""
 	deal.Preimage = ""
