@@ -111,8 +111,9 @@ type PublicMilestoneAction struct {
 }
 
 type MilestoneInput struct {
-	Title      string `json:"title"`
-	AmountSats int64  `json:"amount_sats"`
+	Title        string `json:"title"`
+	AmountSats   int64  `json:"amount_sats"`
+	DeliveryDays int    `json:"delivery_days"`
 }
 
 // DealView is the safe authed view of a deal. It is what every authenticated
@@ -320,6 +321,8 @@ type Milestone struct {
 	Order             int             `json:"order"`
 	Status            MilestoneStatus `json:"status"`
 	CompletedAt       sql.NullTime    `json:"completed_at,omitempty"`
+	DeliveryDays      int             `json:"delivery_days"`
+	FundedAt          sql.NullTime    `json:"funded_at,omitempty"`
 	CreatedAt         time.Time       `json:"created_at"`
 	PreimageHash      string          `json:"preimage_hash,omitempty"`
 	Preimage          string          `json:"preimage,omitempty"`

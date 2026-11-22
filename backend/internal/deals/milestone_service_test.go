@@ -2,6 +2,7 @@ package deals
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
@@ -22,6 +24,8 @@ type milestoneLN struct {
 	payCount             int32
 	cancelCount          int32
 	createHoldCount      int32
+	lastHoldExpiry       int64
+	holdExpiries         []int64
 	createHoldErr        error
 	payoutStatusByID     map[string]string // payout checking_id -> status
 	holdStatusByID       map[string]string // hold checking_id -> status (default HOLD)
@@ -53,7 +57,13 @@ func (m *milestoneLN) handler() http.Handler {
 			}
 			atomic.AddInt32(&m.createHoldCount, 1)
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"checking_id":"chk-hold-` + fmt.Sprint(atomic.LoadInt32(&m.createHoldCount)) + `","payment_hash":"` + body["payment_hash"].(string) + `","payment_request":"lnbc-hold"}`))
+			expiry := int64(0)
+			if v, ok := body["expiry"].(float64); ok {
+				expiry = int64(v)
+			}
+			m.lastHoldExpiry = expiry
+			m.holdExpiries = append(m.holdExpiries, expiry)
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"checking_id":"chk-hold-%d","payment_hash":"%s","payment_request":"lnbc-hold","expiry":%d}`, atomic.LoadInt32(&m.createHoldCount), body["payment_hash"].(string), expiry)))
 			return
 		}
 		atomic.AddInt32(&m.payCount, 1)
@@ -161,6 +171,8 @@ func TestCreateDealWithMilestonesFundsM1Only(t *testing.T) {
 	}
 	repo.deals[deal.ID] = deal
 	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
+	ms[0].DeliveryDays = 5
+	ms[1].DeliveryDays = 12
 	if err := service.CreateDealWithMilestones(context.Background(), deal, ms); err != nil {
 		t.Fatalf("CreateDealWithMilestones: %v", err)
 	}
@@ -177,11 +189,36 @@ func TestCreateDealWithMilestonesFundsM1Only(t *testing.T) {
 	if mls[0].Order != 1 || mls[0].Status != MilestoneAwaitingPayment || mls[0].CheckingID == "" {
 		t.Fatalf("M1 must be funded awaiting_payment, got %+v", mls[0])
 	}
+	if mls[0].DeliveryDays != 5 || mls[1].DeliveryDays != 12 {
+		t.Fatalf("expected per-milestone delivery estimates to persist, got %d and %d", mls[0].DeliveryDays, mls[1].DeliveryDays)
+	}
 	if mls[1].Status != MilestonePending || mls[1].CheckingID != "" {
 		t.Fatalf("M2 must remain unfunded pending, got %+v", mls[1])
 	}
 	if atomic.LoadInt32(&ln.createHoldCount) != 1 {
 		t.Fatalf("expected exactly 1 hold invoice (M1), got %d", atomic.LoadInt32(&ln.createHoldCount))
+	}
+	if ln.lastHoldExpiry != 5*86400 {
+		t.Fatalf("expected M1 hold expiry from delivery_days, got %d", ln.lastHoldExpiry)
+	}
+}
+
+func TestFundMilestoneUsesPerMilestoneExpiry(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+
+	deal := &Deal{ID: "deal-exp", FreelancerID: "f1", ClientEmail: "c@example.com", Title: "Job", SourcePlatform: "x", PayeeInvoice: "lnbc-payee"}
+	repo.deals[deal.ID] = deal
+	if err := service.CreateDealWithMilestones(context.Background(), deal, []MilestoneInput{{Title: "M1", AmountSats: 1000, DeliveryDays: 3}, {Title: "M2", AmountSats: 1000, DeliveryDays: 50}}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	mls, _ := repo.GetMilestonesByDeal(context.Background(), deal.ID)
+	if err := service.FundMilestone(context.Background(), deal, &mls[1]); err != nil {
+		t.Fatalf("fund M2: %v", err)
+	}
+	if len(ln.holdExpiries) < 2 || ln.holdExpiries[1] != 50*86400 {
+		t.Fatalf("expected M2 hold expiry 50 days, got %v", ln.holdExpiries)
 	}
 }
 
@@ -253,9 +290,23 @@ func TestCreateMilestoneValidation(t *testing.T) {
 	if _, err := service.CreateMilestone(context.Background(), "deal-v", "X", 1000, 0); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected invalid input for order 0, got %v", err)
 	}
+	if _, err := service.CreateMilestone(context.Background(), "deal-v", "X", 1000, 1, 3651); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid input for delivery estimate above 3650 days, got %v", err)
+	}
 	m, err := service.CreateMilestone(context.Background(), "deal-v", "Legal", 1000, 1)
-	if err != nil || m.Status != MilestonePending {
+	if err != nil || m.Status != MilestonePending || m.DeliveryDays != 7 {
 		t.Fatalf("expected pending milestone, got %+v err=%v", m, err)
+	}
+}
+
+func TestMilestoneViewCalculatesDueDateFromFunding(t *testing.T) {
+	fundedAt := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
+	view := milestoneViewFrom(Milestone{
+		DeliveryDays: 7,
+		FundedAt:     sql.NullTime{Time: fundedAt, Valid: true},
+	})
+	if view.DueAt == nil || *view.DueAt != "2026-11-29T10:00:00Z" {
+		t.Fatalf("expected due date seven days after funding, got %v", view.DueAt)
 	}
 }
 

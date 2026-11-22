@@ -53,6 +53,8 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 			Status:               string(ms[i].Status),
 			Invoice:              ms[i].Invoice,
 			CompletedAt:          completed,
+			DeliveryDays:         ms[i].DeliveryDays,
+			DueAt:                milestoneViewFrom(ms[i]).DueAt,
 			CreatedAt:            ms[i].CreatedAt,
 			PayoutResetAvailable: resetAvailable,
 		})
@@ -86,4 +88,3 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 		PayoutResetAvailable: payoutResetAvailable,
 	}, nil
 }
-

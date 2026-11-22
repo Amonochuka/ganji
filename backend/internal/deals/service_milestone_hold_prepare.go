@@ -26,8 +26,16 @@ func (s *Service) prepareMilestoneHold(ctx context.Context, deal *Deal, m *Miles
 	m.Preimage = hex.EncodeToString(preimage[:])
 	m.PreimageHash = hex.EncodeToString(hash[:])
 	m.PayeeInvoice = payee
+	days := m.DeliveryDays
+	if days <= 0 {
+		days = 7
+	}
 	hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
-		Out: false, Amount: m.AmountSats, Memo: fmt.Sprintf("%s — M%d: %s", deal.Title, m.Order, m.Title), PaymentHash: m.PreimageHash,
+		Out:         false,
+		Amount:      m.AmountSats,
+		Memo:        fmt.Sprintf("%s — M%d: %s", deal.Title, m.Order, m.Title),
+		PaymentHash: m.PreimageHash,
+		Expiry:      int64(days) * 86400,
 	})
 	if err != nil {
 		s.cancelOrphanHold(ctx, m.PreimageHash)

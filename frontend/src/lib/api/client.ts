@@ -220,8 +220,8 @@ export const api = {
   },
 
   // Milestones
-  createMilestone(dealId: string, title: string, amountSats: number, order: number, token: string) {
-    return this.post<{ milestone: MilestoneView }>(`/deals/${dealId}/milestones`, { title, amount_sats: amountSats, order }, token);
+  createMilestone(dealId: string, title: string, amountSats: number, order: number, token: string, deliveryDays = 7) {
+    return this.post<{ milestone: MilestoneView }>(`/deals/${dealId}/milestones`, { title, amount_sats: amountSats, order, delivery_days: deliveryDays }, token);
   },
 
   listMilestones(dealId: string, token: string) {

@@ -46,6 +46,10 @@ export function MilestoneRow({
           {msStatusLabel(ms.status)}
         </span>
       </div>
+      <p className="mt-2 text-xs text-ink-500">
+        Delivery estimate: {ms.delivery_days} days from funding
+        {ms.due_at ? ` · Due ${new Date(ms.due_at).toLocaleDateString()}` : ""}
+      </p>
       {ms.completed_at && <p className="mt-1 text-xs text-ink-500 font-mono">Completed: {new Date(ms.completed_at).toLocaleString()}</p>}
       {needsFunding && (
         <div className="mt-3 p-3 rounded border border-gold-500/30 bg-gold-500/5">

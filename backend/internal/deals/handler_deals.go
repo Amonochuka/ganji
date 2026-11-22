@@ -14,8 +14,9 @@ type updateDealStatusRequest struct {
 }
 
 type milestoneInput struct {
-	Title      string `json:"title" binding:"required"`
-	AmountSats int64  `json:"amount_sats" binding:"required"`
+	Title        string `json:"title" binding:"required"`
+	AmountSats   int64  `json:"amount_sats" binding:"required"`
+	DeliveryDays int    `json:"delivery_days"`
 }
 
 type generateInvoiceRequest struct {
@@ -57,7 +58,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 
 	var ms []MilestoneInput
 	for _, mi := range req.Milestones {
-		ms = append(ms, MilestoneInput{Title: mi.Title, AmountSats: mi.AmountSats})
+		ms = append(ms, MilestoneInput{Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays})
 	}
 
 	if err := h.service.CreateDealWithMilestones(c.Request.Context(), deal, ms); err != nil {

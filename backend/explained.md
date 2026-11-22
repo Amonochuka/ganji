@@ -751,7 +751,7 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 | `LND_REST_MACAROON_PATH` | ✅ | — | Es admin macaroon path (e.g., `/home/amonoff/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon`) |
 | `PORT` | ❌ | 8080 | HTTP listen port |
 | `FRONTEND_URLS` | ❌ | localhost:3000 | CORS origins, comma-separated (singular `FRONTEND_URL` accepted as fallback) |
-| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | ❌ | 2,592,000 | Hold invoice expiry (30 days) |
+| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | ❌ | 2,592,000 | Unpaid hold invoice expiry (30 days); separate from the per-milestone delivery estimate, which starts when funded |
 | `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | ❌ | 21,600 | Sweep interval (6 hours) |
 | `STORAGE_PATH` | ❌ | ./uploads | Local artifact storage path |
 | `MAX_UPLOAD_BYTES` | ❌ | 10,485,760 | Max artifact size (10MB) |

@@ -10,23 +10,14 @@ import (
 )
 
 type createMilestoneRequest struct {
-	Title      string `json:"title" binding:"required"`
-	AmountSats int64  `json:"amount_sats" binding:"required"`
-	Order      int    `json:"order" binding:"required,min=1"`
+	Title        string `json:"title" binding:"required"`
+	AmountSats   int64  `json:"amount_sats" binding:"required"`
+	Order        int    `json:"order" binding:"required,min=1"`
+	DeliveryDays int    `json:"delivery_days"`
 }
 
 type listMilestonesResponse struct {
 	Milestones []MilestoneView `json:"milestones"`
-}
-
-type milestoneView struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	AmountSats  int64     `json:"amount_sats"`
-	Order       int       `json:"order"`
-	Status      string    `json:"status"`
-	CompletedAt *string   `json:"completed_at,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (h *Handler) CreateMilestone(c *gin.Context) {
@@ -59,7 +50,7 @@ func (h *Handler) CreateMilestone(c *gin.Context) {
 		return
 	}
 
-	milestone, err := h.service.CreateMilestone(c.Request.Context(), dealID, req.Title, req.AmountSats, req.Order)
+	milestone, err := h.service.CreateMilestone(c.Request.Context(), dealID, req.Title, req.AmountSats, req.Order, req.DeliveryDays)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -71,15 +62,8 @@ func (h *Handler) CreateMilestone(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "milestone created",
-		"milestone": milestoneView{
-			ID:         milestone.ID,
-			Title:      milestone.Title,
-			AmountSats: milestone.AmountSats,
-			Order:      milestone.Order,
-			Status:     string(milestone.Status),
-			CreatedAt:  milestone.CreatedAt,
-		},
+		"message":   "milestone created",
+		"milestone": milestoneViewFrom(*milestone),
 	})
 }
 
@@ -90,7 +74,7 @@ type milestoneStatusUpdateRequest struct {
 
 type updateMilestoneResponse struct {
 	Message   string        `json:"message"`
-	Milestone milestoneView `json:"milestone"`
+	Milestone MilestoneView `json:"milestone"`
 }
 
 func (h *Handler) ListMilestones(c *gin.Context) {
@@ -135,15 +119,9 @@ func (h *Handler) ListMilestones(c *gin.Context) {
 		if milestones[i].CompletedAt.Valid {
 			completedAtStr = milestones[i].CompletedAt.Time.Format(time.RFC3339)
 		}
-		views = append(views, MilestoneView{
-			ID:          milestones[i].ID,
-			Title:       milestones[i].Title,
-			AmountSats:  milestones[i].AmountSats,
-			Order:       milestones[i].Order,
-			Status:      string(milestones[i].Status),
-			CompletedAt: &completedAtStr,
-			CreatedAt:   milestones[i].CreatedAt,
-		})
+		view := milestoneViewFrom(milestones[i])
+		view.CompletedAt = &completedAtStr
+		views = append(views, view)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

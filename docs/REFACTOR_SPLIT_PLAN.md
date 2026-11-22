@@ -125,7 +125,7 @@ Stop after any step if verification fails or scope drifts.
 - Removing websocket stubs or changing documented milestone TODOs.
 - Committing `backend/uploads/`.
 
-## Planned feature: milestone funding/build timing (F1)
+## Milestone delivery timing (F1)
 
 **Context/problem:** escrow hold invoices are currently created with a fixed `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` (default 30 days) from hold creation. For M1 this starts at deal/milestone creation, so different milestones cannot have different build/funding windows and the timer is not aligned to “when payable/funded” in the way desired. Goal: freelancer can set days/time per milestone (how long it will take to build / be fundable), and funded escrows must not be auto-cancelled by the app.
 
@@ -144,7 +144,7 @@ Stop after any step if verification fails or scope drifts.
 - Tests: update/add coverage for per-milestone expiry/funding windows and no auto-cancel after funded.
 - Docs: update lifecycle/env/API docs to reflect per-milestone timing.
 
-**Execution:** do as dedicated step(s) after or interleaved with approved refactor steps, but never mixed into mechanical split commits. Record design decisions and deviations in the progress tracker.
+**Status (2026-11-22): implemented (per-milestone hold expiry).** `delivery_days` is collected per milestone (1–3650 days, default 7), stored in DB, and visible to both participants. Milestone hold invoices are created with `expiry = delivery_days * 86400` from that hold's creation time (M1 at deal creation, M2+ when fundable/funded). `due_at` is derived from `funded_at + delivery_days` after funding. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` is fallback/default for holds without per-milestone expiry. Sweep reconciles open deals by LNbits status (`UNPAID/EXPIRED/CANCELLED`) without a global age cutoff, because hold expiries now vary. See API reference and migration `000010`.
 
 
 ## UI ideas / UX improvements (tracked)

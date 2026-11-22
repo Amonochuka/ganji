@@ -9,7 +9,7 @@ import (
 )
 
 // MilestoneService provides milestone-related operations for a deal.
-func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amountSats int64, order int) (*Milestone, error) {
+func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amountSats int64, order int, deliveryDays ...int) (*Milestone, error) {
 	title = strings.TrimSpace(title)
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
@@ -23,13 +23,21 @@ func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amo
 	if order < 1 {
 		return nil, fmt.Errorf("%w: milestone order must be at least 1", ErrInvalidInput)
 	}
+	days := 7
+	if len(deliveryDays) > 0 && deliveryDays[0] != 0 {
+		days = deliveryDays[0]
+	}
+	if days < 1 || days > 3650 {
+		return nil, fmt.Errorf("%w: milestone delivery days must be between 1 and 3650", ErrInvalidInput)
+	}
 	milestone := &Milestone{
-		DealID:      dealID,
-		Title:       title,
-		AmountSats:  amountSats,
-		Order:       order,
-		Status:      MilestonePending,
-		CompletedAt: sql.NullTime{},
+		DealID:       dealID,
+		Title:        title,
+		AmountSats:   amountSats,
+		Order:        order,
+		DeliveryDays: days,
+		Status:       MilestonePending,
+		CompletedAt:  sql.NullTime{},
 	}
 	if err := s.repo.CreateMilestone(ctx, milestone); err != nil {
 		return nil, err

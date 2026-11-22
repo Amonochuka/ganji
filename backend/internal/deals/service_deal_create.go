@@ -46,6 +46,11 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	if milestoneMode {
 		var total int64
 		for i, mi := range milestones {
+			if mi.DeliveryDays == 0 {
+				milestones[i].DeliveryDays = 7 // compatibility default for older API clients
+			} else if mi.DeliveryDays < 1 || mi.DeliveryDays > 3650 {
+				return fmt.Errorf("%w: milestone delivery days must be between 1 and 3650", ErrInvalidInput)
+			}
 			if strings.TrimSpace(mi.Title) == "" || mi.AmountSats <= 0 {
 				return fmt.Errorf("%w: each milestone needs a title and positive amount", ErrInvalidInput)
 			}
@@ -73,10 +78,11 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	var first *Milestone
 	if milestoneMode && len(milestones) > 0 {
 		first = &Milestone{
-			Title:      milestones[0].Title,
-			AmountSats: milestones[0].AmountSats,
-			Order:      1,
-			Status:     MilestonePending,
+			Title:        milestones[0].Title,
+			AmountSats:   milestones[0].AmountSats,
+			DeliveryDays: milestones[0].DeliveryDays,
+			Order:        1,
+			Status:       MilestonePending,
 		}
 		if err := s.prepareMilestoneHold(ctx, deal, first); err != nil {
 			return err
@@ -94,7 +100,10 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		deal.PreimageHash = hex.EncodeToString(hash[:])
 
 		hold, err := s.lnbits.CreateHoldInvoice(ctx, lnbits.CreateHoldInvoiceRequest{
-			Out: false, Amount: deal.AmountSats, Memo: deal.Title, PaymentHash: deal.PreimageHash,
+			Out:         false,
+			Amount:      deal.AmountSats,
+			Memo:        deal.Title,
+			PaymentHash: deal.PreimageHash,
 		})
 		if err != nil {
 			s.cancelOrphanHold(ctx, deal.PreimageHash)
@@ -132,7 +141,7 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	}
 
 	for i, mi := range milestones {
-		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, Order: i + 1, Status: MilestonePending}
+		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays, Order: i + 1, Status: MilestonePending}
 		if i == 0 && first != nil {
 			*m = *first
 			m.DealID = deal.ID

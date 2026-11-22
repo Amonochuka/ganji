@@ -5,16 +5,17 @@ import (
 	"time"
 )
 
-// SweepExpiredHolds reconciles DB state with LNbits for old open deals.
+// SweepExpiredHolds reconciles DB state with LNbits for open deals.
 // When a hold invoice expires (or was never funded and is now UNPAID /
 // EXPIRED / CANCELLED), any committed funds have already returned to the
 // client on the Lightning network — so the deal should be recorded as
 // refunded instead of sitting in awaiting_payment/locked/work_submitted/
 // reviewing/disputed forever. Holds that LNbits still reports as held (or
-// settled) are left untouched. Returns the number of deals reconciled to
-// refunded.
-func (s *Service) SweepExpiredHolds(ctx context.Context, cutoff time.Time) (int, error) {
-	open, err := s.repo.ListOpenBefore(ctx, cutoff)
+// settled) are left untouched. Per-milestone holds may have different expiry
+// windows, so sweep checks open deals by LNbits status. Returns the number of
+// deals reconciled to refunded.
+func (s *Service) SweepExpiredHolds(ctx context.Context, _ time.Time) (int, error) {
+	open, err := s.repo.ListOpenBefore(ctx, time.Time{})
 	if err != nil {
 		return 0, err
 	}

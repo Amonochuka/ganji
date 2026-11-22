@@ -53,7 +53,7 @@ Then use `DATABASE_URL=postgres://postgres:postgres@localhost:5432/ganji?sslmode
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `8080` | HTTP server port |
-| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | `2592000` (30 days) | Hold invoice expiry; must comfortably exceed a deal's lifetime |
+| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | `2592000` (30 days) | Default/fallback unpaid hold-invoice expiry. Milestone holds are created with `delivery_days * 86400` seconds (from hold creation/funding time per milestone); this env is used when a hold does not specify its own expiry. |
 | `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | `21600` (6 hours) | Background job interval to reconcile stale open deals against LNbits |
 | `OTS_ESPLORA_URL` | (empty) | Esplora API URL for live Bitcoin chain verification (e.g., `https://blockstream.info/api`) |
 | `OTS_UPGRADE_INTERVAL_SECONDS` | `21600` (6 hours) | OTS proof upgrade worker cadence |

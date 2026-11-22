@@ -9,7 +9,7 @@ import (
 )
 
 const milestoneColumns = `
-		id, deal_id, title, amount_sats, "order", status, completed_at, created_at,
+		id, deal_id, title, amount_sats, "order", status, completed_at, created_at, delivery_days, funded_at,
 		preimage_hash, preimage, payee_invoice, invoice, checking_id, payout_checking_id, payout_attempted_at
 	`
 
@@ -24,7 +24,7 @@ func (r *Repository) scanMilestone(row interface{ Scan(dest ...any) error }) (*M
 	)
 	m := &Milestone{}
 	if err := row.Scan(
-		&m.ID, &m.DealID, &m.Title, &m.AmountSats, &m.Order, &m.Status, &m.CompletedAt, &m.CreatedAt,
+		&m.ID, &m.DealID, &m.Title, &m.AmountSats, &m.Order, &m.Status, &m.CompletedAt, &m.CreatedAt, &m.DeliveryDays, &m.FundedAt,
 		&preimageHash, &preimage, &payeeInvoice, &invoice, &checkingID, &payoutID, &m.PayoutAttemptedAt,
 	); err != nil {
 		return nil, err
@@ -135,8 +135,8 @@ func (r *Repository) DeleteMilestone(ctx context.Context, milestoneID string) er
 // CreateMilestone inserts a new milestone for a deal.
 func (r *Repository) CreateMilestone(ctx context.Context, milestone *Milestone) error {
 	query := `
-		INSERT INTO milestones (deal_id, title, amount_sats, "order", status)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO milestones (deal_id, title, amount_sats, "order", status, delivery_days)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at;`
 	err := r.q.QueryRowContext(ctx, query,
 		milestone.DealID,
@@ -144,6 +144,7 @@ func (r *Repository) CreateMilestone(ctx context.Context, milestone *Milestone) 
 		milestone.AmountSats,
 		milestone.Order,
 		milestone.Status,
+		milestone.DeliveryDays,
 	).Scan(&milestone.ID, &milestone.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("repository: create milestone: %w", err)
@@ -156,7 +157,7 @@ func (r *Repository) UpdateMilestoneEscrow(ctx context.Context, m *Milestone) er
 	if err != nil {
 		return fmt.Errorf("repository: encrypt milestone preimage: %w", err)
 	}
-	_, err = r.q.ExecContext(ctx, `UPDATE milestones SET preimage_hash=$1, preimage=$2, payee_invoice=$3, invoice=$4, checking_id=$5, status=$6 WHERE id=$7;`,
+	_, err = r.q.ExecContext(ctx, `UPDATE milestones SET preimage_hash=$1, preimage=$2, payee_invoice=$3, invoice=$4, checking_id=$5, status=$6, funded_at=CASE WHEN $6 IN ('funded','in_progress') THEN COALESCE(funded_at,NOW()) ELSE funded_at END WHERE id=$7;`,
 		nullString(m.PreimageHash), nullString(enc), nullString(m.PayeeInvoice), nullString(m.Invoice), nullString(m.CheckingID), m.Status, m.ID)
 	if err != nil {
 		return fmt.Errorf("repository: update milestone escrow: %w", err)

@@ -338,10 +338,11 @@ func (f *fakeDealRepo) UpdatePayoutCheckingID(ctx context.Context, dealID, payou
 	return nil
 }
 
-func (f *fakeDealRepo) ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error) {
+func (f *fakeDealRepo) ListOpenBefore(ctx context.Context, _ time.Time) ([]Deal, error) {
 	var out []Deal
 	for _, deal := range f.deals {
-		if (deal.Status == StatusAwaitingPayment || deal.Status == StatusLocked) && deal.CreatedAt.Before(cutoff) {
+		switch deal.Status {
+		case StatusAwaitingPayment, StatusLocked, StatusWorkSubmitted, StatusReviewing, StatusDisputed:
 			out = append(out, *deal)
 		}
 	}
@@ -1468,7 +1469,7 @@ func TestSweepRefundsExpiredHold(t *testing.T) {
 	}
 }
 
-func TestSweepIgnoresHeldOrFreshDeals(t *testing.T) {
+func TestSweepIgnoresHeldDeals(t *testing.T) {
 	repo := newFakeDealRepo()
 	held := escrowDeal(repo, "held-1", "freelancer-1", "client@example.com")
 	held.Status = StatusLocked
@@ -1483,12 +1484,14 @@ func TestSweepIgnoresHeldOrFreshDeals(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/payments/" + held.CheckingID:
 			_, _ = w.Write([]byte(`{"paid":true,"details":{"checking_id":"bb","status":"HOLD"}}`))
+		case "/api/v1/payments/" + fresh.CheckingID:
+			_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"cc","status":"PENDING"}}`))
 		default:
-			t.Errorf("fresh deal must not be queried, got %s", r.URL.Path)
+			t.Errorf("unexpected payment query: %s", r.URL.Path)
 		}
 	}))
 
-	swept, err := service.SweepExpiredHolds(context.Background(), time.Now().Add(-30*24*time.Hour))
+	swept, err := service.SweepExpiredHolds(context.Background(), time.Time{})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -1497,6 +1500,9 @@ func TestSweepIgnoresHeldOrFreshDeals(t *testing.T) {
 	}
 	if repo.deals["held-1"].Status != StatusLocked {
 		t.Fatalf("expected held deal to stay locked, got %s", repo.deals["held-1"].Status)
+	}
+	if repo.deals["fresh-1"].Status != StatusAwaitingPayment {
+		t.Fatalf("expected fresh pending deal untouched, got %s", repo.deals["fresh-1"].Status)
 	}
 }
 

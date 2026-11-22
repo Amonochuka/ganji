@@ -11,7 +11,7 @@ import { api, type CreateDealRequest } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatCurrency } from "@/lib/utils/format";
 
-type MilestoneDraft = { title: string; amount_sats: string };
+type MilestoneDraft = { title: string; amount_sats: string; delivery_days: string };
 
 export default function CreateDealPage() {
   const router = useRouter();
@@ -30,7 +30,7 @@ export default function CreateDealPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [milestoneMode, setMilestoneMode] = useState(false);
-  const [milestones, setMilestones] = useState<MilestoneDraft[]>([{ title: "Milestone 1", amount_sats: "" }]);
+  const [milestones, setMilestones] = useState<MilestoneDraft[]>([{ title: "Milestone 1", amount_sats: "", delivery_days: "7" }]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -50,7 +50,7 @@ export default function CreateDealPage() {
     setMilestones((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
   }
   function addMilestone() {
-    setMilestones((prev) => [...prev, { title: `Milestone ${prev.length + 1}`, amount_sats: "" }]);
+    setMilestones((prev) => [...prev, { title: `Milestone ${prev.length + 1}`, amount_sats: "", delivery_days: "7" }]);
   }
   function removeMilestone(i: number) {
     setMilestones((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
@@ -113,14 +113,16 @@ export default function CreateDealPage() {
     if (!payeeInvoice.trim().startsWith("lnbc")) return setError("Payee invoice must be a valid Lightning invoice (starts with lnbc)");
 
     let amount = 0;
-    let msPayload: { title: string; amount_sats: number }[] | undefined;
+    let msPayload: { title: string; amount_sats: number; delivery_days: number }[] | undefined;
     if (milestoneMode) {
       const parsed = milestones.map((m, idx) => ({
         title: m.title.trim() || `Milestone ${idx + 1}`,
         amount_sats: /^\d+$/.test(m.amount_sats.trim()) ? parseInt(m.amount_sats, 10) : 0,
+        delivery_days: /^\d+$/.test(m.delivery_days.trim()) ? parseInt(m.delivery_days, 10) : 0,
       }));
       if (parsed.length === 0) return setError("Add at least one milestone");
       if (parsed.some((m) => !m.title || m.amount_sats <= 0)) return setError("Each milestone needs a title and positive sats amount");
+      if (parsed.some((m) => m.delivery_days < 1 || m.delivery_days > 3650)) return setError("Each milestone needs a delivery estimate from 1 to 3650 days");
       msPayload = parsed;
       amount = parsed.reduce((s, m) => s + m.amount_sats, 0);
     } else {
@@ -196,7 +198,7 @@ export default function CreateDealPage() {
                   <div className="space-y-3">
                     <p className="text-xs text-ink-500">Client funds M1 first; after release, M2 is funded. Total: <span className="font-mono text-ink-200">{formatCurrency(milestonesTotal)}</span></p>
                     {milestones.map((m, i) => (
-                      <div key={i} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-end">
+                      <div key={i} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-2 items-end">
                         <div className="md:col-span-3">
                           <Input label={i === 0 ? "Milestone title" : `Milestone ${i + 1} title`} type="text" value={m.title} onChange={(e) => updateMilestone(i, { title: e.target.value })} placeholder={`Milestone ${i + 1}`} />
                         </div>
@@ -204,10 +206,14 @@ export default function CreateDealPage() {
                           <Input label={i === 0 ? "Amount (sats)" : `Milestone ${i + 1} sats`} type="number" value={m.amount_sats} onChange={(e) => updateMilestone(i, { amount_sats: e.target.value })} placeholder="250000" min="1" />
                         </div>
                         <div className="md:col-span-1">
+                          <Input label="Days" type="number" value={m.delivery_days} onChange={(e) => updateMilestone(i, { delivery_days: e.target.value })} min="1" max="3650" />
+                        </div>
+                        <div className="md:col-span-1">
                           <Button type="button" variant="ghost" size="sm" onClick={() => removeMilestone(i)} disabled={milestones.length <= 1}>Remove</Button>
                         </div>
                       </div>
                     ))}
+                    <p className="text-xs text-ink-500">Delivery time starts when that milestone is funded. Share the agreed schedule with your client before creating the deal.</p>
                     <Button type="button" variant="outline" size="sm" onClick={addMilestone}>Add milestone</Button>
                   </div>
                 )}
