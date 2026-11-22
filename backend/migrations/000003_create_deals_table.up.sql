@@ -1,7 +1,6 @@
 -- deals (complete schema with all escrow columns).
--- Folded in from the later client_email / escrow ALTER migrations because this
--- is a fresh schema for a new environment: client_email identifies the client,
--- preimage settles the hold invoice later, and payee_invoice is the payout leg.
+-- Fresh schema for milestone-only escrow model: milestone holds live on milestones;
+-- deal-level hold fields are nullable/legacy-compatible.
 CREATE TABLE deals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     freelancer_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -9,21 +8,15 @@ CREATE TABLE deals (
     title TEXT NOT NULL,
     amount_sats BIGINT NOT NULL,
     source_platform TEXT NOT NULL,
-    preimage_hash TEXT NOT NULL UNIQUE,
+    preimage_hash TEXT UNIQUE,
     preimage TEXT,
     payee_invoice TEXT,
-    invoice TEXT NOT NULL,
+    invoice TEXT,
     checking_id TEXT,
-    -- Payout checking_id tracks the outgoing payment to the freelancer.
-    -- Filled after PayInvoice succeeds so a retry can verify the payout
-    -- instead of sending again (double-pay prevention).
-    -- committed BEFORE any money moves. A release that crashes mid-payout
-    -- leaves this set, and a retry refuses to auto-resend until an operator
-    -- Shareable payment-link token: a separate high-entropy random value from
-    -- the deal's UUID so the public link can be revoked/rotated without
-    -- exposing the internal id. NOT NULL DEFAULT backfills existing deals;
-    -- UNIQUE doubles as the lookup index for GET /public/deals/:shareToken.
-    share_token TEXT NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex'),
+    -- Shareable payment-link token: separate high-entropy random value from
+    -- the deal UUID so the public link can be revoked/rotated without
+    -- exposing the internal id.
+    share_token TEXT NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex') UNIQUE,
     status TEXT NOT NULL DEFAULT 'awaiting_payment',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     verified_at TIMESTAMPTZ,
