@@ -22,9 +22,6 @@ type DealRepository interface {
 	UpdateDisputeIfCurrent(ctx context.Context, dealID string, expected Status, reason string) (bool, error)
 	UpdateDisputeResolution(ctx context.Context, dealID string, status Status, resolvedBy string) error
 	GetDealForUpdate(ctx context.Context, dealID string) (*Deal, error)
-	UpdatePayoutCheckingID(ctx context.Context, dealID, payoutCheckingID string) error
-	MarkPayoutAttempted(ctx context.Context, dealID string) error
-	ClearPayoutTracking(ctx context.Context, dealID string) error
 	UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error
 	UpdateShareToken(ctx context.Context, dealID, shareToken string) error
 	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)
@@ -36,6 +33,8 @@ type DealRepository interface {
 	GetMilestoneByID(ctx context.Context, milestoneID string) (*Milestone, error)
 	GetMilestoneForUpdate(ctx context.Context, milestoneID string) (*Milestone, error)
 	UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error
+	UpdateMilestoneStatusIfCurrent(ctx context.Context, milestoneID string, expected, status MilestoneStatus) (bool, error)
+	UpdateDealStatusFromMilestones(ctx context.Context, dealID string) (Status, error)
 	UpdateMilestoneEscrow(ctx context.Context, m *Milestone) error
 	UpdateMilestonePayout(ctx context.Context, milestoneID, payoutCheckingID string) error
 	MarkMilestonePayoutAttempted(ctx context.Context, milestoneID string) error

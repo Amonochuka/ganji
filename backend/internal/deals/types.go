@@ -181,7 +181,7 @@ func (d *Deal) View() DealView {
 		CheckingID:           d.CheckingID,
 		ShareToken:           d.ShareToken,
 		Status:               d.Status,
-		PayoutResetAvailable: canResetDealPayoutAttempt(d),
+		PayoutResetAvailable: false,
 		DisputeReason:        d.DisputeReason,
 		DisputedAt:           nullTime(d.DisputedAt),
 		ResolvedAt:           nullTime(d.ResolvedAt),
@@ -204,7 +204,7 @@ func (d *Deal) PublicView() PublicDeal {
 		Status:               d.Status,
 		DisputeReason:        d.DisputeReason,
 		CreatedAt:            d.CreatedAt,
-		PayoutResetAvailable: canResetDealPayoutAttempt(d),
+		PayoutResetAvailable: false,
 	}
 }
 

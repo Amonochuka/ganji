@@ -88,22 +88,11 @@ func (r *Repository) GetMilestonesByDeal(ctx context.Context, dealID string) ([]
 }
 
 func (r *Repository) UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error {
-	var query string
-	var args []any
-	if completedAt != nil {
-		query = `
-			UPDATE milestones
-			SET status = $1, completed_at = $2
-			WHERE id = $3;`
-		args = []any{status, completedAt, milestoneID}
-	} else {
-		query = `
-			UPDATE milestones
-			SET status = $1
-			WHERE id = $3;`
-		args = []any{status, milestoneID}
-	}
-	result, err := r.q.ExecContext(ctx, query, args...)
+	query := `
+		UPDATE milestones
+		SET status = $1, completed_at = COALESCE($2, completed_at)
+		WHERE id = $3;`
+	result, err := r.q.ExecContext(ctx, query, status, completedAt, milestoneID)
 	if err != nil {
 		return fmt.Errorf("repository: update milestone status: %w", err)
 	}
@@ -112,9 +101,25 @@ func (r *Repository) UpdateMilestoneStatus(ctx context.Context, milestoneID stri
 		return fmt.Errorf("repository: update milestone status rows affected: %w", err)
 	}
 	if rowsAffected == 0 {
-		return ErrDealNotFound
+		return ErrMilestoneNotFound
 	}
 	return nil
+}
+
+func (r *Repository) UpdateMilestoneStatusIfCurrent(ctx context.Context, milestoneID string, expected, status MilestoneStatus) (bool, error) {
+	result, err := r.q.ExecContext(ctx, `
+		UPDATE milestones
+		SET status = $1,
+		    completed_at = CASE WHEN $1 IN ('released','refunded','exited') THEN COALESCE(completed_at, NOW()) ELSE completed_at END
+		WHERE id = $2 AND status = $3;`, status, milestoneID, expected)
+	if err != nil {
+		return false, fmt.Errorf("repository: update milestone status if current: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("repository: update milestone status if current rows affected: %w", err)
+	}
+	return rowsAffected > 0, nil
 }
 
 func (r *Repository) DeleteMilestone(ctx context.Context, milestoneID string) error {
@@ -127,9 +132,66 @@ func (r *Repository) DeleteMilestone(ctx context.Context, milestoneID string) er
 		return fmt.Errorf("repository: delete milestone rows affected: %w", err)
 	}
 	if n == 0 {
-		return ErrDealNotFound
+		return ErrMilestoneNotFound
 	}
 	return nil
+}
+
+// UpdateDealStatusFromMilestones recomputes and persists deal status from
+// milestone states in milestone-only model.
+func (r *Repository) UpdateDealStatusFromMilestones(ctx context.Context, dealID string) (Status, error) {
+	ms, err := r.GetMilestonesByDeal(ctx, dealID)
+	if err != nil {
+		return "", err
+	}
+	if len(ms) == 0 {
+		return "", fmt.Errorf("%w: deal has no milestones", ErrInvalidTransition)
+	}
+	allReleased := true
+	allRefunded := true
+	anyDisputed := false
+	anySubmitted := false
+	anyFunded := false
+	for i := range ms {
+		s := ms[i].Status
+		if s != MilestoneReleased {
+			allReleased = false
+		}
+		if s != MilestoneRefunded && s != MilestoneExited {
+			allRefunded = false
+		}
+		if s == MilestoneDisputed || s == MilestoneRejected {
+			anyDisputed = true
+		}
+		if s == MilestoneWorkSubmitted || s == MilestoneCompleted {
+			anySubmitted = true
+		}
+		if s == MilestoneAwaitingPayment || s == MilestonePending {
+			anyFunded = false
+		}
+		if s == MilestoneFunded || s == MilestoneInProgress || s == MilestoneWorkSubmitted || s == MilestoneCompleted || s == MilestoneDisputed || s == MilestoneRejected {
+			anyFunded = true
+		}
+	}
+	var next Status
+	switch {
+	case allReleased:
+		next = StatusReleased
+	case allRefunded:
+		next = StatusRefunded
+	case anyDisputed:
+		next = StatusDisputed
+	case anySubmitted:
+		next = StatusWorkSubmitted
+	case anyFunded:
+		next = StatusLocked
+	default:
+		next = StatusAwaitingPayment
+	}
+	if err := r.UpdateStatus(ctx, dealID, next); err != nil {
+		return "", err
+	}
+	return next, nil
 }
 
 // CreateMilestone inserts a new milestone for a deal.

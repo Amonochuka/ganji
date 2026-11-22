@@ -77,17 +77,11 @@ func (s *Service) exitDeal(ctx context.Context, deal *Deal) error {
 		}
 	}
 
-	if len(milestones) == 0 && deal.PreimageHash != "" && deal.Status != StatusReleased && deal.Status != StatusRefunded {
-		if deal.Status == StatusWorkSubmitted || deal.Status == StatusReviewing || deal.Status == StatusDisputed {
-			if deal.DisputeReason == "" {
-				_, _ = s.repo.UpdateDisputeIfCurrent(ctx, deal.ID, deal.Status, "exit requested after submission (requires review)")
-			}
-		} else {
-			_ = s.cancelEscrowHold(ctx, deal)
-			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusRefunded)
-		}
+	if len(milestones) == 0 {
+		return fmt.Errorf("%w: deal has no milestones", ErrInvalidTransition)
 	}
 
+	_, _ = s.repo.UpdateDealStatusFromMilestones(ctx, deal.ID)
 	s.notifyExited(deal)
 	return nil
 }

@@ -6,15 +6,6 @@ import (
 	"log"
 )
 
-// clearPayoutAttempt resets the payout tracking (autocommit, off the money
-// path). Only called when the payout is provably not in flight.
-func (s *Service) clearPayoutAttempt(ctx context.Context, dealID string) error {
-	if err := s.repo.ClearPayoutTracking(ctx, dealID); err != nil {
-		return fmt.Errorf("resetting payout tracking for deal %s: %w", dealID, err)
-	}
-	return nil
-}
-
 // anchorReleasedDeal writes the Live CV anchors for accepted work. Best-effort
 // and deliberately off the money path: a failed anchor must never roll back a
 // completed release, and the public CV self-heals any missing anchors on its
@@ -47,17 +38,6 @@ func (s *Service) checkOutgoingPayout(ctx context.Context, payoutCheckingID stri
 		return false, true, nil
 	}
 	return false, false, nil
-}
-
-func (s *Service) isDealHoldSettled(ctx context.Context, deal *Deal) (bool, error) {
-	if deal == nil || deal.CheckingID == "" {
-		return false, fmt.Errorf("%w: deal has no escrow invoice", ErrInvalidInput)
-	}
-	payment, err := s.lnbits.CheckPayment(ctx, deal.CheckingID)
-	if err != nil {
-		return false, err
-	}
-	return isHoldSettled(payment.Details.Status), nil
 }
 
 func (s *Service) isMilestoneHoldSettled(ctx context.Context, m *Milestone) (bool, error) {

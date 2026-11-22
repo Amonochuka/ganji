@@ -34,7 +34,7 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	views := make([]MilestoneView, 0, len(ms))
 	activeInvoice := deal.Invoice
 	activeStatus := deal.Status
-	payoutResetAvailable := canResetDealPayoutAttempt(deal)
+	payoutResetAvailable := false
 	for i := range ms {
 		var completed *string
 		if ms[i].CompletedAt.Valid {
