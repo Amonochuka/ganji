@@ -118,7 +118,7 @@
 | Verify Entry | `/cv/[slug]/verify/[entryId]` | `GET /cv/:slug/verify/:entryID` | Cryptographic proof viewer |
 | Settings / Profile | `/settings` | `GET /auth/me` | Display name, default payee invoice, password |
 | Operator Dispute Queue | `/operator/disputes` | `GET /disputes`, `POST /disputes/:id/resolve` | Admin only |
-| Operator Reconcile | `/operator/deals/[id]/reconcile` | `POST /deals/:id/reconcile` | Admin only |
+| Operator Reconcile | `/operator/deals/[id]/reconcile` | `POST /deals/:dealID/milestones/:milestoneID/reconcile` | Admin only |
 
 ---
 

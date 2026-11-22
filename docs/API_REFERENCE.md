@@ -645,7 +645,7 @@ Public (share-token-only, no JWT) milestone actions:
 
 - `GET /public/deals/:shareToken/milestones` — list milestones for the share link.
 - `POST /public/deals/:shareToken/fund` — pay the active (or `milestone_id`-selected) hold from a transient client wallet; accepted-hold proof on Es moves it `awaiting_payment → funded → in_progress` and the deal to `locked` (**Funds Held**). See §3 for the body and the `503` verification error.
-- `POST /public/deals/:shareToken/payout/reset` — clear a definitively unconfirmed deal or milestone payout-attempt marker; never moves money or changes status. `409` when a checking ID exists.
+- `POST /public/deals/:shareToken/payout/reset` — clear a definitively unconfirmed milestone payout-attempt marker; never moves money or changes status. Body `{milestone_id?}`. `409` when a checking ID exists.
 - `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` — release that escrow-backed milestone (settle + pay), then fund the next; final milestone releases the deal. `disputed`/`rejected` → `400` (operator resolution required). No-hold → "fund it first" error, never marked paid.
 - `POST /public/deals/:shareToken/milestones/:milestoneID/reject` — body `{reason}` (required, ≤2000 chars). Only from `work_submitted`/`completed`. **Does not auto-refund**: hold stays, milestone → `disputed` pending independent review. The reason also lands on the deal's `dispute_reason`.
 - `POST /public/deals/:shareToken/exit` — public exit with the same pre/post-submission money rules as the authed exit.
@@ -653,6 +653,7 @@ Public (share-token-only, no JWT) milestone actions:
 Operator (arbitration):
 
 - `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve` (operator only, `OperatorRequired`). Body `{resolution: "release" | "refund"}`. Resolves a `disputed`/`rejected` milestone: `release` → canonical `ReleaseMilestone` (settle + pay) + advance sequence/finalize deal; `refund` → `CancelHold` + `refunded`. `release` is also accepted from `work_submitted`/`completed` for parity. Milestone `refund` does not auto-fund the next milestone.
+- `POST /deals/:dealID/milestones/:milestoneID/reconcile` (operator only, `OperatorRequired`). Body `{action: "confirm_payout"|"reset_payout", payout_checking_id?}`. `confirm_payout` verifies the outgoing LNbits payout is paid/terminal success and the milestone hold is settled, then records payout and releases the milestone without moving money. `reset_payout` clears an unconfirmed milestone payout-attempt marker when no payout checking ID is recorded.
 
 ---
 

@@ -100,7 +100,7 @@ api.getCVProfile(slug)     // GET /cv/:slug
 api.verifyEntry(slug, entryId)  // GET /cv/:slug/verify/:entryId
 api.listDisputes(token)    // GET /disputes
 api.resolveDispute(id, resolution, token)  // POST /disputes/:id/resolve
-api.reconcileDeal(id, action, payoutCheckingId, token)  // POST /deals/:id/reconcile
+api.reconcileMilestonePayout(id, action, payoutCheckingId, token)  // POST /deals/:dealID/milestones/:milestoneID/reconcile
 ```
 
 All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
@@ -141,7 +141,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - `listDisputes(token)` → `GET /disputes`
 - `resolveDispute(id, resolution, token)` → `POST /disputes/:id/resolve`
 - `resolveMilestone(dealId, milestoneId, resolution, token)` → `POST /disputes/deals/:dealID/milestones/:milestoneID/resolve` (frontend wiring complete; operator resolves disputed/rejected milestone via release/refund)
-- `reconcileDeal(id, action, payoutCheckingId, token)` → `POST /deals/:id/reconcile`
+- `reconcileMilestonePayout(id, action, payoutCheckingId, token)` → `POST /deals/:dealID/milestones/:milestoneID/reconcile`
 
 ### Types (selected)
 

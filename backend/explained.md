@@ -166,7 +166,7 @@ tx.Commit()
   `ErrPayoutInFlight` (reconciliation required) and **does not** call
   `PayInvoice` again. A crash between Phase 2 and Phase 3 therefore leaves a
   visible, stuck deal — not a duplicate payout.
-- The human backstop is the operator-only `POST /deals/:dealID/reconcile`
+- The human backstop is the operator-only `POST /deals/:dealID/milestones/:milestoneID/reconcile`
   endpoint:
   - `{"action":"confirm_payout","payout_checking_id":"..."}` — the operator
     verified in the LNbits UI that the freelancer was paid; after re-verifying,
@@ -725,7 +725,7 @@ func (c *Client) SettleHold(ctx, preimage) (*SimpleInvoiceResponse, error) {
 |-----------|------------------|
 | `SettleHold` | If `ok:false` + "already settled" → verify via `CheckPayment` → if `SETTLED`, treat as success |
 | `CancelHold` | If `ok:false` → verify via `CheckPayment` → if `UNPAID/EXPIRED/CANCELLED`, treat as success |
-| `PayInvoice` | Persist intent first (`payout_attempted_at`); 4xx → `ErrPayoutRefused` (provable non-send, safe to retry later); 5xx/timeout → ambiguous → `ErrPayoutInFlight`, never auto-resend. Operator reconciles a hung attempt via `POST /deals/:dealID/reconcile`. |
+| `PayInvoice` | Persist intent first (`payout_attempted_at`); 4xx → `ErrPayoutRefused` (provable non-send, safe to retry later); 5xx/timeout → ambiguous → `ErrPayoutInFlight`, never auto-resend. Operator reconciles a hung attempt via `POST /deals/:dealID/milestones/:milestoneID/reconcile`. |
 | `CreateHoldInvoice` | Retry with new preimage (idempotent at Ganji level) |
 
 **Retry Logic:** All network calls use `context.Context` for timeout/cancellation. No automatic retry — caller decides (e.g., operator retries resolution).
@@ -976,7 +976,7 @@ A 4xx response from `PayInvoice` is classified as a *provable non-send*
 cleared and a retry is legal; 5xx/timeout are treated as ambiguous.
 
 **Operator reconcile endpoint.** The human backstop for the stuck state:
-`POST /deals/:dealID/reconcile` (operator-only).
+`POST /deals/:dealID/milestones/:milestoneID/reconcile` (operator-only).
 - `{"action":"confirm_payout","payout_checking_id":"..."}` — operator verified
   in the LNbits UI that the freelancer was paid; Ganji re-verifies, records the
   real id, and releases. No money moves.

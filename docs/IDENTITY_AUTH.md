@@ -59,7 +59,7 @@
 | `GET /deals/:id/artifacts/:artifactID/download` | ✓ | ✓ | ✓ |
 | `GET /disputes` | ✗ | ✗ | ✓ |
 | `POST /disputes/:id/resolve` | ✗ | ✗ | ✓ |
-| `POST /deals/:id/reconcile` | ✗ | ✗ | ✓ |
+| `POST /deals/:dealID/milestones/:milestoneID/reconcile` | ✗ | ✗ | ✓ |
 | `GET /cv/:slug` | public | public | public |
 | `GET /cv/:slug/verify/:entryID` | public | public | public |
 
