@@ -1,14 +1,11 @@
 package deals
 
 import (
-	"database/sql"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 // newTestDealRouter mounts the authenticated deal routes behind a stub auth
@@ -37,8 +34,6 @@ func TestDealResponsesRedactSecrets(t *testing.T) {
 	repo := newFakeDealRepo()
 	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusReleased
-	deal.PayoutCheckingID = "payout-cc"
-	deal.PayoutAttemptedAt = sql.NullTime{Time: time.Now(), Valid: true}
 
 	service := newTestService(repo)
 	router := newTestDealRouter(t, service, "client-user", "client@example.com")
@@ -51,7 +46,7 @@ func TestDealResponsesRedactSecrets(t *testing.T) {
 	}
 	body := resp.Body.String()
 
-	for _, secret := range []string{`"preimage"`, `"payee_invoice"`, `"payout_checking_id"`, `"payout_attempted_at"`} {
+	for _, secret := range []string{`"preimage"`, `"payee_invoice"`, `"payout_checking_id"`} {
 		if strings.Contains(body, secret) {
 			t.Errorf("deal response leaks %q: %s", secret, body)
 		}
@@ -67,8 +62,7 @@ func TestDealResponsesRedactSecrets(t *testing.T) {
 // every deal through the same redacted view.
 func TestListDealsResponsesRedactSecrets(t *testing.T) {
 	repo := newFakeDealRepo()
-	deal := escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
-	deal.PayoutCheckingID = "payout-cc"
+	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 
 	service := newTestService(repo)
 	router := newTestDealRouter(t, service, "freelancer-1", "freelancer-1@example.com")

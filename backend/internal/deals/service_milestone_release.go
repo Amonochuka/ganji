@@ -354,3 +354,107 @@ func (s *Service) ResolveMilestone(ctx context.Context, operatorEmail, dealID, m
 		return nil, fmt.Errorf("%w: resolution must be %q or %q", ErrInvalidInput, DisputeResolutionRelease, DisputeResolutionRefund)
 	}
 }
+
+// ReconcileMilestonePayout is the operator backstop for a hung milestone payout.
+// confirm_payout: verifies LNbits outgoing payout is paid/terminal success,
+// records payout_checking_id and releases milestone without moving money.
+// reset_payout: clears an unconfirmed attempt marker so normal release can retry.
+func (s *Service) ReconcileMilestonePayout(ctx context.Context, operatorEmail, dealID, milestoneID string, action ReconcileAction, payoutCheckingID string) (*Milestone, error) {
+	operatorEmail = strings.ToLower(strings.TrimSpace(operatorEmail))
+	if operatorEmail == "" || dealID == "" || milestoneID == "" {
+		return nil, fmt.Errorf("%w: operator email, deal id and milestone id are required", ErrInvalidInput)
+	}
+	deal, err := s.repo.GetDealByID(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+	if err != nil {
+		return nil, err
+	}
+	if m.DealID != deal.ID {
+		return nil, ErrMilestoneNotFound
+	}
+
+	switch action {
+	case ReconcileConfirmPayout:
+		payoutCheckingID = strings.TrimSpace(payoutCheckingID)
+		if payoutCheckingID == "" {
+			return nil, fmt.Errorf("%w: payout_checking_id is required for confirm_payout", ErrInvalidInput)
+		}
+		if m.Status == MilestoneReleased {
+			if m.PayoutCheckingID == payoutCheckingID || m.PayoutCheckingID == "" {
+				_ = s.repo.UpdateMilestonePayout(ctx, m.ID, payoutCheckingID)
+				m.PayoutCheckingID = payoutCheckingID
+				return m, nil
+			}
+			return nil, fmt.Errorf("%w: milestone already released with different payout %s", ErrInvalidTransition, m.PayoutCheckingID)
+		}
+		if !CanMilestoneTransition(m.Status, MilestoneReleased) {
+			return nil, fmt.Errorf("%w: milestone cannot be released from status %s", ErrInvalidTransition, m.Status)
+		}
+		ok, failed, err := s.checkOutgoingPayout(ctx, payoutCheckingID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: verifying payout %s: %v", ErrPayoutInFlight, payoutCheckingID, err)
+		}
+		if !ok || failed {
+			return nil, fmt.Errorf("%w: payout %s is not confirmed as paid", ErrInvalidInput, payoutCheckingID)
+		}
+		settled, err := s.isMilestoneHoldSettled(ctx, m)
+		if err != nil || !settled {
+			return nil, fmt.Errorf("%w: milestone hold is not settled; cannot confirm payout without settled escrow", ErrInvalidInput)
+		}
+		now := time.Now().UTC()
+		if err := s.repo.UpdateMilestoneStatus(ctx, m.ID, MilestoneReleased, &now); err != nil {
+			return nil, err
+		}
+		if err := s.repo.UpdateMilestonePayout(ctx, m.ID, payoutCheckingID); err != nil {
+			return nil, err
+		}
+		m.Status = MilestoneReleased
+		m.PayoutCheckingID = payoutCheckingID
+		m.CompletedAt = sql.NullTime{Time: now, Valid: true}
+		s.anchorReleasedDeal(ctx, deal)
+		// advance sequence/finalize deal like release path
+		ms, _ := s.repo.GetMilestonesByDeal(ctx, deal.ID)
+		idx := -1
+		for i := range ms {
+			if ms[i].ID == milestoneID {
+				idx = i
+				break
+			}
+		}
+		if idx >= 0 && idx+1 < len(ms) {
+			next := ms[idx+1]
+			if next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
+				_ = s.FundMilestone(ctx, deal, &next)
+			} else if next.Status == MilestonePending {
+				_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
+			}
+		} else if idx >= 0 {
+			_ = s.repo.UpdateStatus(ctx, deal.ID, StatusReleased)
+			s.notifyReleased(deal)
+		}
+		return m, nil
+
+	case ReconcileResetPayout:
+		if m.PayoutCheckingID != "" {
+			return nil, fmt.Errorf("%w: milestone payout %s is recorded; cannot reset", ErrPayoutInFlight, m.PayoutCheckingID)
+		}
+		if !m.PayoutAttemptedAt.Valid {
+			return nil, fmt.Errorf("%w: milestone has no unconfirmed payout attempt", ErrInvalidInput)
+		}
+		if !canResetMilestonePayoutAttempt(m) {
+			return nil, fmt.Errorf("%w: milestone cannot reset payout from status %s", ErrInvalidTransition, m.Status)
+		}
+		if err := s.repo.ClearMilestonePayoutTracking(ctx, m.ID); err != nil {
+			return nil, err
+		}
+		m.PayoutCheckingID = ""
+		m.PayoutAttemptedAt = sql.NullTime{}
+		return m, nil
+
+	default:
+		return nil, fmt.Errorf("%w: reconcile action must be %q or %q", ErrInvalidInput, ReconcileConfirmPayout, ReconcileResetPayout)
+	}
+}

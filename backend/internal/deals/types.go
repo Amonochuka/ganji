@@ -29,33 +29,28 @@ const (
 // only describes the transaction itself. Preimage holds the raw hex
 // preimage (needed to settle the hold); PreimageHash is sha256(preimage)
 // for verification and CV anchoring. PayeeInvoice is the freelancer's
-// Lightning destination for the payout leg. PayoutCheckingID tracks the
-// outgoing payout payment for idempotency (double-pay prevention);
-// PayoutAttemptedAt is the durable "payout attempt started" marker committed
-// BEFORE any money moves, so a release that crashes mid-network can never be
-// auto-resumed into a second payout.
+// Lightning destination for the payout leg. Deal-level payout tracking is
+// milestone-only (milestones hold payout fields).
 type Deal struct {
-	ID                string       `json:"id"`
-	FreelancerID      string       `json:"freelancer_id"`
-	ClientEmail       string       `json:"client_email"`
-	Title             string       `json:"title"`
-	AmountSats        int64        `json:"amount_sats"`
-	SourcePlatform    string       `json:"source_platform"`
-	PreimageHash      string       `json:"preimage_hash"`
-	Preimage          string       `json:"preimage,omitempty"`
-	PayeeInvoice      string       `json:"payee_invoice,omitempty"`
-	Invoice           string       `json:"invoice"`
-	CheckingID        string       `json:"checking_id"`
-	PayoutCheckingID  string       `json:"payout_checking_id,omitempty"`
-	PayoutAttemptedAt sql.NullTime `json:"payout_attempted_at"`
-	ShareToken        string       `json:"share_token"`
-	Status            Status       `json:"status"`
-	DisputeReason     string       `json:"dispute_reason"`
-	DisputedAt        sql.NullTime `json:"disputed_at"`
-	ResolvedAt        sql.NullTime `json:"resolved_at"`
-	ResolvedBy        string       `json:"resolved_by,omitempty"`
-	CreatedAt         time.Time    `json:"created_at"`
-	VerifiedAt        sql.NullTime `json:"verified_at"`
+	ID             string       `json:"id"`
+	FreelancerID   string       `json:"freelancer_id"`
+	ClientEmail    string       `json:"client_email"`
+	Title          string       `json:"title"`
+	AmountSats     int64        `json:"amount_sats"`
+	SourcePlatform string       `json:"source_platform"`
+	PreimageHash   string       `json:"preimage_hash"`
+	Preimage       string       `json:"preimage,omitempty"`
+	PayeeInvoice   string       `json:"payee_invoice,omitempty"`
+	Invoice        string       `json:"invoice"`
+	CheckingID     string       `json:"checking_id"`
+	ShareToken     string       `json:"share_token"`
+	Status         Status       `json:"status"`
+	DisputeReason  string       `json:"dispute_reason"`
+	DisputedAt     sql.NullTime `json:"disputed_at"`
+	ResolvedAt     sql.NullTime `json:"resolved_at"`
+	ResolvedBy     string       `json:"resolved_by,omitempty"`
+	CreatedAt      time.Time    `json:"created_at"`
+	VerifiedAt     sql.NullTime `json:"verified_at"`
 }
 
 // DisputeResolution is the operator's verdict on a disputed deal. It is the
@@ -95,15 +90,14 @@ const (
 // of the response on purpose so a shared link never leaks the DB row handle
 // (rotation would otherwise be pointless if the UUID leaked inside the body).
 type PublicDeal struct {
-	Title                string          `json:"title"`
-	AmountSats           int64           `json:"amount_sats"`
-	SourcePlatform       string          `json:"source_platform"`
-	Invoice              string          `json:"invoice"`
-	Status               Status          `json:"status"`
-	DisputeReason        string          `json:"dispute_reason"`
-	CreatedAt            time.Time       `json:"created_at"`
-	Milestones           []MilestoneView `json:"milestones,omitempty"`
-	PayoutResetAvailable bool            `json:"payout_reset_available,omitempty"`
+	Title          string          `json:"title"`
+	AmountSats     int64           `json:"amount_sats"`
+	SourcePlatform string          `json:"source_platform"`
+	Invoice        string          `json:"invoice"`
+	Status         Status          `json:"status"`
+	DisputeReason  string          `json:"dispute_reason"`
+	CreatedAt      time.Time       `json:"created_at"`
+	Milestones     []MilestoneView `json:"milestones,omitempty"`
 }
 
 type PublicMilestoneAction struct {
@@ -123,30 +117,27 @@ type MilestoneInput struct {
 //   - Preimage — the raw escrow settle secret (revealing it completes the held
 //     payment).
 //   - PayeeInvoice — the freelancer's Lightning payout destination.
-//   - PayoutCheckingID / PayoutAttemptedAt — internal payout-tracking markers,
-//     part of the double-pay-prevention machinery, of no use to either party.
 //
 // Everything else is surfaced to both the freelancer and the client (the
 // client is authorized by email match). See explained.md §10 #1.
 type DealView struct {
-	ID                   string     `json:"id"`
-	FreelancerID         string     `json:"freelancer_id"`
-	ClientEmail          string     `json:"client_email"`
-	Title                string     `json:"title"`
-	AmountSats           int64      `json:"amount_sats"`
-	SourcePlatform       string     `json:"source_platform"`
-	PreimageHash         string     `json:"preimage_hash"`
-	Invoice              string     `json:"invoice"`
-	CheckingID           string     `json:"checking_id"`
-	ShareToken           string     `json:"share_token"`
-	Status               Status     `json:"status"`
-	PayoutResetAvailable bool       `json:"payout_reset_available,omitempty"`
-	DisputeReason        string     `json:"dispute_reason"`
-	DisputedAt           *time.Time `json:"disputed_at"`
-	ResolvedAt           *time.Time `json:"resolved_at"`
-	ResolvedBy           string     `json:"resolved_by,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	VerifiedAt           *time.Time `json:"verified_at"`
+	ID             string     `json:"id"`
+	FreelancerID   string     `json:"freelancer_id"`
+	ClientEmail    string     `json:"client_email"`
+	Title          string     `json:"title"`
+	AmountSats     int64      `json:"amount_sats"`
+	SourcePlatform string     `json:"source_platform"`
+	PreimageHash   string     `json:"preimage_hash"`
+	Invoice        string     `json:"invoice"`
+	CheckingID     string     `json:"checking_id"`
+	ShareToken     string     `json:"share_token"`
+	Status         Status     `json:"status"`
+	DisputeReason  string     `json:"dispute_reason"`
+	DisputedAt     *time.Time `json:"disputed_at"`
+	ResolvedAt     *time.Time `json:"resolved_at"`
+	ResolvedBy     string     `json:"resolved_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	VerifiedAt     *time.Time `json:"verified_at"`
 	// Milestones carries per-milestone truth in milestone mode (empty in
 	// legacy single-hold mode). Order by Order asc. Invoice/CheckingID/Status
 	// on the view mirror the active milestone (first non-terminal) for
@@ -170,24 +161,23 @@ func nullTime(nt sql.NullTime) *time.Time {
 // View redacts a deal for API responses (see DealView).
 func (d *Deal) View() DealView {
 	return DealView{
-		ID:                   d.ID,
-		FreelancerID:         d.FreelancerID,
-		ClientEmail:          d.ClientEmail,
-		Title:                d.Title,
-		AmountSats:           d.AmountSats,
-		SourcePlatform:       d.SourcePlatform,
-		PreimageHash:         d.PreimageHash,
-		Invoice:              d.Invoice,
-		CheckingID:           d.CheckingID,
-		ShareToken:           d.ShareToken,
-		Status:               d.Status,
-		PayoutResetAvailable: false,
-		DisputeReason:        d.DisputeReason,
-		DisputedAt:           nullTime(d.DisputedAt),
-		ResolvedAt:           nullTime(d.ResolvedAt),
-		ResolvedBy:           d.ResolvedBy,
-		CreatedAt:            d.CreatedAt,
-		VerifiedAt:           nullTime(d.VerifiedAt),
+		ID:             d.ID,
+		FreelancerID:   d.FreelancerID,
+		ClientEmail:    d.ClientEmail,
+		Title:          d.Title,
+		AmountSats:     d.AmountSats,
+		SourcePlatform: d.SourcePlatform,
+		PreimageHash:   d.PreimageHash,
+		Invoice:        d.Invoice,
+		CheckingID:     d.CheckingID,
+		ShareToken:     d.ShareToken,
+		Status:         d.Status,
+		DisputeReason:  d.DisputeReason,
+		DisputedAt:     nullTime(d.DisputedAt),
+		ResolvedAt:     nullTime(d.ResolvedAt),
+		ResolvedBy:     d.ResolvedBy,
+		CreatedAt:      d.CreatedAt,
+		VerifiedAt:     nullTime(d.VerifiedAt),
 	}
 }
 
@@ -197,14 +187,13 @@ func (d *Deal) View() DealView {
 // share token itself.
 func (d *Deal) PublicView() PublicDeal {
 	return PublicDeal{
-		Title:                d.Title,
-		AmountSats:           d.AmountSats,
-		SourcePlatform:       d.SourcePlatform,
-		Invoice:              d.Invoice,
-		Status:               d.Status,
-		DisputeReason:        d.DisputeReason,
-		CreatedAt:            d.CreatedAt,
-		PayoutResetAvailable: false,
+		Title:          d.Title,
+		AmountSats:     d.AmountSats,
+		SourcePlatform: d.SourcePlatform,
+		Invoice:        d.Invoice,
+		Status:         d.Status,
+		DisputeReason:  d.DisputeReason,
+		CreatedAt:      d.CreatedAt,
 	}
 }
 

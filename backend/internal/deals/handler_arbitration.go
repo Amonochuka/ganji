@@ -106,11 +106,9 @@ func RegisterArbitrationRoutes(router gin.IRouter, h *Handler) {
 	group.POST("/:dealID/resolve", h.ResolveDispute)
 	group.POST("/deals/:dealID/milestones/:milestoneID/resolve", h.ResolveMilestone)
 
-	// Operator reconcile for hung payouts: the human backstop to the
-	// no-auto-resend payout policy (see Service.ReconcilePayout). Mounted here
-	// so it inherits the same operator-only gate.
+	// Operator reconcile for hung milestone payouts.
 	reconcile := router.Group("/deals")
-	reconcile.POST("/:dealID/reconcile", h.ReconcileDeal)
+	reconcile.POST("/:dealID/milestones/:milestoneID/reconcile", h.ReconcileMilestone)
 }
 
 type reconcileDealRequest struct {
@@ -118,13 +116,11 @@ type reconcileDealRequest struct {
 	PayoutCheckingID string          `json:"payout_checking_id"`
 }
 
-// ReconcileDeal lets an operator unstick a deal whose payout is hung. They
-// confirmed the true state against LNbits history and either record a verified
-// payout (confirm_payout -> release) or clear a never-sent attempt
-// (reset_payout -> re-payable by a normal approve/release).
-func (h *Handler) ReconcileDeal(c *gin.Context) {
+// ReconcileMilestone lets an operator unstick a milestone whose payout is hung.
+func (h *Handler) ReconcileMilestone(c *gin.Context) {
 	email := c.GetString("email")
 	dealID := c.Param("dealID")
+	milestoneID := c.Param("milestoneID")
 
 	var req reconcileDealRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -132,15 +128,14 @@ func (h *Handler) ReconcileDeal(c *gin.Context) {
 		return
 	}
 
-	deal, err := h.service.ReconcilePayout(c.Request.Context(), email, dealID, req.Action, req.PayoutCheckingID)
+	m, err := h.service.ReconcileMilestonePayout(c.Request.Context(), email, dealID, milestoneID, req.Action, req.PayoutCheckingID)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidInput),
-			errors.Is(err, ErrInvalidTransition):
+		case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-		case errors.Is(err, ErrDealNotFound):
+		case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		case errors.Is(err, ErrPayoutInFlight):
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -150,7 +145,5 @@ func (h *Handler) ReconcileDeal(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"deal": deal.View(),
-	})
+	c.JSON(http.StatusOK, gin.H{"milestone": m, "milestone_id": m.ID, "status": m.Status})
 }

@@ -42,11 +42,10 @@ func (s *Service) ResolveDispute(ctx context.Context, operatorEmail, dealID stri
 	return deal, nil
 }
 
-// ReconcilePayout is legacy deal-level reconciliation. In milestone-only mode,
-// payouts are tracked per milestone; use milestone/public reset or milestone
-// resolution flows. Kept as explicit unsupported endpoint to avoid unsafe
-// deal-level money moves.
-func (s *Service) ReconcilePayout(ctx context.Context, operatorEmail, dealID string, action ReconcileAction, payoutCheckingID string) (*Deal, error) {
+// ReconcilePayout is the legacy deal-level endpoint; in milestone-only mode it
+// reconciles a specific milestone when milestone_id is provided. deal-level
+// without milestone_id is unsupported.
+func (s *Service) ReconcilePayout(ctx context.Context, operatorEmail, dealID, milestoneID string, action ReconcileAction, payoutCheckingID string) (*Deal, error) {
 	operatorEmail = strings.ToLower(strings.TrimSpace(operatorEmail))
 	if operatorEmail == "" {
 		return nil, fmt.Errorf("%w: operator email is required", ErrInvalidInput)
@@ -54,14 +53,11 @@ func (s *Service) ReconcilePayout(ctx context.Context, operatorEmail, dealID str
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
-	_, err := s.repo.GetDealByID(ctx, dealID)
-	if err != nil {
+	if strings.TrimSpace(milestoneID) == "" {
+		return nil, fmt.Errorf("%w: milestone_id is required for reconcile in milestone-only mode", ErrInvalidInput)
+	}
+	if _, err := s.ReconcileMilestonePayout(ctx, operatorEmail, dealID, strings.TrimSpace(milestoneID), action, payoutCheckingID); err != nil {
 		return nil, err
 	}
-	switch action {
-	case ReconcileConfirmPayout, ReconcileResetPayout:
-		return nil, fmt.Errorf("%w: deal-level payout reconciliation is not supported in milestone-only mode; use milestone payout reset/resolution", ErrInvalidInput)
-	default:
-		return nil, fmt.Errorf("%w: reconcile action must be %q or %q", ErrInvalidInput, ReconcileConfirmPayout, ReconcileResetPayout)
-	}
+	return s.repo.GetDealByID(ctx, dealID)
 }

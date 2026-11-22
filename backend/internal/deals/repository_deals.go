@@ -21,12 +21,11 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 			payee_invoice,
 			invoice,
 			checking_id,
-			payout_checking_id,
 			share_token,
 			status
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 		)
 		RETURNING id, created_at;
 	`
@@ -44,7 +43,6 @@ func (r *Repository) CreateDeal(ctx context.Context, deal *Deal) error {
 		nullString(deal.PayeeInvoice),
 		nullString(deal.Invoice),
 		nullString(deal.CheckingID),
-		nullString(deal.PayoutCheckingID),
 		deal.ShareToken,
 		deal.Status,
 	)
@@ -70,8 +68,6 @@ const dealColumns = `
 		payee_invoice,
 		invoice,
 		checking_id,
-		payout_checking_id,
-		payout_attempted_at,
 		share_token,
 		status,
 		dispute_reason,
@@ -88,7 +84,6 @@ func (r *Repository) scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, 
 		preimage     sql.NullString
 		payeeInvoice sql.NullString
 		checkingID   sql.NullString
-		payoutID     sql.NullString
 		resolvedBy   sql.NullString
 	)
 	deal := &Deal{}
@@ -104,8 +99,6 @@ func (r *Repository) scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, 
 		&payeeInvoice,
 		&deal.Invoice,
 		&checkingID,
-		&payoutID,
-		&deal.PayoutAttemptedAt,
 		&deal.ShareToken,
 		&deal.Status,
 		&deal.DisputeReason,
@@ -125,7 +118,6 @@ func (r *Repository) scanDeal(row interface{ Scan(dest ...any) error }) (*Deal, 
 	deal.Preimage = decrypted
 	deal.PayeeInvoice = payeeInvoice.String
 	deal.CheckingID = checkingID.String
-	deal.PayoutCheckingID = payoutID.String
 	deal.ResolvedBy = resolvedBy.String
 	return deal, nil
 }
