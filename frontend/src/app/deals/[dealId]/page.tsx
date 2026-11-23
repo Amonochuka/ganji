@@ -7,11 +7,28 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { DealCard } from "@/components/deals/deal-card";
-import { api, type Artifact, type ArtifactKind, type DealView, type DealStatus, type DealDetailResponse, type SubmitWorkResponse, type DisputeDealResponse, type MilestoneView } from "@/lib/api/api-client";
+import {
+  api,
+  type Artifact,
+  type ArtifactKind,
+  type DealView,
+  type DealStatus,
+  type DealDetailResponse,
+  type SubmitWorkResponse,
+  type DisputeDealResponse,
+  type MilestoneView,
+} from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatCurrency } from "@/lib/utils/format";
 import { copyText } from "@/lib/utils/clipboard";
-import { DealHeader, StatusTimeline, getMilestoneStatusClass, getMilestoneStatusLabel, getStatusClass, getStatusLabel } from "./deal-ui";
+import {
+  DealHeader,
+  StatusTimeline,
+  getMilestoneStatusClass,
+  getMilestoneStatusLabel,
+  getStatusClass,
+  getStatusLabel,
+} from "./deal-ui";
 
 export default function DealDetailPage() {
   const router = useRouter();
@@ -24,6 +41,7 @@ export default function DealDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showBanner, setShowBanner] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneView[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -51,7 +69,8 @@ export default function DealDetailPage() {
       setDeal(res.deal);
       if (!silent) setLoadError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load deal";
+      const message =
+        err instanceof Error ? err.message : "Failed to load deal";
       if (!silent) setLoadError(message);
       else setActionError(message);
     } finally {
@@ -65,7 +84,9 @@ export default function DealDetailPage() {
       const res = await api.listMilestones(dealId, tokens.access_token);
       setMilestones(res.milestones);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to load milestones");
+      setActionError(
+        err instanceof Error ? err.message : "Failed to load milestones",
+      );
     }
   }
 
@@ -75,7 +96,9 @@ export default function DealDetailPage() {
       const res = await api.listArtifacts(dealId, tokens.access_token);
       setArtifacts(res.artifacts ?? []);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to load deliverables");
+      setActionError(
+        err instanceof Error ? err.message : "Failed to load deliverables",
+      );
     }
   }
 
@@ -89,7 +112,9 @@ export default function DealDetailPage() {
       await fetchMilestones();
       await fetchArtifacts();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Failed to ${action}`);
+      setActionError(
+        err instanceof Error ? err.message : `Failed to ${action}`,
+      );
     } finally {
       setActionLoading(null);
     }
@@ -110,7 +135,12 @@ export default function DealDetailPage() {
     }
     const file = new File([value], "work-link.txt", { type: "text/plain" });
     await handleAction("attach work link", async () => {
-      await api.uploadArtifact(dealId, "source_file", file, tokens!.access_token);
+      await api.uploadArtifact(
+        dealId,
+        "source_file",
+        file,
+        tokens!.access_token,
+      );
       setWorkLink("");
     });
   }
@@ -122,7 +152,12 @@ export default function DealDetailPage() {
     }
     const file = selectedFile;
     await handleAction("upload artifact", async () => {
-      await api.uploadArtifact(dealId, artifactKind, file, tokens!.access_token);
+      await api.uploadArtifact(
+        dealId,
+        artifactKind,
+        file,
+        tokens!.access_token,
+      );
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     });
@@ -137,7 +172,11 @@ export default function DealDetailPage() {
 
   async function handleDownloadArtifact(artifact: Artifact) {
     await handleAction("download artifact", async () => {
-      const blob = await api.downloadArtifact(dealId, artifact.id, tokens!.access_token);
+      const blob = await api.downloadArtifact(
+        dealId,
+        artifact.id,
+        tokens!.access_token,
+      );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -153,7 +192,11 @@ export default function DealDetailPage() {
     const reason = prompt("Dispute reason (required):");
     if (!reason?.trim()) return;
     await handleAction("dispute", async () => {
-      const res = await api.disputeDeal(dealId, reason.trim(), tokens!.access_token);
+      const res = await api.disputeDeal(
+        dealId,
+        reason.trim(),
+        tokens!.access_token,
+      );
       setDeal(res.deal);
     });
   }
@@ -173,7 +216,9 @@ export default function DealDetailPage() {
       setNotice("Share link copied to clipboard");
       setTimeout(() => setNotice(null), 3000);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Could not copy share link");
+      setActionError(
+        err instanceof Error ? err.message : "Could not copy share link",
+      );
     }
   }
 
@@ -185,7 +230,12 @@ export default function DealDetailPage() {
   }
 
   async function handleExitDeal() {
-    if (!window.confirm("Exit this deal? Mid-milestone exit (not submitted/approved) cancels that milestone hold per redesign.")) return;
+    if (
+      !window.confirm(
+        "Exit this deal? Mid-milestone exit (not submitted/approved) cancels that milestone hold per redesign.",
+      )
+    )
+      return;
     await handleAction("exit deal", async () => {
       await api.exitDeal(dealId, tokens!.access_token);
       await fetchDeal(true);
@@ -206,6 +256,10 @@ export default function DealDetailPage() {
     await handleAction("check payment", async () => {
       const res = await api.checkPayment(dealId, tokens.access_token);
       setDeal(res.deal);
+      // Show banner and change button after funding is confirmed
+      if (res.deal.status === "locked") {
+        setShowBanner(true);
+      }
       await fetchMilestones();
       await fetchArtifacts();
     });
@@ -250,14 +304,25 @@ export default function DealDetailPage() {
   }
 
   const isFreelancer = user?.id === deal.freelancer_id;
-  const isClient = !!user && user.email.toLowerCase() === deal.client_email.toLowerCase();
+  const isClient =
+    !!user && user.email.toLowerCase() === deal.client_email.toLowerCase();
   const canAttachArtifact = isFreelancer && deal.status === "locked";
   const canSubmit = canAttachArtifact && artifacts.length > 0;
-  const fundsHeld = ["locked", "work_submitted", "reviewing"].includes(deal.status);
-  const canDispute = isFreelancer && (deal.status === "locked" || deal.status === "work_submitted" || deal.status === "reviewing");
+  const fundsHeld = ["locked", "work_submitted", "reviewing"].includes(
+    deal.status,
+  );
+  const canDispute =
+    isFreelancer &&
+    (deal.status === "locked" ||
+      deal.status === "work_submitted" ||
+      deal.status === "reviewing");
   const canRotateLink = isFreelancer;
-  const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(deal.status);
-  const clientCanDispute = ["locked", "work_submitted", "reviewing"].includes(deal.status);
+  const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(
+    deal.status,
+  );
+  const clientCanDispute = ["locked", "work_submitted", "reviewing"].includes(
+    deal.status,
+  );
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
@@ -267,25 +332,37 @@ export default function DealDetailPage() {
         <div className="mx-auto max-w-4xl">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
             <div>
-              <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-ink-500 hover:text-ink-300 mb-2 block">
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center gap-2 text-sm text-ink-500 hover:text-ink-300 mb-2 block"
+              >
                 ← Dashboard
               </Link>
-              <h1 className="font-display text-3xl font-semibold text-ink-100">{deal.title}</h1>
+              <h1 className="font-display text-3xl font-semibold text-ink-100">
+                {deal.title}
+              </h1>
             </div>
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${getStatusClass(deal.status)}`}>
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${getStatusClass(deal.status)}`}
+            >
               <StatusIcon status={deal.status} /> {getStatusLabel(deal.status)}
             </span>
           </div>
 
           {(actionError || notice) && (
-            <div className={`mb-6 p-4 rounded-lg text-sm border ${actionError ? "bg-yellow-600/10 border-yellow-600/30 text-yellow-400" : "bg-green-600/10 border-green-600/30 text-green-400"}`}>
+            <div
+              className={`mb-6 p-4 rounded-lg text-sm border ${actionError ? "bg-yellow-600/10 border-yellow-600/30 text-yellow-400" : "bg-green-600/10 border-green-600/30 text-green-400"}`}
+            >
               {actionError || notice}
             </div>
           )}
 
           {fundsHeld && (
             <div className="mb-6 p-4 rounded-lg bg-blue-600/10 border border-blue-600/30 text-sm text-blue-400">
-              <span className="inline-flex items-center gap-1.5"><StatusIcon status="locked" /> Funds held in Lightning escrow. Ganji verified the hold; work can proceed.</span>
+              <span className="inline-flex items-center gap-1.5">
+                <StatusIcon status="locked" /> Funds held in Lightning escrow.
+                Ganji verified the hold; work can proceed.
+              </span>
             </div>
           )}
 
@@ -294,40 +371,60 @@ export default function DealDetailPage() {
               <DealCard deal={deal} />
 
               <div className="vault-card p-6 vault-seam">
-                <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Deal Details</h2>
+                <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                  Deal Details
+                </h2>
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
                     <dt className="text-ink-500">Amount</dt>
-                    <dd className="font-mono text-lg font-medium text-ink-100 mono-tabular">{formatCurrency(deal.amount_sats)}</dd>
+                    <dd className="font-mono text-lg font-medium text-ink-100 mono-tabular">
+                      {formatCurrency(deal.amount_sats)}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-ink-500">Source Platform</dt>
-                    <dd className="text-ink-300 font-mono">{deal.source_platform}</dd>
+                    <dd className="text-ink-300 font-mono">
+                      {deal.source_platform}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-ink-500">Client</dt>
-                    <dd className="text-ink-300 font-mono truncate">{deal.client_email}</dd>
+                    <dd className="text-ink-300 font-mono truncate">
+                      {deal.client_email}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-ink-500">Freelancer</dt>
-                    <dd className="text-ink-300 font-mono">{deal.freelancer_id === user?.id ? "You" : deal.freelancer_id}</dd>
+                    <dd className="text-ink-300 font-mono">
+                      {deal.freelancer_id === user?.id
+                        ? "You"
+                        : deal.freelancer_id}
+                    </dd>
                   </div>
                   <div className="sm:col-span-2">
                     <dt className="text-ink-500">Preimage Hash</dt>
-                    <dd className="font-mono text-xs text-ink-400 break-all">{deal.preimage_hash}</dd>
+                    <dd className="font-mono text-xs text-ink-400 break-all">
+                      {deal.preimage_hash}
+                    </dd>
                   </div>
                   <div className="sm:col-span-2">
                     <dt className="text-ink-500">LNbits Checking ID</dt>
-                    <dd className="font-mono text-xs text-ink-400">{deal.checking_id || "—"}</dd>
+                    <dd className="font-mono text-xs text-ink-400">
+                      {deal.checking_id || "—"}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-ink-500">Created</dt>
-                    <dd className="text-ink-300 font-mono">{new Date(deal.created_at).toLocaleString()}</dd>
+                    <dd className="text-ink-300 font-mono">
+                      {new Date(deal.created_at).toLocaleString()}
+                    </dd>
                   </div>
                   {deal.verified_at && (
                     <div>
                       <dt className="text-ink-500">Anchored to Bitcoin</dt>
-                      <dd className="text-ink-300 font-mono text-green-400">{new Date(deal.verified_at).toLocaleString()}</dd>
+                      <dd className="text-ink-300 font-mono text-green-400">
+                        {new Date(deal.verified_at).toLocaleString()}
+                      </dd>
                     </div>
                   )}
                 </dl>
@@ -335,21 +432,30 @@ export default function DealDetailPage() {
 
               {deal.dispute_reason && (
                 <div className="vault-card p-6 vault-seam border-red-600/30 bg-red-600/5">
-                  <h2 className="font-display text-lg font-semibold text-red-400 mb-2 flex items-center gap-2"><StatusIcon status="disputed" /> Dispute</h2>
+                  <h2 className="font-display text-lg font-semibold text-red-400 mb-2 flex items-center gap-2">
+                    <StatusIcon status="disputed" /> Dispute
+                  </h2>
                   <p className="text-ink-300">{deal.dispute_reason}</p>
                   {deal.disputed_at && (
-                    <p className="mt-2 text-xs text-ink-500 font-mono">Disputed at {new Date(deal.disputed_at).toLocaleString()}</p>
+                    <p className="mt-2 text-xs text-ink-500 font-mono">
+                      Disputed at {new Date(deal.disputed_at).toLocaleString()}
+                    </p>
                   )}
                 </div>
               )}
 
               {(isFreelancer || isClient || artifacts.length > 0) && (
                 <div className="vault-card p-6 vault-seam">
-                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Deliverables</h2>
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Deliverables
+                  </h2>
                   {canAttachArtifact && (
                     <div className="space-y-4 mb-6">
                       <div className="space-y-2">
-                        <label htmlFor="work-link" className="text-sm font-medium text-ink-300">
+                        <label
+                          htmlFor="work-link"
+                          className="text-sm font-medium text-ink-300"
+                        >
                           Work link or delivery note
                         </label>
                         <textarea
@@ -363,14 +469,20 @@ export default function DealDetailPage() {
                         <Button
                           size="sm"
                           onClick={handleAttachWorkLink}
-                          disabled={!workLink.trim() || actionLoading === "attach work link"}
+                          disabled={
+                            !workLink.trim() ||
+                            actionLoading === "attach work link"
+                          }
                           isLoading={actionLoading === "attach work link"}
                         >
                           Attach Work Link
                         </Button>
                       </div>
                       <div className="space-y-2">
-                        <label htmlFor="artifact-file" className="text-sm font-medium text-ink-300">
+                        <label
+                          htmlFor="artifact-file"
+                          className="text-sm font-medium text-ink-300"
+                        >
                           Upload a deliverable file
                         </label>
                         <div className="flex flex-wrap gap-2">
@@ -378,13 +490,19 @@ export default function DealDetailPage() {
                             ref={fileInputRef}
                             id="artifact-file"
                             type="file"
-                            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                            onChange={(event) =>
+                              setSelectedFile(event.target.files?.[0] ?? null)
+                            }
                             className="flex-1 min-w-[200px] rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-300 file:mr-3 file:rounded file:border-0 file:bg-gold-500 file:px-3 file:py-1 file:text-vault-bg"
                           />
                           <select
                             aria-label="Artifact kind"
                             value={artifactKind}
-                            onChange={(event) => setArtifactKind(event.target.value as ArtifactKind)}
+                            onChange={(event) =>
+                              setArtifactKind(
+                                event.target.value as ArtifactKind,
+                              )
+                            }
                             className="rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-300"
                           >
                             <option value="source_file">source_file</option>
@@ -393,7 +511,10 @@ export default function DealDetailPage() {
                           <Button
                             size="sm"
                             onClick={handleUploadFile}
-                            disabled={!selectedFile || actionLoading === "upload artifact"}
+                            disabled={
+                              !selectedFile ||
+                              actionLoading === "upload artifact"
+                            }
                             isLoading={actionLoading === "upload artifact"}
                           >
                             Upload File
@@ -403,15 +524,23 @@ export default function DealDetailPage() {
                     </div>
                   )}
                   {artifacts.length === 0 ? (
-                    <p className="text-sm text-ink-500">No deliverables attached yet.</p>
+                    <p className="text-sm text-ink-500">
+                      No deliverables attached yet.
+                    </p>
                   ) : (
                     <ul className="space-y-2">
                       {artifacts.map((artifact) => (
-                        <li key={artifact.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-vault-border bg-vault-raised px-3 py-2">
+                        <li
+                          key={artifact.id}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-vault-border bg-vault-raised px-3 py-2"
+                        >
                           <div className="min-w-0">
-                            <p className="truncate font-mono text-sm text-ink-200">{artifact.storage_key.split("/").pop()}</p>
+                            <p className="truncate font-mono text-sm text-ink-200">
+                              {artifact.storage_key.split("/").pop()}
+                            </p>
                             <p className="text-xs text-ink-500">
-                              {artifact.kind} • {new Date(artifact.uploaded_at).toLocaleString()}
+                              {artifact.kind} •{" "}
+                              {new Date(artifact.uploaded_at).toLocaleString()}
                             </p>
                           </div>
                           <div className="flex gap-2">
@@ -428,7 +557,9 @@ export default function DealDetailPage() {
                               <Button
                                 variant="danger"
                                 size="sm"
-                                onClick={() => handleDeleteArtifact(artifact.id)}
+                                onClick={() =>
+                                  handleDeleteArtifact(artifact.id)
+                                }
                                 disabled={actionLoading === "delete artifact"}
                                 isLoading={actionLoading === "delete artifact"}
                               >
@@ -441,17 +572,24 @@ export default function DealDetailPage() {
                     </ul>
                   )}
                   {canAttachArtifact && artifacts.length === 0 && (
-                    <p className="mt-3 text-xs text-yellow-400">Attach at least one deliverable before clicking Submit Work.</p>
+                    <p className="mt-3 text-xs text-yellow-400">
+                      Attach at least one deliverable before clicking Submit
+                      Work.
+                    </p>
                   )}
                 </div>
               )}
 
               {isFreelancer && (
                 <div className="vault-card p-6 vault-seam">
-                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Actions</h2>
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Actions
+                  </h2>
                   <div className="flex flex-wrap gap-3">
                     {canAttachArtifact && !canSubmit && (
-                      <span className="flex items-center px-3 py-2 text-sm text-ink-500">Submit Work unlocks after a deliverable is attached.</span>
+                      <span className="flex items-center px-3 py-2 text-sm text-ink-500">
+                        Submit Work unlocks after a deliverable is attached.
+                      </span>
                     )}
                     {canSubmit && (
                       <Button
@@ -494,6 +632,16 @@ export default function DealDetailPage() {
                     )}
                     {deal.status === "locked" && (
                       <Button
+                        variant="outline"
+                        onClick={() => setShowBanner(true)}
+                        disabled={actionLoading}
+                        isLoading={actionLoading}
+                      >
+                        Confirm Funded
+                      </Button>
+                    )}
+                    {deal.status === "locked" && (
+                      <Button
                         variant="ghost"
                         onClick={handleRefreshEscrowStatus}
                         disabled={actionLoading === "refresh escrow status"}
@@ -502,52 +650,91 @@ export default function DealDetailPage() {
                         Check Escrow Status
                       </Button>
                     )}
-                    {(deal.status === "work_submitted" || deal.status === "released") && (
+                    {(deal.status === "work_submitted" ||
+                      deal.status === "released") && (
                       <>
-                        <Button variant="ghost" onClick={handleCheckFreelancerStatus} disabled={actionLoading === "check freelancer status"} isLoading={actionLoading === "check freelancer status"}>
+                        <Button
+                          variant="ghost"
+                          onClick={handleCheckFreelancerStatus}
+                          disabled={actionLoading === "check freelancer status"}
+                          isLoading={
+                            actionLoading === "check freelancer status"
+                          }
+                        >
                           Check Freelancer Status
                         </Button>
-                        {deal.payout_reset_available && <span className="flex items-center px-3 py-2 text-sm text-yellow-400">Payout needs operator confirmation before retry.</span>}
+                        {deal.payout_reset_available && (
+                          <span className="flex items-center px-3 py-2 text-sm text-yellow-400">
+                            Payout needs operator confirmation before retry.
+                          </span>
+                        )}
                       </>
                     )}
-                    {deal.status !== "released" && deal.status !== "refunded" && (
-                      <Button
-                        variant="outline"
-                        onClick={handleExitDeal}
-                        disabled={actionLoading === "exit deal"}
-                        isLoading={actionLoading === "exit deal"}
-                      >
-                        Exit Deal
-                      </Button>
-                    )}
+                    {deal.status !== "released" &&
+                      deal.status !== "refunded" && (
+                        <Button
+                          variant="outline"
+                          onClick={handleExitDeal}
+                          disabled={actionLoading === "exit deal"}
+                          isLoading={actionLoading === "exit deal"}
+                        >
+                          Exit Deal
+                        </Button>
+                      )}
                     {deal.status === "released" && (
                       <span className="flex items-center px-3 py-2 text-sm text-green-400 bg-green-600/10 rounded-lg border border-green-600/30">
-                        <StatusIcon status="released" /> Released — {formatCurrency(deal.amount_sats)} paid to your invoice
+                        <StatusIcon status="released" /> Released —{" "}
+                        {formatCurrency(deal.amount_sats)} paid to your invoice
                       </span>
                     )}
                   </div>
                   {deal.status !== "released" && deal.status !== "refunded" && (
-                    <p className="text-xs text-ink-400 mt-3">Exit mid-milestone (not submitted/approved): that milestone’s escrow hold is cancelled/refunded per redesign.</p>
+                    <p className="text-xs text-ink-400 mt-3">
+                      Exit mid-milestone (not submitted/approved): that
+                      milestone’s escrow hold is cancelled/refunded per
+                      redesign.
+                    </p>
                   )}
+                </div>
+              )}
+
+              {showBanner && (
+                <div className="vault-card p-4 mt-4">
+                  <p className="text-ink-400">
+                    Funds held in Lightning escrow. Ganji verified the hold;
+                    work can proceed.
+                  </p>
                 </div>
               )}
 
               {!isFreelancer && isClient && (
                 <div className="vault-card p-6 vault-seam">
-                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Your Actions</h2>
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Your Actions
+                  </h2>
                   {clientCanApprove && (
                     <div className="mb-4 p-4 rounded-lg bg-gold-500/5 border border-gold-500/30">
-                      <p className="font-medium text-gold-400 mb-1">Review the delivered work</p>
-                      <p className="text-sm text-ink-300">Approving releases escrow (current milestone in sequential mode) to the freelancer.</p>
+                      <p className="font-medium text-gold-400 mb-1">
+                        Review the delivered work
+                      </p>
+                      <p className="text-sm text-ink-300">
+                        Approving releases escrow (current milestone in
+                        sequential mode) to the freelancer.
+                      </p>
                     </div>
                   )}
                   <div className="flex flex-wrap gap-3">
                     {clientCanApprove && (
                       <Button
-                        onClick={() => handleAction("approve", async () => {
-                          const res = await api.approveDeal(dealId, tokens!.access_token);
-                          setDeal(res.deal);
-                        })}
+                        onClick={() =>
+                          handleAction("approve", async () => {
+                            const res = await api.approveDeal(
+                              dealId,
+                              tokens!.access_token,
+                            );
+                            setDeal(res.deal);
+                          })
+                        }
                         disabled={actionLoading === "approve"}
                         isLoading={actionLoading === "approve"}
                         size="lg"
@@ -567,15 +754,28 @@ export default function DealDetailPage() {
                     )}
                     {deal.status === "released" && (
                       <span className="flex items-center px-3 py-2 text-sm text-green-400 bg-green-600/10 rounded-lg border border-green-600/30">
-                        <StatusIcon status="released" /> Payment confirmed to the freelancer
+                        <StatusIcon status="released" /> Payment confirmed to
+                        the freelancer
                       </span>
                     )}
-                    {(deal.status === "work_submitted" || deal.status === "released") && (
+                    {(deal.status === "work_submitted" ||
+                      deal.status === "released") && (
                       <>
-                        <Button variant="ghost" onClick={handleCheckFreelancerStatus} disabled={actionLoading === "check freelancer status"} isLoading={actionLoading === "check freelancer status"}>
+                        <Button
+                          variant="ghost"
+                          onClick={handleCheckFreelancerStatus}
+                          disabled={actionLoading === "check freelancer status"}
+                          isLoading={
+                            actionLoading === "check freelancer status"
+                          }
+                        >
                           Check Freelancer Status
                         </Button>
-                        {deal.payout_reset_available && <span className="flex items-center px-3 py-2 text-sm text-yellow-400">Payout needs operator confirmation before retry.</span>}
+                        {deal.payout_reset_available && (
+                          <span className="flex items-center px-3 py-2 text-sm text-yellow-400">
+                            Payout needs operator confirmation before retry.
+                          </span>
+                        )}
                       </>
                     )}
                     {deal.status === "refunded" && (
@@ -593,55 +793,84 @@ export default function DealDetailPage() {
                         Check Escrow Status
                       </Button>
                     )}
-                    {deal.status !== "released" && deal.status !== "refunded" && (
-                      <Button
-                        variant="danger"
-                        onClick={handleExitDeal}
-                        disabled={actionLoading === "exit deal"}
-                        isLoading={actionLoading === "exit deal"}
-                      >
-                        Exit Deal
-                      </Button>
-                    )}
+                    {deal.status !== "released" &&
+                      deal.status !== "refunded" && (
+                        <Button
+                          variant="danger"
+                          onClick={handleExitDeal}
+                          disabled={actionLoading === "exit deal"}
+                          isLoading={actionLoading === "exit deal"}
+                        >
+                          Exit Deal
+                        </Button>
+                      )}
                   </div>
                 </div>
               )}
 
               <div className="space-y-6">
                 <div className="vault-card p-6 vault-seam">
-                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Milestones</h2>
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Milestones
+                  </h2>
                   {milestones.length === 0 ? (
                     <div className="p-4 rounded-lg border border-vault-border bg-vault-raised/40">
                       <div className="flex justify-between items-start gap-3">
                         <div>
-                          <h3 className="font-medium text-ink-100">#1 Final delivery</h3>
-                          <p className="text-sm text-ink-500">Sats: {formatCurrency(deal.amount_sats)} • Single-step deal</p>
-                          <p className="mt-1 text-xs text-gold-400">Work submitted on the deal is recorded here.</p>
+                          <h3 className="font-medium text-ink-100">
+                            #1 Final delivery
+                          </h3>
+                          <p className="text-sm text-ink-500">
+                            Sats: {formatCurrency(deal.amount_sats)} •
+                            Single-step deal
+                          </p>
+                          <p className="mt-1 text-xs text-gold-400">
+                            Work submitted on the deal is recorded here.
+                          </p>
                         </div>
-                        <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border ${getStatusClass(deal.status)}`}>
-                          <StatusIcon status={deal.status} /> {getStatusLabel(deal.status)}
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border ${getStatusClass(deal.status)}`}
+                        >
+                          <StatusIcon status={deal.status} />{" "}
+                          {getStatusLabel(deal.status)}
                         </span>
                       </div>
                     </div>
                   ) : (
                     <div className="space-y-4">
                       {milestones.map((ms) => (
-                        <div key={ms.id} className="p-4 rounded-lg border transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold-500">
+                        <div
+                          key={ms.id}
+                          className="p-4 rounded-lg border transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold-500"
+                        >
                           <div className="flex justify-between items-start">
                             <div>
-                              <h3 className="font-medium text-ink-100">{ms.title}</h3>
-                              <p className="text-sm text-ink-500">Sats: {formatCurrency(ms.amount_sats)} • Order: #{ms.order}</p>
+                              <h3 className="font-medium text-ink-100">
+                                {ms.title}
+                              </h3>
+                              <p className="text-sm text-ink-500">
+                                Sats: {formatCurrency(ms.amount_sats)} • Order:
+                                #{ms.order}
+                              </p>
                             </div>
-                            <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${getMilestoneStatusClass(ms.status)}`}>
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${getMilestoneStatusClass(ms.status)}`}
+                            >
                               {getMilestoneStatusLabel(ms.status)}
                             </span>
                           </div>
                           {ms.completed_at && (
-                            <p className="mt-1 text-xs text-ink-500 font-mono">Completed: {new Date(ms.completed_at).toLocaleString()}</p>
+                            <p className="mt-1 text-xs text-ink-500 font-mono">
+                              Completed:{" "}
+                              {new Date(ms.completed_at).toLocaleString()}
+                            </p>
                           )}
                           <p className="mt-1 text-xs text-ink-500">
-                            Delivery estimate: {ms.delivery_days} days from funding
-                            {ms.due_at ? ` · Due ${new Date(ms.due_at).toLocaleDateString()}` : ""}
+                            Delivery estimate: {ms.delivery_days} days from
+                            funding
+                            {ms.due_at
+                              ? ` · Due ${new Date(ms.due_at).toLocaleDateString()}`
+                              : ""}
                           </p>
                         </div>
                       ))}
@@ -650,22 +879,33 @@ export default function DealDetailPage() {
                 </div>
 
                 <div className="vault-card p-6 vault-seam">
-                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Timeline</h2>
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Timeline
+                  </h2>
                   <StatusTimeline deal={deal} />
                 </div>
 
                 <div className="vault-card p-6 vault-seam">
-                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Verification</h2>
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Verification
+                  </h2>
                   <p className="text-sm text-ink-500 mb-3">
-                    This deal will be anchored to Bitcoin via OpenTimestamps when released.
+                    This deal will be anchored to Bitcoin via OpenTimestamps
+                    when released.
                   </p>
                   {deal.verified_at ? (
                     <div className="p-3 rounded-lg bg-green-600/10 border border-green-600/30 text-green-400 text-sm">
-                      <span className="inline-flex items-center gap-1.5"><StatusIcon status="valid" /> Verified on Bitcoin at {new Date(deal.verified_at).toLocaleString()}</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <StatusIcon status="valid" /> Verified on Bitcoin at{" "}
+                        {new Date(deal.verified_at).toLocaleString()}
+                      </span>
                     </div>
                   ) : (
                     <div className="p-3 rounded-lg bg-yellow-600/10 border border-yellow-600/30 text-yellow-400 text-sm">
-                      <span className="inline-flex items-center gap-1.5"><StatusIcon status="awaiting_payment" /> Pending verification (anchors on release)</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <StatusIcon status="awaiting_payment" /> Pending
+                        verification (anchors on release)
+                      </span>
                     </div>
                   )}
                 </div>
@@ -674,9 +914,12 @@ export default function DealDetailPage() {
 
             <div className="space-y-6">
               <div className="vault-card p-6 vault-seam">
-                <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">Share Link</h2>
+                <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                  Share Link
+                </h2>
                 <p className="text-sm text-ink-500 mb-4">
-                  Send this to your client. They can view the deal and approve payment.
+                  Send this to your client. They can view the deal and approve
+                  payment.
                 </p>
                 <div className="space-y-3">
                   <div className="flex gap-2">
@@ -686,12 +929,19 @@ export default function DealDetailPage() {
                       value={`${window.location.origin}/public/deals/${deal.share_token}`}
                       className="flex-1 rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm font-mono text-ink-300"
                     />
-                    <Button variant="ghost" size="sm" onClick={handleCopyShareLink}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleCopyShareLink}
+                    >
                       Copy
                     </Button>
                   </div>
                   <p className="text-xs text-ink-500">
-                    Status: <span className="font-mono capitalize">{deal.status.replace("_", " ")}</span>
+                    Status:{" "}
+                    <span className="font-mono capitalize">
+                      {deal.status.replace("_", " ")}
+                    </span>
                   </p>
                 </div>
               </div>
