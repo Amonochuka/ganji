@@ -101,11 +101,13 @@ export default function Dashboard() {
                 {filteredDeals.length} of {deals.length} deal{deals.length !== 1 ? "s" : ""} • Manage your escrows
               </p>
             </div>
-            <Link href="/deals/new">
-              <Button size="lg">
-                Create Deal
-              </Button>
-            </Link>
+            {!user?.is_operator && (
+              <Link href="/deals/new">
+                <Button size="lg">
+                  Create Deal
+                </Button>
+              </Link>
+            )}
           </div>
 
           <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -144,11 +146,15 @@ export default function Dashboard() {
               </div>
               <h2 className="font-display text-xl font-semibold text-ink-100 mb-2">No deals yet</h2>
               <p className="text-ink-500 mb-6 max-w-sm mx-auto">
-                Create your first escrow deal to get started. Funds stay locked until your client approves.
+                {user?.is_operator
+                  ? "No deals found. Deals created by freelancers will appear here for triage."
+                  : "Create your first escrow deal to get started. Funds stay locked until your client approves."}
               </p>
-              <Link href="/deals/new">
-                <Button size="lg">Create Your First Deal</Button>
-              </Link>
+              {!user?.is_operator && (
+                <Link href="/deals/new">
+                  <Button size="lg">Create Your First Deal</Button>
+                </Link>
+              )}
             </div>
           ) : filteredDeals.length === 0 ? (
             <div className="vault-card p-8 text-center text-ink-400">No deals match this filter.</div>

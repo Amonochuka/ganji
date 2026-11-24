@@ -15,7 +15,7 @@ type MilestoneDraft = { title: string; amount_sats: string; delivery_days: strin
 
 export default function CreateDealPage() {
   const router = useRouter();
-  const { tokens, isLoading: authLoading } = useAuth();
+  const { user, tokens, isLoading: authLoading } = useAuth();
 
   const [title, setTitle] = useState("");
   const [amountSats, setAmountSats] = useState("");
@@ -36,6 +36,25 @@ export default function CreateDealPage() {
     if (authLoading) return;
     if (!tokens) router.push("/login");
   }, [authLoading, tokens, router]);
+
+  if (!authLoading && tokens && user?.is_operator) {
+    return (
+      <main className="flex min-h-screen flex-col bg-vault-bg">
+        <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+            <Link href="/dashboard" className="brand-wordmark" aria-label="Ganji Dashboard">ganji</Link>
+          </div>
+        </header>
+        <div className="flex-1 px-6 py-12">
+          <div className="mx-auto max-w-xl vault-card p-8 text-center">
+            <h1 className="font-display text-2xl font-semibold text-ink-100 mb-2">Operator accounts cannot create deals</h1>
+            <p className="text-ink-500 mb-6">Use the operator dashboard for triage, disputes, and reconciliation.</p>
+            <Link href="/dashboard"><Button>Back to Dashboard</Button></Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   const platforms = [
     "Upwork", "Fiverr", "Freelancer.com", "Toptal", "Guru", "PeoplePerHour", "Direct Client", "Other",

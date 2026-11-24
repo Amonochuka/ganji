@@ -36,6 +36,11 @@ type createDealRequest struct {
 }
 
 func (h *Handler) CreateDeal(c *gin.Context) {
+	if c.GetBool("isOperator") {
+		c.JSON(http.StatusForbidden, gin.H{"error": "operator accounts cannot create deals"})
+		return
+	}
+
 	var req createDealRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
