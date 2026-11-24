@@ -61,6 +61,9 @@ func (s *Service) UpdatePayeeInvoice(ctx context.Context, userID, dealID, bolt11
 	if err := s.repo.UpdatePayeeInvoice(ctx, dealID, bolt11); err != nil {
 		return nil, fmt.Errorf("updating payee invoice: %w", err)
 	}
+	if err := s.repo.UpdateMilestonePayeeInvoices(ctx, dealID, bolt11); err != nil {
+		return nil, fmt.Errorf("updating milestone payee invoices: %w", err)
+	}
 
 	deal.PayeeInvoice = bolt11
 	return deal, nil

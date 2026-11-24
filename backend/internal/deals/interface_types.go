@@ -24,6 +24,7 @@ type DealRepository interface {
 	UpdateDisputeResolution(ctx context.Context, dealID string, status Status, resolvedBy string) error
 	GetDealForUpdate(ctx context.Context, dealID string) (*Deal, error)
 	UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error
+	UpdateMilestonePayeeInvoices(ctx context.Context, dealID, payeeInvoice string) error
 	UpdateShareToken(ctx context.Context, dealID, shareToken string) error
 	ListOpenBefore(ctx context.Context, cutoff time.Time) ([]Deal, error)
 	ListDisputed(ctx context.Context) ([]Deal, error)

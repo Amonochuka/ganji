@@ -309,6 +309,20 @@ func (f *fakeDealRepo) UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvo
 	return nil
 }
 
+func (f *fakeDealRepo) UpdateMilestonePayeeInvoices(ctx context.Context, dealID, payeeInvoice string) error {
+	for _, milestone := range f.milestones {
+		if milestone.DealID != dealID {
+			continue
+		}
+		switch milestone.Status {
+		case MilestoneReleased, MilestoneRefunded, MilestoneExited:
+			continue
+		}
+		milestone.PayeeInvoice = payeeInvoice
+	}
+	return nil
+}
+
 func (f *fakeDealRepo) UpdateShareToken(ctx context.Context, dealID, shareToken string) error {
 	deal, ok := f.deals[dealID]
 	if !ok {
@@ -1655,5 +1669,35 @@ func TestGenerateInvoiceWrapsLinkedWalletFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid key") {
 		t.Fatalf("expected upstream error detail, got %v", err)
+	}
+}
+
+func TestUpdatePayeeInvoiceUpdatesOpenMilestones(t *testing.T) {
+	decode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/payments/decode" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"amount_msat":889000,"payment_hash":"new-hash"}`))
+	}))
+	defer decode.Close()
+
+	repo := newFakeDealRepo()
+	repo.deals["deal-1"] = &Deal{ID: "deal-1", FreelancerID: "f1", Status: StatusWorkSubmitted, PayeeInvoice: "old-invoice"}
+	repo.milestones["ms-1"] = &Milestone{ID: "ms-1", DealID: "deal-1", Status: MilestoneWorkSubmitted, AmountSats: 889, PayeeInvoice: "old-invoice"}
+	repo.milestones["ms-done"] = &Milestone{ID: "ms-done", DealID: "deal-1", Status: MilestoneReleased, AmountSats: 889, PayeeInvoice: "paid-invoice"}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: decode.URL, APIKey: "key"}))
+
+	if _, err := service.UpdatePayeeInvoice(context.Background(), "f1", "deal-1", "lnbc889"); err != nil {
+		t.Fatalf("expected payee invoice update to succeed, got %v", err)
+	}
+	if repo.deals["deal-1"].PayeeInvoice != "lnbc889" {
+		t.Fatalf("deal payee invoice was not updated")
+	}
+	if repo.milestones["ms-1"].PayeeInvoice != "lnbc889" {
+		t.Fatalf("open milestone payee invoice was not updated")
+	}
+	if repo.milestones["ms-done"].PayeeInvoice != "paid-invoice" {
+		t.Fatalf("released milestone payee invoice must remain unchanged")
 	}
 }
