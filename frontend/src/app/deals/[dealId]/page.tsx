@@ -46,6 +46,8 @@ export default function DealDetailPage() {
   const [milestones, setMilestones] = useState<MilestoneView[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [workLink, setWorkLink] = useState("");
+  const [showPayeeInvoiceForm, setShowPayeeInvoiceForm] = useState(false);
+  const [payeeInvoiceInput, setPayeeInvoiceInput] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [artifactKind, setArtifactKind] = useState<ArtifactKind>("source_file");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -208,6 +210,24 @@ export default function DealDetailPage() {
     });
   }
 
+  async function handleUpdatePayeeInvoice() {
+    const invoice = payeeInvoiceInput.trim();
+    if (!invoice.startsWith("lnbc")) {
+      setActionError("Payee invoice must be a valid Lightning invoice");
+      return;
+    }
+    await handleAction("update payee invoice", async () => {
+      const res = await api.updatePayeeInvoice(
+        dealId,
+        { payee_invoice: invoice },
+        tokens!.access_token,
+      );
+      setDeal(res.deal);
+      setShowPayeeInvoiceForm(false);
+      setNotice("Payee invoice updated. Client is not charged again; escrow funds remain held.");
+    });
+  }
+
   async function handleCopyShareLink() {
     if (!deal) return;
     const url = `${window.location.origin}/public/deals/${deal.share_token}`;
@@ -317,6 +337,8 @@ export default function DealDetailPage() {
       deal.status === "work_submitted" ||
       deal.status === "reviewing");
   const canRotateLink = isFreelancer;
+  const canUpdatePayeeInvoice =
+    isFreelancer && deal.status !== "released" && deal.status !== "refunded";
   const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(
     deal.status,
   );
@@ -643,6 +665,19 @@ export default function DealDetailPage() {
                         Rotate Share Link
                       </Button>
                     )}
+                    {canUpdatePayeeInvoice && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setPayeeInvoiceInput("");
+                          setShowPayeeInvoiceForm((open) => !open);
+                          setActionError(null);
+                        }}
+                        disabled={!!actionLoading}
+                      >
+                        Update Payee Invoice
+                      </Button>
+                    )}
                     {deal.status === "awaiting_payment" && (
                       <Button
                         variant="outline"
@@ -711,6 +746,42 @@ export default function DealDetailPage() {
                       </span>
                     )}
                   </div>
+                  {showPayeeInvoiceForm && canUpdatePayeeInvoice && (
+                    <div className="mt-5 rounded-lg border border-vault-border bg-vault-raised p-4">
+                      <h3 className="font-medium text-ink-100 mb-2">Replace payout invoice</h3>
+                      <p className="text-xs text-ink-400 mb-3">
+                        Use this if a payout invoice expired. The client is not charged again; the already-held escrow funds are paid to this new invoice when approved/reconciled.
+                      </p>
+                      <textarea
+                        value={payeeInvoiceInput}
+                        onChange={(e) => setPayeeInvoiceInput(e.target.value)}
+                        rows={3}
+                        placeholder="lnbc..."
+                        className="w-full rounded-lg border border-vault-border bg-vault-bg px-3 py-2 text-xs font-mono text-ink-200"
+                      />
+                      <div className="mt-3 flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={handleUpdatePayeeInvoice}
+                          disabled={actionLoading === "update payee invoice" || !payeeInvoiceInput.trim()}
+                          isLoading={actionLoading === "update payee invoice"}
+                        >
+                          Save Invoice
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setShowPayeeInvoiceForm(false);
+                            setPayeeInvoiceInput("");
+                          }}
+                          disabled={!!actionLoading}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   {deal.status !== "released" && deal.status !== "refunded" && (
                     <p className="text-xs text-ink-400 mt-3">
                       Exit mid-milestone (not submitted/approved): that
