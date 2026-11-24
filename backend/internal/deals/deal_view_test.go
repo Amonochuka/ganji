@@ -1,11 +1,13 @@
 package deals
 
 import (
-	"github.com/gin-gonic/gin"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 // newTestDealRouter mounts the authenticated deal routes behind a stub auth
@@ -60,6 +62,31 @@ func TestDealResponsesRedactSecrets(t *testing.T) {
 
 // TestListDealsResponsesRedactSecrets covers the list endpoint, which must map
 // every deal through the same redacted view.
+func TestRespondPublicDealErrorMapsPayoutFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		err        error
+		wantStatus int
+		wantBody   string
+	}{
+		{fmt.Errorf("%w: paying freelancer for milestone was refused", ErrPayoutFailed), http.StatusBadGateway, "paying freelancer"},
+		{fmt.Errorf("%w: verifying milestone payout", ErrPayoutInFlight), http.StatusConflict, "verifying milestone payout"},
+	}
+	for _, tt := range tests {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+
+		respondPublicDealError(c, tt.err, "public accept-next")
+
+		if recorder.Code != tt.wantStatus {
+			t.Fatalf("expected status %d, got %d: %s", tt.wantStatus, recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), tt.wantBody) {
+			t.Fatalf("expected body to contain %q, got %s", tt.wantBody, recorder.Body.String())
+		}
+	}
+}
+
 func TestFreelancerDealDetailIncludesPayeeInvoice(t *testing.T) {
 	repo := newFakeDealRepo()
 	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")

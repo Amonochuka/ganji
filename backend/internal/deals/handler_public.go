@@ -8,6 +8,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func respondPublicDealError(c *gin.Context, err error, operation string) {
+	switch {
+	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, ErrForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+	case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, ErrPayoutFailed):
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+	case errors.Is(err, ErrPayoutInFlight):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		log.Printf("%s failed: %v", operation, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+	}
+}
+
 type fundDealRequest struct {
 	WalletURL   string `json:"wallet_url" binding:"required"`
 	WalletKey   string `json:"wallet_key" binding:"required"`
@@ -77,24 +95,7 @@ func (h *Handler) PublicApproveDeal(c *gin.Context) {
 
 	_, err := h.service.PublicApproveDeal(c.Request.Context(), shareToken)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidInput),
-			errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		case errors.Is(err, ErrPayoutFailed):
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-		case errors.Is(err, ErrPayoutInFlight):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-		default:
-			log.Printf("public approve failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "internal server error",
-			})
-		}
+		respondPublicDealError(c, err, "public approve")
 		return
 	}
 
@@ -159,14 +160,7 @@ func (h *Handler) PublicAcceptNextMilestone(c *gin.Context) {
 	milestoneID := c.Param("milestoneID")
 	deal, err := h.service.PublicAcceptNextMilestone(c.Request.Context(), shareToken, milestoneID)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
-		}
+		respondPublicDealError(c, err, "public accept-next")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "milestone accepted", "deal": deal})
