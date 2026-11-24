@@ -1,6 +1,6 @@
 module github.com/Amonochuka/ganji-backend
 
-go 1.25.0
+go 1.26.0
 
 require (
 	git.intruders.space/public/opentimestamps v0.5.1
@@ -48,6 +48,7 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	golang.org/x/arch v0.23.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect

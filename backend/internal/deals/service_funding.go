@@ -33,31 +33,31 @@ func (s *Service) FundDeal(ctx context.Context, shareToken, milestoneID, walletU
 	if err != nil {
 		return nil, err
 	}
-	unlock := s.lockFund(deal.ID)
-	defer unlock()
 
-	ms, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(ms) == 0 {
-		return nil, fmt.Errorf("%w: deal has no milestones", ErrInvalidTransition)
-	}
-
-	if milestoneID != "" {
-		m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+	return s.runFundExclusive(ctx, deal.ID, func() (*PublicDeal, error) {
+		ms, err := s.repo.GetMilestonesByDeal(ctx, deal.ID)
 		if err != nil {
 			return nil, err
 		}
-		return s.fundMilestoneHold(ctx, deal, shareToken, m, endpoint, key)
-	}
-
-	for i := range ms {
-		if ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending {
-			return s.fundMilestoneHold(ctx, deal, shareToken, &ms[i], endpoint, key)
+		if len(ms) == 0 {
+			return nil, fmt.Errorf("%w: deal has no milestones", ErrInvalidTransition)
 		}
-	}
-	return nil, fmt.Errorf("%w: no milestone is awaiting payment", ErrInvalidTransition)
+
+		if milestoneID != "" {
+			m, err := s.repo.GetMilestoneByID(ctx, milestoneID)
+			if err != nil {
+				return nil, err
+			}
+			return s.fundMilestoneHold(ctx, deal, shareToken, m, endpoint, key)
+		}
+
+		for i := range ms {
+			if ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending {
+				return s.fundMilestoneHold(ctx, deal, shareToken, &ms[i], endpoint, key)
+			}
+		}
+		return nil, fmt.Errorf("%w: no milestone is awaiting payment", ErrInvalidTransition)
+	})
 }
 
 func (s *Service) fundMilestoneHold(ctx context.Context, deal *Deal, shareToken string, m *Milestone, walletURL, walletKey string) (*PublicDeal, error) {

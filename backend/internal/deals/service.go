@@ -2,7 +2,8 @@ package deals
 
 import (
 	"context"
-	"sync"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 	"github.com/Amonochuka/ganji-backend/internal/storage"
@@ -48,8 +49,7 @@ type Service struct {
 	storage        storage.Storage
 	maxUploadBytes int64
 	notifier       DealNotifier
-	fundMu         sync.Mutex
-	fundLocks      map[string]*sync.Mutex
+	fundGroup singleflight.Group
 }
 
 type Option func(*Service)
@@ -80,9 +80,8 @@ func WithNotifier(n DealNotifier) Option {
 
 func NewService(repo DealRepository, lnbits *lnbits.Client, opts ...Option) *Service {
 	s := &Service{
-		repo:      repo,
-		lnbits:    lnbits,
-		fundLocks: make(map[string]*sync.Mutex),
+		repo:   repo,
+		lnbits: lnbits,
 	}
 	for _, o := range opts {
 		o(s)
