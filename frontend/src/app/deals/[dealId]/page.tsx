@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { DealCard } from "@/components/deals/deal-card";
+import { WalletLinkDialog } from "@/components/deals/wallet-link-dialog";
 import {
   api,
   type Artifact,
@@ -48,6 +49,11 @@ export default function DealDetailPage() {
   const [workLink, setWorkLink] = useState("");
   const [showPayeeInvoiceForm, setShowPayeeInvoiceForm] = useState(false);
   const [payeeInvoiceInput, setPayeeInvoiceInput] = useState("");
+  const [showPayeeWalletDialog, setShowPayeeWalletDialog] = useState(false);
+  const [payeeWalletURL, setPayeeWalletURL] = useState("");
+  const [payeeWalletKey, setPayeeWalletKey] = useState("");
+  const [payeeWalletError, setPayeeWalletError] = useState<string | null>(null);
+  const [isGeneratingPayeeInvoice, setIsGeneratingPayeeInvoice] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [artifactKind, setArtifactKind] = useState<ArtifactKind>("source_file");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -226,6 +232,44 @@ export default function DealDetailPage() {
       setShowPayeeInvoiceForm(false);
       setNotice("Payee invoice updated. Client is not charged again; escrow funds remain held.");
     });
+  }
+
+  async function handleGeneratePayeeInvoice() {
+    const openMilestone = milestones.find((milestone) =>
+      !["released", "refunded", "exited"].includes(milestone.status),
+    );
+    const amountSats = openMilestone?.amount_sats || deal?.amount_sats || 0;
+    if (!payeeWalletURL.trim() || !payeeWalletKey.trim()) {
+      setPayeeWalletError("Enter your LNbits wallet URL and invoice key");
+      return;
+    }
+    if (amountSats <= 0) {
+      setPayeeWalletError("No open milestone amount is available for this invoice");
+      return;
+    }
+    setIsGeneratingPayeeInvoice(true);
+    setPayeeWalletError(null);
+    try {
+      const res = await api.generateInvoice(
+        {
+          wallet_url: payeeWalletURL.trim(),
+          wallet_key: payeeWalletKey.trim(),
+          amount_sats: amountSats,
+          memo: deal ? `Ganji payout: ${deal.title}` : "Ganji payout",
+        },
+        tokens!.access_token,
+      );
+      setPayeeInvoiceInput(res.invoice.bolt11);
+      setShowPayeeWalletDialog(false);
+      setPayeeWalletKey("");
+      setNotice(`Generated ${formatCurrency(amountSats)} invoice. Click Save Invoice to use it.`);
+    } catch (err) {
+      setPayeeWalletError(
+        err instanceof Error ? err.message : "Failed to generate invoice",
+      );
+    } finally {
+      setIsGeneratingPayeeInvoice(false);
+    }
   }
 
   async function handleCopyShareLink() {
@@ -750,7 +794,7 @@ export default function DealDetailPage() {
                     <div className="mt-5 rounded-lg border border-vault-border bg-vault-raised p-4">
                       <h3 className="font-medium text-ink-100 mb-2">Replace payout invoice</h3>
                       <p className="text-xs text-ink-400 mb-3">
-                        Use this if a payout invoice expired. The client is not charged again; the already-held escrow funds are paid to this new invoice when approved/reconciled.
+                        Use this if a payout invoice expired. Generate a fresh invoice from your LNbits wallet or paste one manually. The client is not charged again; already-held escrow funds are paid to this new invoice when approved/reconciled.
                       </p>
                       <textarea
                         value={payeeInvoiceInput}
@@ -759,7 +803,18 @@ export default function DealDetailPage() {
                         placeholder="lnbc..."
                         className="w-full rounded-lg border border-vault-border bg-vault-bg px-3 py-2 text-xs font-mono text-ink-200"
                       />
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setPayeeWalletError(null);
+                            setShowPayeeWalletDialog(true);
+                          }}
+                          disabled={!!actionLoading || isGeneratingPayeeInvoice}
+                        >
+                          Generate Invoice
+                        </Button>
                         <Button
                           size="sm"
                           onClick={handleUpdatePayeeInvoice}
@@ -791,6 +846,25 @@ export default function DealDetailPage() {
                   )}
                 </div>
               )}
+
+              <WalletLinkDialog
+                open={showPayeeWalletDialog}
+                title="Generate payout invoice"
+                walletURL={payeeWalletURL}
+                walletKey={payeeWalletKey}
+                keyLabel="Wallet invoice key"
+                keyPlaceholder="LNbits invoice key"
+                submitLabel="Generate invoice"
+                error={payeeWalletError}
+                isSubmitting={isGeneratingPayeeInvoice}
+                onClose={() => {
+                  setShowPayeeWalletDialog(false);
+                  setPayeeWalletError(null);
+                }}
+                onWalletURLChange={setPayeeWalletURL}
+                onWalletKeyChange={setPayeeWalletKey}
+                onSubmit={handleGeneratePayeeInvoice}
+              />
 
               {showBanner && (
                 <div className="vault-card p-4 mt-4">
