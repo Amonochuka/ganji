@@ -69,7 +69,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 	if err := h.service.CreateDealWithMilestones(c.Request.Context(), deal, ms); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		default:
 			log.Printf("create deal failed (user=%s): %v", userID, err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": "Could not create the deal. Check backend logs for the underlying error before retrying."})
@@ -91,11 +91,11 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -130,7 +130,7 @@ func (h *Handler) ListDeals(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -166,11 +166,11 @@ func (h *Handler) UpdateDealStatus(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidTransition),
 			errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -192,11 +192,11 @@ func (h *Handler) CheckPayment(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrNoCheckingID):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -219,11 +219,11 @@ func (h *Handler) SubmitWork(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
 			errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -247,15 +247,15 @@ func (h *Handler) ApproveDeal(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
 			errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrPayoutFailed):
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrPayoutInFlight):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -291,11 +291,11 @@ func (h *Handler) DisputeDeal(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
 			errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -329,11 +329,11 @@ func (h *Handler) UpdatePayeeInvoice(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
 			errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -359,10 +359,10 @@ func (h *Handler) GenerateInvoice(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrWalletInvoiceFailed):
 			log.Printf("generate invoice failed: %v", err)
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"error": safeDealMessage(err)})
 		default:
 			log.Printf("generate invoice failed: %v", err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": "could not generate invoice with linked wallet"})
@@ -388,11 +388,11 @@ func (h *Handler) RotateShareLink(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
 			errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -417,11 +417,11 @@ func (h *Handler) ExitDeal(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -439,7 +439,7 @@ func (h *Handler) ExitDeal(c *gin.Context) {
 	if err := h.service.ExitDeal(c.Request.Context(), dealID); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}

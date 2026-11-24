@@ -17,6 +17,9 @@ func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amo
 	if title == "" {
 		return nil, fmt.Errorf("%w: milestone title is required", ErrInvalidInput)
 	}
+	if len(title) > maxMilestoneTitleChars {
+		return nil, fmt.Errorf("%w: milestone title is too long", ErrInvalidInput)
+	}
 	if amountSats <= 0 {
 		return nil, fmt.Errorf("%w: milestone amount must be greater than zero", ErrInvalidInput)
 	}
@@ -29,6 +32,13 @@ func (s *Service) CreateMilestone(ctx context.Context, dealID, title string, amo
 	}
 	if days < 1 || days > 3650 {
 		return nil, fmt.Errorf("%w: milestone delivery days must be between 1 and 3650", ErrInvalidInput)
+	}
+	existing, err := s.repo.GetMilestonesByDeal(ctx, dealID)
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) >= maxMilestonesPerDeal {
+		return nil, fmt.Errorf("%w: too many milestones", ErrInvalidInput)
 	}
 	milestone := &Milestone{
 		DealID:       dealID,

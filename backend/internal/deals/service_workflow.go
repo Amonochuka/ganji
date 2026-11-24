@@ -55,9 +55,14 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 	if len(ms) > 0 {
 		// Sequential milestone mode: mark active funded/in-progress milestone as submitted.
 		for i := range ms {
-			_ = s.refreshMilestonePayment(ctx, &ms[i])
+			if err := s.refreshMilestonePayment(ctx, &ms[i]); err != nil {
+				return nil, fmt.Errorf("refreshing milestone %d payment: %w", ms[i].Order, err)
+			}
 		}
-		ms, _ = s.repo.GetMilestonesByDeal(ctx, dealID)
+		ms, err = s.repo.GetMilestonesByDeal(ctx, dealID)
+		if err != nil {
+			return nil, fmt.Errorf("reloading milestones: %w", err)
+		}
 		idx := -1
 		for i := range ms {
 			if ms[i].Status == MilestoneInProgress || ms[i].Status == MilestoneFunded || ms[i].Status == MilestoneWorkSubmitted {
@@ -92,7 +97,9 @@ func (s *Service) SubmitWork(ctx context.Context, userID, dealID string) (*Deal,
 			ms[idx].Status = MilestoneWorkSubmitted
 		}
 		deal.Status = StatusWorkSubmitted
-		_ = s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted)
+		if err := s.repo.UpdateStatus(ctx, dealID, StatusWorkSubmitted); err != nil {
+			return nil, fmt.Errorf("submitting work for deal %s: %w", dealID, err)
+		}
 		return deal, nil
 	}
 

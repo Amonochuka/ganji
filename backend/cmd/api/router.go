@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"git.intruders.space/public/opentimestamps/verifyer"
@@ -23,6 +25,30 @@ import (
 	"github.com/Amonochuka/ganji-backend/internal/webhook"
 )
 
+func redactShareTokenPath(path string) string {
+	for _, prefix := range []string{"/api/public/deals/", "/public/deals/"} {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(path, prefix)
+		if idx := strings.Index(rest, "/"); idx >= 0 {
+			return prefix + ":shareToken" + rest[idx:]
+		}
+		return prefix + ":shareToken"
+	}
+	return path
+}
+
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		c.Next()
+	}
+}
+
 // setupRouter builds the Gin engine and registers all routes. As we add
 // deals, lightning, and cv, each one registers its own routes here via
 // its own RegisterRoutes-style function — this file should never grow
@@ -30,8 +56,20 @@ import (
 // can run background workers (e.g. the hold-expiry sweep) against it.
 // uploadStore is the artifact blob backend, owned (and closed) by main.
 func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage) (*gin.Engine, *deals.Service, *cv.Service, *auth.Service) {
-	router := gin.Default()
-
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		return fmt.Sprintf("%s | %s | %s %s | %d | %s | %s\n",
+			param.TimeStamp.Format(time.RFC3339),
+			param.ClientIP,
+			param.Method,
+			redactShareTokenPath(param.Path),
+			param.StatusCode,
+			param.Latency,
+			param.ErrorMessage,
+		)
+	}))
+	router.Use(securityHeaders())
 	router.Use(middleware.NewCORSMiddleware(cfg.FrontendURLs, cfg.CORSAllowPrivateLAN))
 
 	tokenManager := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTRefreshSecret)
@@ -109,7 +147,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	router.GET("/health", health.Handler(dbConn, lnbitsClient))
 
 	protected := router.Group("/")
-	protected.Use(middleware.AuthRequired(tokenManager))
+	protected.Use(middleware.AuthRequired(tokenManager, authRepo))
 
 	auth.RegisterProtectedRoutes(protected, authHandler)
 
@@ -120,7 +158,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	publicDeals.GET("/deals/:shareToken/milestones", dealHandler.PublicListMilestones)
 	publicDeals.POST("/deals/:shareToken/fund", dealHandler.FundDeal)
 	publicClientActions := publicDeals.Group("")
-	publicClientActions.Use(middleware.AuthRequired(tokenManager))
+	publicClientActions.Use(middleware.AuthRequired(tokenManager, authRepo))
 	publicClientActions.POST("/deals/:shareToken/approve", dealHandler.PublicApproveDeal)
 	publicClientActions.POST("/deals/:shareToken/payout/reset", dealHandler.PublicResetPayout)
 	publicClientActions.POST("/deals/:shareToken/milestones/:milestoneID/accept-next", dealHandler.PublicAcceptNextMilestone)
@@ -139,7 +177,7 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	if acceptedHoldChecker != nil {
 		webhookService.SetAcceptedHoldChecker(acceptedHoldChecker)
 	}
-	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret)
+	webhookHandler := webhook.NewHandler(webhookService, cfg.LNBitsWebhookSecret, cfg.AllowInsecureWebhooks)
 	webhookGroup := router.Group("/webhooks")
 	webhookGroup.Use(middleware.RateLimitByIP(100, time.Minute))
 	webhookGroup.POST("/lnbits", webhookHandler.HandleLNbitsWebhook)

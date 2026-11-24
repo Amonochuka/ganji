@@ -2,6 +2,34 @@ package auth
 
 import "testing"
 
+func TestAccessTokenCarriesJTI(t *testing.T) {
+	tokens := NewTokenManager("access-secret", "refresh-secret")
+
+	first, err := tokens.GenerateAccessToken("user-1", "client@example.com", false)
+	if err != nil {
+		t.Fatalf("generate first access token: %v", err)
+	}
+	second, err := tokens.GenerateAccessToken("user-1", "client@example.com", false)
+	if err != nil {
+		t.Fatalf("generate second access token: %v", err)
+	}
+
+	firstClaims, err := tokens.VerifyAccessToken(first)
+	if err != nil {
+		t.Fatalf("verify first access token: %v", err)
+	}
+	secondClaims, err := tokens.VerifyAccessToken(second)
+	if err != nil {
+		t.Fatalf("verify second access token: %v", err)
+	}
+	if firstClaims.ID == "" || secondClaims.ID == "" {
+		t.Fatal("expected access tokens to carry a jti")
+	}
+	if firstClaims.ID == secondClaims.ID {
+		t.Fatal("expected access token jtis to differ")
+	}
+}
+
 func TestAccessTokenCarriesOperatorFlag(t *testing.T) {
 	tokens := NewTokenManager("access-secret", "refresh-secret")
 

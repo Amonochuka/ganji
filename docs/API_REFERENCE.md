@@ -72,10 +72,11 @@ Public. Register a new user.
     "trust_score": 100,
     "created_at": "2026-08-26T12:00:00Z"
   },
-  "access_token": "...",
-  "refresh_token": "..."
+  "access_token": "..."
 }
 ```
+
+Refresh token is returned in a `Set-Cookie: ganji_refresh=...; HttpOnly; SameSite=Strict; Path=/auth` header.
 
 ### `POST /auth/login`
 
@@ -93,16 +94,17 @@ Public. Authenticate with email and password.
 ```json
 {
   "user": { ... },
-  "access_token": "...",
-  "refresh_token": "..."
+  "access_token": "..."
 }
 ```
 
+The refresh token is set in the same `ganji_refresh` cookie as signup.
+
 ### `POST /auth/refresh-token`
 
-Public. Rotate refresh token, get new access + refresh pair.
+Public. Rotate the refresh token and get a new access token. The refresh token is read from the `ganji_refresh` cookie; a JSON body with `refresh_token` is accepted as a fallback for non-browser clients.
 
-**Request**
+**Request (optional fallback)**
 ```json
 {
   "refresh_token": "..."
@@ -112,16 +114,18 @@ Public. Rotate refresh token, get new access + refresh pair.
 **Response `200`**
 ```json
 {
-  "access_token": "...",
-  "refresh_token": "..."
+  "user": { ... },
+  "access_token": "..."
 }
 ```
 
+A rotated refresh token is returned in the `ganji_refresh` cookie.
+
 ### `POST /auth/logout`
 
-Public. Revoke a refresh token.
+Public. Clear the refresh cookie, revoke the refresh token, and revoke the access token's `jti` when an `Authorization: Bearer` header is supplied.
 
-**Request**
+**Request (optional fallback)**
 ```json
 {
   "refresh_token": "..."
@@ -932,7 +936,8 @@ Ganji to do. Returning non-2xx would cause LNbits to retry unnecessarily.
 - HMAC-SHA256 with `LNBITS_WEBHOOK_SECRET` as key
 - Timestamps older than 5 minutes are rejected (replay protection)
 - Timestamps more than 5 minutes in the future are rejected (clock skew protection)
-- If `LNBITS_WEBHOOK_SECRET` is empty, signature verification is skipped
+- `LNBITS_WEBHOOK_SECRET` is required; an empty value is rejected at startup unless `ALLOW_INSECURE_WEBHOOKS=true` is explicitly set for local development
+- With no secret in local bypass mode, requests are rejected rather than silently accepted
 
 ---
 

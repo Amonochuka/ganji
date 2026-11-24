@@ -1203,7 +1203,7 @@ func TestSweepSkipsDealMovedByConcurrentActor(t *testing.T) {
 		_, _ = w.Write([]byte(`{"paid":false,"details":{"checking_id":"bb","status":"UNPAID"}}`))
 	}))
 
-	swept, err := service.SweepExpiredHolds(context.Background(), time.Now().Add(-24*time.Hour))
+	swept, err := service.SweepExpiredHolds(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

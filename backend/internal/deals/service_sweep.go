@@ -11,7 +11,7 @@ import (
 // HOLD/ACCEPTED/SETTLED are left untouched. Per-milestone holds may have
 // different expiry windows, so sweep checks all open deals. Returns the number
 // of milestones reconciled to refunded.
-func (s *Service) SweepExpiredHolds(ctx context.Context, _ time.Time) (int, error) {
+func (s *Service) SweepExpiredHolds(ctx context.Context) (int, error) {
 	open, err := s.repo.ListOpenBefore(ctx, time.Time{})
 	if err != nil {
 		return 0, err

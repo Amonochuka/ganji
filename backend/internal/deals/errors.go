@@ -21,3 +21,36 @@ var (
 	// history before it can be released again; the code must never auto-resend.
 	ErrPayoutInFlight = errors.New("payout outcome unknown; manual reconciliation required")
 )
+
+func safeDealMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrInvalidInput):
+		return "invalid request"
+	case errors.Is(err, ErrForbidden):
+		return "forbidden"
+	case errors.Is(err, ErrDealNotFound):
+		return ErrDealNotFound.Error()
+	case errors.Is(err, ErrArtifactNotFound):
+		return ErrArtifactNotFound.Error()
+	case errors.Is(err, ErrVerificationNotFound):
+		return ErrVerificationNotFound.Error()
+	case errors.Is(err, ErrInvalidTransition):
+		return ErrInvalidTransition.Error()
+	case errors.Is(err, ErrNoCheckingID):
+		return ErrNoCheckingID.Error()
+	case errors.Is(err, ErrMilestoneNotFound):
+		return ErrMilestoneNotFound.Error()
+	case errors.Is(err, ErrVerificationUnavailable):
+		return ErrVerificationUnavailable.Error()
+	case errors.Is(err, ErrWalletPaymentFailed):
+		return ErrWalletPaymentFailed.Error()
+	case errors.Is(err, ErrWalletInvoiceFailed):
+		return ErrWalletInvoiceFailed.Error()
+	case errors.Is(err, ErrPayoutFailed):
+		return ErrPayoutFailed.Error()
+	case errors.Is(err, ErrPayoutInFlight):
+		return ErrPayoutInFlight.Error()
+	default:
+		return "internal server error"
+	}
+}

@@ -19,7 +19,7 @@ const signatureTolerance = 5 * time.Minute
 // rejected by requiring the timestamp to be close to now.
 func VerifyLNbitsSignature(rawBody []byte, signatureHeader, secret string) bool {
 	if secret == "" {
-		return true
+		return false
 	}
 	if signatureHeader == "" {
 		return false

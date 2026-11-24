@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+const (
+	maxDealTitleChars      = 200
+	maxSourcePlatformChars = 100
+	maxMilestoneTitleChars = 200
+	maxMilestonesPerDeal   = 25
+)
+
 func (s *Service) CreateDeal(ctx context.Context, deal *Deal) error {
 	return s.CreateDealWithMilestones(ctx, deal, nil)
 }
@@ -27,8 +34,14 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	if deal.Title == "" {
 		return fmt.Errorf("%w: title is required", ErrInvalidInput)
 	}
+	if len(deal.Title) > maxDealTitleChars {
+		return fmt.Errorf("%w: title is too long", ErrInvalidInput)
+	}
 	if deal.SourcePlatform == "" {
 		return fmt.Errorf("%w: source platform is required", ErrInvalidInput)
+	}
+	if len(deal.SourcePlatform) > maxSourcePlatformChars {
+		return fmt.Errorf("%w: source platform is too long", ErrInvalidInput)
 	}
 	if deal.PayeeInvoice == "" {
 		return fmt.Errorf("%w: payee invoice is required", ErrInvalidInput)
@@ -37,6 +50,9 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		deal.Status = StatusAwaitingPayment
 	}
 
+	if len(milestones) > maxMilestonesPerDeal {
+		return fmt.Errorf("%w: too many milestones", ErrInvalidInput)
+	}
 	if len(milestones) == 0 {
 		if deal.AmountSats <= 0 {
 			return fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
@@ -51,10 +67,13 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		} else if mi.DeliveryDays < 1 || mi.DeliveryDays > 3650 {
 			return fmt.Errorf("%w: milestone delivery days must be between 1 and 3650", ErrInvalidInput)
 		}
-		if strings.TrimSpace(mi.Title) == "" || mi.AmountSats <= 0 {
+		milestones[i].Title = strings.TrimSpace(mi.Title)
+		if milestones[i].Title == "" || mi.AmountSats <= 0 {
 			return fmt.Errorf("%w: each milestone needs a title and positive amount", ErrInvalidInput)
 		}
-		milestones[i].Title = strings.TrimSpace(mi.Title)
+		if len(milestones[i].Title) > maxMilestoneTitleChars {
+			return fmt.Errorf("%w: milestone title is too long", ErrInvalidInput)
+		}
 		total += mi.AmountSats
 	}
 	deal.AmountSats = total

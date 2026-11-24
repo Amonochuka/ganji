@@ -18,6 +18,7 @@ type Config struct {
 	LNBitsAPIKey              string
 	LNBitsAdminKey            string
 	LNBitsWebhookSecret       string
+	AllowInsecureWebhooks     bool
 	LNDRESTURL                string
 	LNDRESTCertPath           string
 	LNDRESTMacaroonPath       string
@@ -55,6 +56,7 @@ func Load() *Config {
 		LNBitsAPIKey:              getEnv("LNBITS_API_KEY", ""),
 		LNBitsAdminKey:            getEnv("LNBITS_ADMIN_KEY", ""),
 		LNBitsWebhookSecret:       getEnv("LNBITS_WEBHOOK_SECRET", ""),
+		AllowInsecureWebhooks:     getEnvBool("ALLOW_INSECURE_WEBHOOKS", false),
 		LNDRESTURL:                getEnv("LND_REST_URL", ""),
 		LNDRESTCertPath:           getEnv("LND_REST_CERT_PATH", ""),
 		LNDRESTMacaroonPath:       getEnv("LND_REST_MACAROON_PATH", ""),
@@ -93,10 +95,25 @@ func Load() *Config {
 		}
 	}
 	if cfg.LNBitsWebhookSecret == "" {
-		if os.Getenv("GIN_MODE") == "release" || os.Getenv("ENV") == "production" {
-			log.Fatalf("LNBITS_WEBHOOK_SECRET is required in production")
+		if isProduction() {
+			log.Fatalf("LNBITS_WEBHOOK_SECRET is required")
 		}
-		log.Printf("WARNING: LNBITS_WEBHOOK_SECRET not set - webhook signature verification disabled (dev mode)")
+		if !cfg.AllowInsecureWebhooks {
+			log.Fatalf("LNBITS_WEBHOOK_SECRET is required; set ALLOW_INSECURE_WEBHOOKS=true only for local development")
+		}
+		log.Printf("WARNING: LNBITS_WEBHOOK_SECRET not set - webhook signature verification disabled")
+	}
+	if isProduction() && cfg.AllowInsecureWebhooks {
+		log.Fatalf("ALLOW_INSECURE_WEBHOOKS cannot be enabled in production")
+	}
+	if cfg.PreimageEncryptionKey == "" {
+		if isProduction() {
+			log.Fatalf("PREIMAGE_ENCRYPTION_KEY is required")
+		}
+		log.Printf("WARNING: PREIMAGE_ENCRYPTION_KEY not set - preimages will be stored in plaintext")
+	}
+	if len(cfg.PreimageEncryptionKey) > 0 && len(cfg.PreimageEncryptionKey) < 32 {
+		log.Fatalf("PREIMAGE_ENCRYPTION_KEY must be at least 32 characters")
 	}
 	if cfg.LNBitsURL != "" {
 		if cfg.LNBitsAPIKey == "" {
@@ -173,4 +190,8 @@ func requireEnv(key string) string {
 		log.Fatalf("missing required environment variable: %s", key)
 	}
 	return val
+}
+
+func isProduction() bool {
+	return os.Getenv("GIN_MODE") == "release" || os.Getenv("ENV") == "production"
 }

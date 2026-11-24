@@ -11,12 +11,17 @@ import (
 )
 
 type Handler struct {
-	service *Service
-	secret  string
+	service       *Service
+	secret        string
+	allowInsecure bool
 }
 
-func NewHandler(service *Service, secret string) *Handler {
-	return &Handler{service: service, secret: secret}
+func NewHandler(service *Service, secret string, allowInsecure ...bool) *Handler {
+	h := &Handler{service: service, secret: secret}
+	if len(allowInsecure) > 0 {
+		h.allowInsecure = allowInsecure[0]
+	}
+	return h
 }
 
 // maxWebhookBodyBytes caps the webhook request body. LNbits notifications are
@@ -45,8 +50,9 @@ func (h *Handler) HandleLNbitsWebhook(c *gin.Context) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 			return
 		}
-	} else {
-		log.Printf("WARNING: LNBITS_WEBHOOK_SECRET not set - webhook signature verification disabled")
+	} else if !h.allowInsecure {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+		return
 	}
 
 	var notification PaymentNotification

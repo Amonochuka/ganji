@@ -19,15 +19,15 @@ func (h *Handler) authorizePublicClient(c *gin.Context) bool {
 func respondPublicDealError(c *gin.Context, err error, operation string) {
 	switch {
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 	case errors.Is(err, ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 	case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 	case errors.Is(err, ErrPayoutFailed):
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": safeDealMessage(err)})
 	case errors.Is(err, ErrPayoutInFlight):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		c.JSON(http.StatusConflict, gin.H{"error": safeDealMessage(err)})
 	default:
 		log.Printf("%s failed: %v", operation, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
@@ -53,15 +53,15 @@ func (h *Handler) FundDeal(c *gin.Context) {
 		case errors.Is(err, ErrInvalidInput),
 			errors.Is(err, ErrInvalidTransition),
 			errors.Is(err, ErrNoCheckingID):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrMilestoneNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrVerificationUnavailable):
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "escrow verification is not configured"})
 		case errors.Is(err, ErrWalletPaymentFailed):
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			log.Printf("public funding failed: %v", err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": "funding failed; check the deal status before retrying"})
@@ -82,9 +82,9 @@ func (h *Handler) GetPublicDeal(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "internal server error",
@@ -123,9 +123,9 @@ func (h *Handler) PublicListMilestones(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -151,11 +151,11 @@ func (h *Handler) PublicResetPayout(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrInvalidInput),
 			errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrPayoutInFlight):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			log.Printf("public payout reset failed: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
@@ -195,9 +195,9 @@ func (h *Handler) PublicRejectMilestone(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound), errors.Is(err, ErrMilestoneNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -215,9 +215,9 @@ func (h *Handler) PublicExitDeal(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}

@@ -15,12 +15,11 @@ import (
 // LNbits and upgrade OpenTimestamps proofs. It blocks until ctx is cancelled;
 // call it as a goroutine.
 func runWorkers(ctx context.Context, cfg *config.Config, dealService *deals.Service, cvService *cv.Service, authService *auth.Service) {
-	lifetime := time.Duration(cfg.HoldInvoiceExpirySeconds) * time.Second
 	interval := time.Duration(cfg.HoldSweepIntervalSeconds) * time.Second
 
 	otsInterval := time.Duration(cfg.OTSUpgradeIntervalSeconds) * time.Second
 
-	go deals.RunHoldSweep(ctx, dealService, interval, lifetime)
+	go deals.RunHoldSweep(ctx, dealService, interval)
 	go runOTSUpgradeLoop(ctx, cvService, otsInterval)
 	go auth.RunRefreshTokenCleanup(ctx, authService, time.Hour)
 }

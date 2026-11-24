@@ -49,10 +49,21 @@ history rather than active blockers:
 - Removed dead `pkg/hash`, `pkg/sanitize`, and `ErrPaymentNotPaid` code.
 - Artifacts can be deleted with `DELETE /deals/:dealID/artifacts/:artifactID`;
   there are no user-facing deal or verification deletion endpoints.
-- Preimages support optional AES-GCM encryption at rest. When
-  `PREIMAGE_ENCRYPTION_KEY` is unset, development deployments retain plaintext.
-- Slug generation checks the base slug then uses a random suffix (up to five
-  attempts).
+- Preimages support AES-GCM encryption at rest. `PREIMAGE_ENCRYPTION_KEY` is
+  required (32+ chars) in production; unset is dev-only and logs a warning.
+- Slug generation transliterates accents, then uses a random suffix (up to five
+  attempts); non-ASCII names fall back to a deterministic short hash.
+
+### Residual Hardening Debt
+
+- `backend/migrations/000003_create_deals_table.up.sql` still contains the
+  legacy `preimage_hash TEXT UNIQUE` column. Milestone mode uses per-milestone
+  `preimage_hash`, and the deal-level column is nullable/deprecated; dropping it
+  requires a follow-up migration once any remaining old rows are confirmed gone.
+- The in-process rate limiter assumes a single backend replica. Horizontal
+  scaling requires a shared Redis/SQL-backed limiter.
+- `internal/websocket/` is still a stub and no WebSocket route is mounted, so
+  there is no socket auth surface yet.
 
 ## Not Built / Next
 

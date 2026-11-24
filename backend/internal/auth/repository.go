@@ -223,3 +223,35 @@ func (r *Repository) CleanupExpiredRefreshTokens(ctx context.Context) (int64, er
 	}
 	return result.RowsAffected()
 }
+
+func (r *Repository) RevokeAccessToken(ctx context.Context, jti, userID string, expiresAt time.Time) error {
+	query := `
+		INSERT INTO revoked_access_tokens(jti, user_id, expires_at)
+		VALUES($1, $2, $3)
+		ON CONFLICT (jti) DO NOTHING;`
+	if _, err := r.q.ExecContext(ctx, query, jti, userID, expiresAt); err != nil {
+		return fmt.Errorf("repository: revoke access token: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) IsAccessTokenRevoked(ctx context.Context, jti string) (bool, error) {
+	var revoked bool
+	query := `
+		SELECT EXISTS(
+			SELECT 1 FROM revoked_access_tokens
+			WHERE jti = $1 AND expires_at > NOW()
+		);`
+	if err := r.q.QueryRowContext(ctx, query, jti).Scan(&revoked); err != nil {
+		return false, fmt.Errorf("repository: check revoked access token: %w", err)
+	}
+	return revoked, nil
+}
+
+func (r *Repository) CleanupExpiredAccessTokens(ctx context.Context) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM revoked_access_tokens WHERE expires_at < $1`, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

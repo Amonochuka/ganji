@@ -12,7 +12,7 @@ See `backend/.env.example` for the authoritative list; the critical ones:
 | `LNBITS_URL` | LNbits instance URL, backed by the Es LND node (e.g., `http://localhost:5000`) |
 | `LNBITS_API_KEY` | LNbits **invoice key** (read/create invoices) |
 | `LNBITS_ADMIN_KEY` | LNbits **admin key** — required for settle/cancel/payout (money moves) |
-| `LNBITS_WEBHOOK_SECRET` | Wallet webhook secret for `LNbits-Signature` verification |
+| `LNBITS_WEBHOOK_SECRET` | Required wallet webhook secret for `LNbits-Signature` verification. Local-only bypass: `ALLOW_INSECURE_WEBHOOKS=true`. |
 | `WEBHOOK_URL` | Public URL for LNbits to POST payment notifications (e.g., `http://localhost:8080/webhooks/lnbits`) |
 | `LND_REST_URL` | Direct LND REST endpoint on the escrow node Es (e.g., `https://localhost:8082`) |
 | `LND_REST_CERT_PATH` | Es TLS certificate path (e.g., `/home/amonoff/.polar/networks/3/volumes/lnd/Es/tls.cert`) |
@@ -59,7 +59,7 @@ Then use `DATABASE_URL=postgres://postgres:postgres@localhost:5432/ganji?sslmode
 | `OTS_UPGRADE_INTERVAL_SECONDS` | `21600` (6 hours) | OTS proof upgrade worker cadence |
 | `STORAGE_PATH` | `./uploads` | Where artifact blobs live on disk |
 | `MAX_UPLOAD_BYTES` | `10485760` (10 MB) | Per-artifact size cap |
-| `PREIMAGE_ENCRYPTION_KEY` | (empty) | Optional secret used to AES-GCM encrypt escrow preimages at rest; unset disables encryption (dev) |
+| `PREIMAGE_ENCRYPTION_KEY` | (empty) | AES-GCM key for escrow preimages at rest; required (32+ chars) in production. Unset is dev-only and logs a warning. |
 
 ## Frontend (Required)
 
@@ -75,3 +75,5 @@ Then use `DATABASE_URL=postgres://postgres:postgres@localhost:5432/ganji?sslmode
 - Generic demo LNbits/ngrok setups are unsupported unless they can provide Es LND REST accepted-hold verification; a webhook URL or `paid=true` is not enough.
 - Any hold invoice drawn to a given wallet belongs to that wallet's pool, so use the dedicated Ganji wallet/keys and never paste an admin key somewhere public.
 - OpenTimestamps anchoring of CV entries is on by default against the public calendar pools; set `OTS_ESPLORA_URL` to also verify proofs against the live Bitcoin chain.
+- Rate limiting is process-local. Run a single backend replica, or replace it with a shared Redis/SQL-backed limiter before scaling horizontally.
+- Refresh tokens are stored in an `HttpOnly` cookie scoped to `/auth`; access tokens are held in browser memory only. Ensure `FRONTEND_URLS` includes every browser origin and use HTTPS in production.

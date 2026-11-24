@@ -39,14 +39,18 @@ func (f *handlerPaymentChecker) CheckPayment(
 }
 
 func setupWebhookRouter(service *Service) *gin.Engine {
-	return setupWebhookRouterWithSecret(service, "")
+	return setupWebhookRouterWithOptions(service, "", true)
 }
 
 func setupWebhookRouterWithSecret(service *Service, secret string) *gin.Engine {
+	return setupWebhookRouterWithOptions(service, secret, false)
+}
+
+func setupWebhookRouterWithOptions(service *Service, secret string, allowInsecure bool) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	handler := NewHandler(service, secret)
+	handler := NewHandler(service, secret, allowInsecure)
 	RegisterRoutes(router, handler)
 
 	return router
@@ -122,7 +126,7 @@ func TestVerifyLNbitsSignature(t *testing.T) {
 		want   bool
 	}{
 		{name: "valid", body: body, header: header, secret: "secret", want: true},
-		{name: "no secret skips verification", body: body, header: "", secret: "", want: true},
+		{name: "no secret refuses verification", body: body, header: "", secret: "", want: false},
 		{name: "missing header refuses", body: body, header: "", secret: "secret", want: false},
 		{name: "tampered body refuses", body: []byte(`{"checking_id":"other"}`), header: header, secret: "secret", want: false},
 		{name: "wrong secret refuses", body: body, header: header, secret: "wrong", want: false},

@@ -3,6 +3,7 @@ package deals
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -112,19 +113,27 @@ func (s *Service) fundMilestoneHold(ctx context.Context, deal *Deal, shareToken 
 
 func (s *Service) waitForAcceptedHold(ctx context.Context, paymentHash string, amountSats int64) (bool, error) {
 	const attempts = 15
-	const delay = 2 * time.Second
+	const baseDelay = 2 * time.Second
+	const jitter = 500 * time.Millisecond
 
 	var lastErr error
 	for i := 0; i < attempts; i++ {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		accepted, err := s.acceptedHolds.IsAcceptedHold(ctx, paymentHash, amountSats)
 		if err != nil {
 			lastErr = err
-		} else if accepted {
-			return true, nil
+		} else {
+			lastErr = nil
+			if accepted {
+				return true, nil
+			}
 		}
 		if i == attempts-1 {
 			break
 		}
+		delay := baseDelay + time.Duration(rand.Int63n(int64(jitter)))
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {

@@ -17,7 +17,7 @@ import (
 //     holding (and already returned) any funds;
 //   - holds LNbits still reports as held or settled are left untouched, and
 //     the sweep never pays anything out.
-func RunHoldSweep(ctx context.Context, service *Service, interval, _ time.Duration) {
+func RunHoldSweep(ctx context.Context, service *Service, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -33,7 +33,7 @@ func RunHoldSweep(ctx context.Context, service *Service, interval, _ time.Durati
 }
 
 func sweep(ctx context.Context, service *Service) {
-	swept, err := service.SweepExpiredHolds(ctx, time.Time{})
+	swept, err := service.SweepExpiredHolds(ctx)
 	if err != nil {
 		log.Printf("hold sweep error: %v", err)
 		return

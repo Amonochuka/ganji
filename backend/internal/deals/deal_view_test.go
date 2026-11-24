@@ -72,8 +72,8 @@ func TestRespondPublicDealErrorMapsPayoutFailures(t *testing.T) {
 		wantStatus int
 		wantBody   string
 	}{
-		{fmt.Errorf("%w: paying freelancer for milestone was refused", ErrPayoutFailed), http.StatusBadGateway, "paying freelancer"},
-		{fmt.Errorf("%w: verifying milestone payout", ErrPayoutInFlight), http.StatusConflict, "verifying milestone payout"},
+		{fmt.Errorf("%w: paying freelancer for milestone was refused", ErrPayoutFailed), http.StatusBadGateway, "payout failed"},
+		{fmt.Errorf("%w: verifying milestone payout", ErrPayoutInFlight), http.StatusConflict, "payout outcome unknown"},
 	}
 	for _, tt := range tests {
 		recorder := httptest.NewRecorder()

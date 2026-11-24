@@ -7,15 +7,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
-	"unicode"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/bcrypt"
-)
+	"golang.org/x/text/unicode/norm"
 
-var emailPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	"github.com/Amonochuka/ganji-backend/internal/validate"
+)
 
 type Service struct {
 	repo   *Repository
@@ -30,13 +30,16 @@ func NewService(repo *Repository, tokens *TokenManager) *Service {
 }
 
 func (s *Service) Register(ctx context.Context, email, password, displayName string) (*AuthResponse, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = validate.NormalizeEmail(email)
 
-	if !emailPattern.MatchString(email) {
+	if !validate.IsValidEmail(email) {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, ErrInvalidEmail)
 	}
 	if len(password) < 8 {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, ErrPasswordTooShort)
+	}
+	if len(password) > 1024 {
+		return nil, fmt.Errorf("%w: password is too long", ErrInvalidInput)
 	}
 	hasLetter, hasDigit := false, false
 	for _, r := range password {
@@ -52,6 +55,9 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 	}
 	if strings.TrimSpace(displayName) == "" {
 		return nil, fmt.Errorf("%w: display name is required", ErrInvalidInput)
+	}
+	if len(displayName) > 80 {
+		return nil, fmt.Errorf("%w: display name is too long", ErrInvalidInput)
 	}
 
 	taken, err := s.repo.EmailExists(ctx, email)
@@ -81,9 +87,9 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 }
 
 func (s *Service) Authenticate(ctx context.Context, email, password string) (*AuthResponse, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = validate.NormalizeEmail(email)
 
-	if !emailPattern.MatchString(email) {
+	if !validate.IsValidEmail(email) {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, ErrInvalidEmail)
 	}
 	if strings.TrimSpace(password) == "" {
@@ -139,12 +145,14 @@ func (s *Service) generateUniqueSlug(ctx context.Context, displayName string) (s
 // slugify lowercases, replaces spaces with hyphens, and strips anything
 // that isn't a letter, number, or hyphen.
 func slugify(name string) string {
-	lower := strings.ToLower(strings.TrimSpace(name))
+	lower := norm.NFD.String(strings.ToLower(strings.TrimSpace(name)))
 	var b strings.Builder
 	lastWasHyphen := false
 
 	for _, r := range lower {
 		switch {
+		case unicode.Is(unicode.Mn, r):
+			continue
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			b.WriteRune(r)
 			lastWasHyphen = false
@@ -158,7 +166,8 @@ func slugify(name string) string {
 
 	slug := strings.Trim(b.String(), "-")
 	if slug == "" {
-		slug = "user"
+		sum := sha256.Sum256([]byte(strings.TrimSpace(name)))
+		slug = "user-" + hex.EncodeToString(sum[:])[:8]
 	}
 	return slug
 }
@@ -247,7 +256,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 	return s.issueTokens(ctx, user)
 }
 
-func (s *Service) Logout(ctx context.Context, refreshToken string) error {
+func (s *Service) Logout(ctx context.Context, refreshToken, accessToken string) error {
 	_, err := s.tokens.VerifyRefreshToken(refreshToken)
 	if err != nil {
 		return fmt.Errorf("verifying refresh token: %w", err)
@@ -265,6 +274,18 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 
 	if err := s.repo.RevokeRefreshToken(ctx, tokenHash); err != nil {
 		return fmt.Errorf("revoking refresh token: %w", err)
+	}
+	if accessToken != "" {
+		claims, err := s.tokens.VerifyAccessToken(accessToken)
+		if err == nil && claims.ID != "" {
+			expiresAt := time.Now().Add(accessTokenTTL)
+			if claims.ExpiresAt != nil {
+				expiresAt = claims.ExpiresAt.Time
+			}
+			if err := s.repo.RevokeAccessToken(ctx, claims.ID, claims.UserID, expiresAt); err != nil {
+				return fmt.Errorf("revoking access token: %w", err)
+			}
+		}
 	}
 	return nil
 }

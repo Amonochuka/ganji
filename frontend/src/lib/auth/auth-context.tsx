@@ -10,6 +10,7 @@ import {
   type LoginRequest,
   type RegisterRequest,
 } from "@/lib/api/api-client";
+import { logoutSession, restoreSession, setAccessToken } from "@/lib/api/session";
 
 interface AuthContextType {
   user: User | null;
@@ -17,12 +18,11 @@ interface AuthContextType {
   isLoading: boolean;
   login: (credentials: LoginRequest) => Promise<void>;
   signup: (data: RegisterRequest) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = "ganji_tokens";
 const USER_KEY = "ganji_user";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -31,13 +31,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const storedTokens = localStorage.getItem(TOKEN_KEY);
     const storedUser = localStorage.getItem(USER_KEY);
-    if (storedTokens && storedUser) {
-      setTokens(JSON.parse(storedTokens));
-      setUser(JSON.parse(storedUser));
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch {
+        localStorage.removeItem(USER_KEY);
+      }
     }
-    setIsLoading(false);
+
+    void restoreSession().finally(() => setIsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -48,7 +51,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     function handleSessionExpired() {
       setTokens(null);
       setUser(null);
-      localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
     }
 
@@ -61,28 +63,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(credentials: LoginRequest) {
-    const res = await api.post<{ user: User; access_token: string; refresh_token: string }>("/auth/login", credentials);
-    const newTokens = { access_token: res.access_token, refresh_token: res.refresh_token };
+    const res = await api.post<{ user: User; access_token: string; refresh_token?: string }>("/auth/login", credentials);
+    const newTokens: AuthTokens = { access_token: res.access_token };
+    setAccessToken(res.access_token);
     setTokens(newTokens);
     setUser(res.user);
-    localStorage.setItem(TOKEN_KEY, JSON.stringify(newTokens));
     localStorage.setItem(USER_KEY, JSON.stringify(res.user));
   }
 
   async function signup(data: RegisterRequest) {
-    const res = await api.post<{ user: User; access_token: string; refresh_token: string }>("/auth/signup", data);
-    const newTokens = { access_token: res.access_token, refresh_token: res.refresh_token };
+    const res = await api.post<{ user: User; access_token: string; refresh_token?: string }>("/auth/signup", data);
+    const newTokens: AuthTokens = { access_token: res.access_token };
+    setAccessToken(res.access_token);
     setTokens(newTokens);
     setUser(res.user);
-    localStorage.setItem(TOKEN_KEY, JSON.stringify(newTokens));
     localStorage.setItem(USER_KEY, JSON.stringify(res.user));
   }
 
-  function logout() {
+  async function logout() {
+    await logoutSession();
+    setAccessToken(null);
     setTokens(null);
     setUser(null);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
   }
 
   return (

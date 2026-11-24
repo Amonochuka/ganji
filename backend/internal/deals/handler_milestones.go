@@ -30,11 +30,11 @@ func (h *Handler) CreateMilestone(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -50,7 +50,7 @@ func (h *Handler) CreateMilestone(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -79,11 +79,11 @@ func (h *Handler) ListMilestones(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -132,11 +132,11 @@ func (h *Handler) UpdateMilestone(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrDealNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}
@@ -168,9 +168,9 @@ func (h *Handler) UpdateMilestone(c *gin.Context) {
 	if err := h.service.UpdateMilestoneStatus(c.Request.Context(), dealID, milestoneID, MilestoneStatus(req.Status), completedAt); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": safeDealMessage(err)})
 		case errors.Is(err, ErrMilestoneNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": safeDealMessage(err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		}

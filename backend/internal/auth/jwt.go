@@ -43,11 +43,16 @@ func NewTokenManager(accessSecret, refreshSecret string) *TokenManager {
 // is baked into the claims at issuance — promoting a user takes effect for
 // them on their next login.
 func (tm *TokenManager) GenerateAccessToken(userID, email string, isOperator bool) (string, error) {
+	tokenID, err := randomTokenID()
+	if err != nil {
+		return "", err
+	}
 	claims := Claims{
 		UserID:     userID,
 		Email:      email,
 		IsOperator: isOperator,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        tokenID,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessTokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},

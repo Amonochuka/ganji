@@ -223,7 +223,7 @@ Payment-not-successful returns `200` because the webhook was received and unders
 | `JWT_REFRESH_SECRET` | Yes | Refresh token signing key |
 | `LNBITS_URL` | Yes | LNbits instance base URL |
 | `LNBITS_API_KEY` | Yes | LNbits invoice/admin key |
-| `LNBITS_WEBHOOK_SECRET` | No* | HMAC secret for webhook verification (*recommended) |
+| `LNBITS_WEBHOOK_SECRET` | Yes* | HMAC secret for webhook verification (*local `ALLOW_INSECURE_WEBHOOKS=true` bypass only) |
 | `WEBHOOK_URL` | No** | Public URL for webhook endpoint (**required for webhooks to work) |
 | `LNBITS_ADMIN_KEY` | Yes | Router admin key — required for settle/cancel/payout money moves |
 | `LND_REST_URL` | Yes for funding | LND REST endpoint on the escrow node Es; enables the accepted-hold checker (missing checker → `FundDeal` 503) |

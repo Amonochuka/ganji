@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func AuthRequired(tokens *auth.TokenManager) gin.HandlerFunc {
+func AuthRequired(tokens *auth.TokenManager, revokers ...auth.AccessTokenRevoker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if header == "" {
@@ -28,6 +28,14 @@ func AuthRequired(tokens *auth.TokenManager) gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid access token"})
 			c.Abort()
 			return
+		}
+		if claims.ID != "" && len(revokers) > 0 && revokers[0] != nil {
+			revoked, err := revokers[0].IsAccessTokenRevoked(c.Request.Context(), claims.ID)
+			if err != nil || revoked {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid access token"})
+				c.Abort()
+				return
+			}
 		}
 
 		c.Set("claims", claims)

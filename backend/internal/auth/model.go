@@ -1,6 +1,9 @@
 package auth
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // User mirrors the users table. password_hash is deliberately excluded
 // from any JSON response — see the json:"-" tag. Never let a password
@@ -23,6 +26,11 @@ type StoredRefreshToken struct {
 	TokenHash string
 	ExpiresAt time.Time
 	CreatedAt time.Time
+}
+
+type AccessTokenRevoker interface {
+	RevokeAccessToken(ctx context.Context, jti, userID string, expiresAt time.Time) error
+	IsAccessTokenRevoked(ctx context.Context, jti string) (bool, error)
 }
 
 type AuthResponse struct {

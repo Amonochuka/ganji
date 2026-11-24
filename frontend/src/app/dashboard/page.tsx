@@ -90,7 +90,7 @@ export default function Dashboard() {
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
-      <DashboardHeader user={user} onLogout={() => { logout(); router.push("/"); }} />
+      <DashboardHeader user={user} onLogout={async () => { await logout(); router.push("/"); }} />
 
       <div className="flex-1 px-6 py-8 md:py-12">
         <div className="mx-auto max-w-6xl">

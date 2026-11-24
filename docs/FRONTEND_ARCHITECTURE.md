@@ -41,10 +41,10 @@ app/
 ## Auth Flow
 
 1. **Signup** → `POST /auth/signup` → user created, `is_operator` flag from `OPERATOR_EMAILS` at boot
-2. **Login** → `POST /auth/login` → JWT access + refresh tokens stored in localStorage
-3. **AuthContext** wraps the app provides `tokens` (access/refresh) and `user` (profile from `GET /auth/me`)
-4. **Token persistence** — access token in localStorage, refresh used silently when access expires
-5. **API client** — all protected endpoints require `Authorization: Bearer <token>` header; public endpoints are unauthenticated: `GET /public/deals/:shareToken`, `GET /public/deals/:shareToken/milestones`, `POST /public/deals/:shareToken/fund` (client submits a linked wallet URL + key to pay the escrow hold), approve/reset/milestone actions, and exit
+2. **Login** → `POST /auth/login` → access token returned in the response body; refresh token set as an `HttpOnly` cookie scoped to `/auth`
+3. **AuthContext** wraps the app and provides `tokens.access_token` plus `user`
+4. **Token persistence** — access token kept only in memory; refresh is replayed from the cookie on reload and rotated silently when access expires
+5. **API client** — all protected endpoints require `Authorization: Bearer <token>` header; public view/artifact/funding endpoints are share-link based, while approve/reset/milestone actions and exit additionally require a logged-in client whose email matches the deal
 
 ## State Management
 
@@ -109,7 +109,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 
 - `login(credentials)` → `POST /auth/login`
 - `signup(data)` → `POST /auth/signup`
-- `logout()` → clears local auth state and stored tokens; it does not call the backend logout endpoint or revoke the refresh token
+- `logout()` → clears local auth state and calls `POST /auth/logout` with credentials so the refresh cookie is cleared and both refresh/access tokens are revoked
 - `getMe(token)` → `GET /auth/me` — returns user profile without tokens
 
 ### Deal Methods
@@ -174,15 +174,15 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 ## Data Fetching
 
 - All API calls go through `api` client from `lib/api/api-client.ts`
-- Credentials (cookies) sent via `credentials: "include"` for sessions
-- Bearer tokens passed via `Authorization: Bearer <token>` header
+- Credentials (cookies) sent via `credentials: "include"` so the `ganji_refresh` cookie reaches `/auth`
+- In-memory access tokens passed via `Authorization: Bearer <token>` header
 - Error handling unified — `ApiError` with `status` and `data` properties
 - Loading states — each page manages its own `isLoading` flag
 
 ## Error Handling
 
 - `ApiError` class — wraps fetch errors with `message`, `status`, and `data`
-- Protected endpoints can return `401` for missing/invalid authentication and `403` for an authenticated user without access; public endpoints do not require auth
+- Protected endpoints can return `401` for missing/invalid/revoked authentication and `403` for an authenticated user without access; public view/funding endpoints use share links, while public money-changing actions still require matching client proof
 - `404` for not-found deals, artifacts, verifications
 - `500` for unexpected server errors
 - UI shows vault-styled error banners inline

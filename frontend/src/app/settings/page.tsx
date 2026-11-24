@@ -82,7 +82,7 @@ export default function SettingsPage() {
           <Link href="/dashboard" className="brand-wordmark" aria-label="Ganji Dashboard">ganji</Link>
           <nav className="flex items-center gap-4">
             <span className="text-sm text-ink-300 hidden sm:block">{user?.display_name}</span>
-            <Button variant="ghost" className="h-10 px-4" onClick={() => logout()}>Log out</Button>
+            <Button variant="ghost" className="h-10 px-4" onClick={() => void logout()}>Log out</Button>
           </nav>
         </div>
       </header>

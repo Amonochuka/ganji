@@ -113,8 +113,9 @@ a regular invoice through the linked wallet; it does not move escrow funds.
 
 ### Webhook (`POST /webhooks/lnbits`)
 LNbits pings when an invoice is paid. The handler verifies the HMAC signature
-(`LNbits-Signature`, ±5 min replay window, skipped if `LNBITS_WEBHOOK_SECRET`
-is empty), then the service **re-queries LNbits** (the webhook body is never
+(`LNbits-Signature`, ±5 min replay window; `LNBITS_WEBHOOK_SECRET` is required
+unless local `ALLOW_INSECURE_WEBHOOKS=true`, and unsigned requests are
+rejected), then the service **re-queries LNbits** (the webhook body is never
 trusted) and transitions `awaiting_payment → locked` only after the Es
 accepted-hold check succeeds. `paid=true` alone is ignored. Idempotent for
 already-locked deals.

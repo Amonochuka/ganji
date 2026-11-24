@@ -172,6 +172,25 @@ Document UI changes/ideas here as they are implemented or planned, especially wh
 - Caller-supplied wallet URLs now reject loopback, private, link-local, shared-address, and non-routable IPv6 destinations before any wallet API call.
 - Public money actions (approve, accept-next, reject, reset payout, exit) now require an authenticated account whose email matches the deal client; public views, artifact access, and funding remain share-link based.
 
+## QA hardening pass (2026-11-24)
+
+- `fundLocks` was replaced with context-short-circuited `singleflight` so per-deal funding keys are released after each call; no unbounded map remains.
+- Accepted-hold polling now checks context at the top of each loop and adds jitter to retries, avoiding synchronized thundering-herd checks.
+- `SubmitWork` fails closed when milestone payment refresh, reloaded milestone state, or deal status persistence fails.
+- Hold sweep no longer accepts ignored `time.Time`/`time.Duration` cutoff parameters; it checks LNbits status for all open deals.
+- Deal creation and milestone creation now cap milestone count (25) and title/source-platform lengths.
+- Refresh tokens now live in a `Secure`-when-HTTPS, `HttpOnly`, `SameSite=Strict` cookie; access tokens stay in memory and are no longer written to `localStorage`.
+- Logout now deletes the refresh token and revokes the current access token by `jti` via migration `000010_create_revoked_access_tokens_table`; `AuthRequired` rejects revoked access tokens.
+- Auth and deal handlers now return fixed safe error messages instead of wrapped provider/internal error text.
+- Email validation is shared between auth and deals; slugs transliterate accents and fall back to a deterministic hash for non-ASCII names.
+- HTTP server now has header/read/write/idle timeouts and a 1 MiB header cap; responses set `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, and an API-safe CSP.
+- Gin request logging redacts share-token path segments and uses route-style paths.
+- `LNBITS_WEBHOOK_SECRET` is now required unless `ALLOW_INSECURE_WEBHOOKS=true` is explicitly set for local development; webhook signature verification fails closed and no longer warns per request.
+- `PREIMAGE_ENCRYPTION_KEY` is required (32+ chars) in production; local dev logs a one-time warning when preimages remain plaintext.
+- Rate limiting remains in-process: this assumes a single backend replica; a shared Redis/SQL store is required before horizontal scaling.
+- WebSocket support is still stubbed and no WebSocket route is mounted, so there is no socket auth surface yet.
+- Deal-level `preimage_hash` remains a nullable legacy column; milestone mode stores the canonical hash on each milestone, and a drop migration/deployment is still pending.
+
 ## Legacy single-hold removal / migration harmonization (2026-11-22)
 
 - `6c760c4` `refactor: remove legacy single-hold create/funding paths` — removed legacy single-hold create/funding/check/public-approve/release branches; omitted milestones normalized to 1 milestone (7-day default). `FundDeal`/`CheckPayment`/`PublicApproveDeal`/`ApproveDeal`/`refreshMilestonePayment` are milestone-only; `refreshMilestonePayment` requires accepted-hold verification and returns `ErrVerificationUnavailable` when verifier/hash unavailable (no `payment.Paid` fallback). `SubmitWork` updates milestone status with error handling; milestone release anchors CV. Verification: `cd backend && gofmt -w <changed> && go vet ./... && go test ./...` PASS.

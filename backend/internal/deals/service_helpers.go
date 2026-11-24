@@ -3,8 +3,8 @@ package deals
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"net/mail"
-	"strings"
+
+	"github.com/Amonochuka/ganji-backend/internal/validate"
 )
 
 func generateShareToken() (string, error) {
@@ -15,10 +15,6 @@ func generateShareToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// isValidEmail does a light syntactic check using the standard library. The
-// authoritative validation happens when the client actually registers with
-// this email (auth.Service lowercases + enforces a stricter pattern).
 func isValidEmail(s string) bool {
-	addr, err := mail.ParseAddress(s)
-	return err == nil && addr.Address == s && strings.Contains(s, "@")
+	return validate.IsValidEmail(validate.NormalizeEmail(s))
 }
