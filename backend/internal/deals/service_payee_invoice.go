@@ -38,10 +38,6 @@ func (s *Service) UpdatePayeeInvoice(ctx context.Context, userID, dealID, bolt11
 		return nil, fmt.Errorf("%w: payee invoice is frozen once the deal is %s", ErrInvalidInput, deal.Status)
 	}
 
-	if deal.PayeeInvoice == bolt11 {
-		return deal, nil
-	}
-
 	ms, err := s.repo.GetMilestonesByDeal(ctx, dealID)
 	if err != nil {
 		return nil, err

@@ -1701,3 +1701,26 @@ func TestUpdatePayeeInvoiceUpdatesOpenMilestones(t *testing.T) {
 		t.Fatalf("released milestone payee invoice must remain unchanged")
 	}
 }
+
+func TestUpdatePayeeInvoiceRepairsMilestonesWhenDealInvoiceAlreadyMatches(t *testing.T) {
+	decode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/payments/decode" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"amount_msat":889000,"payment_hash":"new-hash"}`))
+	}))
+	defer decode.Close()
+
+	repo := newFakeDealRepo()
+	repo.deals["deal-1"] = &Deal{ID: "deal-1", FreelancerID: "f1", Status: StatusWorkSubmitted, PayeeInvoice: "lnbc889"}
+	repo.milestones["ms-1"] = &Milestone{ID: "ms-1", DealID: "deal-1", Status: MilestoneWorkSubmitted, AmountSats: 889, PayeeInvoice: "old-invoice"}
+	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: decode.URL, APIKey: "key"}))
+
+	if _, err := service.UpdatePayeeInvoice(context.Background(), "f1", "deal-1", "lnbc889"); err != nil {
+		t.Fatalf("expected payee invoice update to succeed, got %v", err)
+	}
+	if repo.milestones["ms-1"].PayeeInvoice != "lnbc889" {
+		t.Fatalf("open milestone payee invoice was not repaired")
+	}
+}
