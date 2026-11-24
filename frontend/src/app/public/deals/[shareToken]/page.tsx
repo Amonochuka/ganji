@@ -285,17 +285,7 @@ export default function PublicDealPage() {
 
             {actionError && <p className="mb-4 text-sm text-red-400">{actionError}</p>}
 
-            {(deal.status === "work_submitted" || deal.status === "released") && (
-              <Button
-                variant="outline"
-                className="mb-4 w-full"
-                onClick={handleCheckFreelancerStatus}
-                isLoading={actionLoading === "check freelancer status"}
-                disabled={!!actionLoading}
-              >
-                Check Freelancer Status
-              </Button>
-            )}
+
             {deal.payout_reset_available && !hasMilestones && (
               <p className="mb-4 rounded-lg border border-yellow-600/30 bg-yellow-600/10 p-3 text-sm text-yellow-300">
                 Payout outcome needs confirmation. Checking account status refreshes the deal; it will not resend payment.
