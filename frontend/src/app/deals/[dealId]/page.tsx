@@ -722,14 +722,10 @@ export default function DealDetailPage() {
                       <Button
                         variant="outline"
                         onClick={() => {
-                          setPayeeInvoiceInput(currentPayeeInvoice);
+                          setPayeeInvoiceInput("");
                           setShowPayeeInvoiceForm((open) => !open);
                           setActionError(null);
-                          setNotice(
-                            currentPayeeInvoice
-                              ? "Stored invoice loaded from the deal."
-                              : null,
-                          );
+                          setNotice(null);
                         }}
                         disabled={!!actionLoading}
                       >
@@ -816,7 +812,7 @@ export default function DealDetailPage() {
                     <div className="mt-5 rounded-lg border border-vault-border bg-vault-raised p-4">
                       <h3 className="font-medium text-ink-100 mb-2">Replace payout invoice</h3>
                       <p className="text-xs text-ink-400 mb-3">
-                        Use this if a payout invoice expired. Generate a fresh invoice from your LNbits wallet or paste one manually. The client is not charged again; already-held escrow funds are paid to this new invoice when approved/reconciled.
+                        Use this if a payout invoice expired. Start by pasting an invoice, use Retry Current Invoice to load the stored one, or use Generate Invoice to create a fresh one from LNbits. The client is not charged again; already-held escrow funds are paid to this invoice when approved/reconciled.
                       </p>
                       <textarea
                         value={payeeInvoiceInput}
@@ -846,7 +842,9 @@ export default function DealDetailPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => {
+                            setPayeeInvoiceInput("");
                             setPayeeWalletError(null);
+                            setNotice(null);
                             setShowPayeeWalletDialog(true);
                           }}
                           disabled={!!actionLoading || isGeneratingPayeeInvoice}
