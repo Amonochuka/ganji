@@ -21,10 +21,16 @@ const statusConfig: Record<DealStatus, { label: string; className: string }> = {
   refunded: { label: "Refunded", className: "bg-gray-600/20 text-gray-400 border-gray-600/30" },
 };
 
+function isStuckDeal(deal: DealView): boolean {
+  if (deal.payout_reset_available) return true;
+  return deal.milestones?.some((m) => m.payout_reset_available) ?? false;
+}
+
 export function DealCard({ deal, onClick }: DealCardProps) {
   const [copyMessage, setCopyMessage] = useState("");
   const config = statusConfig[deal.status];
   const amount = formatCurrency(deal.amount_sats);
+  const stuck = isStuckDeal(deal);
 
   async function copyShareLink() {
     if (!deal.share_token) return;
@@ -55,9 +61,16 @@ export function DealCard({ deal, onClick }: DealCardProps) {
           <h3 className="font-display text-lg font-semibold text-ink-100 truncate">{deal.title}</h3>
           <p className="mt-1 text-sm text-ink-500 font-mono">{deal.source_platform}</p>
         </div>
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${config.className} whitespace-nowrap`}>
-          <StatusIcon status={deal.status} /> {config.label}
-        </span>
+        <div className="flex items-center gap-2">
+          {stuck && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-red-600/20 text-red-400 border-red-600/30 whitespace-nowrap">
+              Stuck
+            </span>
+          )}
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${config.className} whitespace-nowrap`}>
+            <StatusIcon status={deal.status} /> {config.label}
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-4">

@@ -31,6 +31,10 @@ func (s *Service) ListByUser(ctx context.Context, userID, email string) ([]Deal,
 	return s.repo.ListForUser(ctx, userID, email)
 }
 
+func (s *Service) ListAllDeals(ctx context.Context) ([]Deal, error) {
+	return s.repo.ListAllDeals(ctx)
+}
+
 // ListDisputes returns the arbitration queue: every deal frozen in the
 // disputed state, oldest dispute first. Route access is operator-only; the
 // service returns the full deal rows an operator needs to adjudicate.

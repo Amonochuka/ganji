@@ -219,6 +219,14 @@ func (f *fakeDealRepo) ListForUser(ctx context.Context, userID, email string) ([
 	return deals, nil
 }
 
+func (f *fakeDealRepo) ListAllDeals(ctx context.Context) ([]Deal, error) {
+	out := make([]Deal, 0, len(f.deals))
+	for _, deal := range f.deals {
+		out = append(out, *deal)
+	}
+	return out, nil
+}
+
 func (f *fakeDealRepo) UpdateStatus(ctx context.Context, dealID string, status Status) error {
 	if f.updateErr != nil {
 		return f.updateErr

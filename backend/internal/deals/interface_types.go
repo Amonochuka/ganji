@@ -14,6 +14,7 @@ type DealRepository interface {
 	GetDealByShareToken(ctx context.Context, shareToken string) (*Deal, error)
 	ListByFreelancer(ctx context.Context, freelancerID string) ([]Deal, error)
 	ListForUser(ctx context.Context, userID, email string) ([]Deal, error)
+	ListAllDeals(ctx context.Context) ([]Deal, error)
 	UpdateStatus(ctx context.Context, dealID string, status Status) error
 	// UpdateStatusIfCurrent atomically changes a status only when the row is
 	// still in expected. The boolean reports whether this caller won the

@@ -122,7 +122,12 @@ export default function PublicDealPage() {
     setActionError(null);
     setActionLoading("check freelancer status");
     try {
-      await fetchDeal(true);
+      const res = await api.getPublicDeal(shareToken);
+      setDeal(res.deal);
+      setError(null);
+      void fetchArtifacts(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to refresh deal status");
     } finally {
       setActionLoading(null);
     }

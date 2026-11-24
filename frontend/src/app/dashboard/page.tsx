@@ -1,12 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { DealCard } from "@/components/deals/deal-card";
-import { api, type DealView, type ListDealsResponse } from "@/lib/api/api-client";
+import { api, type DealStatus, type DealView } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
+
+const PAGE_SIZE = 10;
+
+type StatusFilter = "all" | "active" | "stuck" | "done" | DealStatus;
+
+function isDealStuck(deal: DealView): boolean {
+  if (deal.payout_reset_available) return true;
+  return deal.milestones?.some((m) => m.payout_reset_available) ?? false;
+}
+
+function isDealDone(deal: DealView): boolean {
+  return deal.status === "released" || deal.status === "refunded";
+}
+
+function isDealActive(deal: DealView): boolean {
+  return !isDealDone(deal);
+}
 
 export default function Dashboard() {
   const router = useRouter();
@@ -14,6 +31,8 @@ export default function Dashboard() {
   const [deals, setDeals] = useState<DealView[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     if (!authLoading && !tokens) {
@@ -38,6 +57,24 @@ export default function Dashboard() {
     }
   }
 
+  const filteredDeals = useMemo(() => {
+    return deals.filter((deal) => {
+      if (statusFilter === "all") return true;
+      if (statusFilter === "stuck") return isDealStuck(deal);
+      if (statusFilter === "active") return isDealActive(deal);
+      if (statusFilter === "done") return isDealDone(deal);
+      return deal.status === statusFilter;
+    });
+  }, [deals, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredDeals.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedDeals = filteredDeals.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter]);
+
   if (authLoading || (tokens && isLoading)) {
     return (
       <main className="flex min-h-screen flex-col bg-vault-bg">
@@ -61,7 +98,7 @@ export default function Dashboard() {
             <div>
               <h1 className="font-display text-3xl font-semibold text-ink-100">Dashboard</h1>
               <p className="mt-1 text-sm text-ink-500">
-                {deals.length} deal{deals.length !== 1 ? "s" : ""} • Manage your escrows
+                {filteredDeals.length} of {deals.length} deal{deals.length !== 1 ? "s" : ""} • Manage your escrows
               </p>
             </div>
             <Link href="/deals/new">
@@ -69,6 +106,29 @@ export default function Dashboard() {
                 Create Deal
               </Button>
             </Link>
+          </div>
+
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm text-ink-400">
+              <span>Status</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                className="rounded-md border border-vault-border bg-vault-raised px-3 py-2 text-sm text-ink-100"
+              >
+                <option value="all">All</option>
+                <option value="stuck">Stuck</option>
+                <option value="active">Active</option>
+                <option value="done">Done</option>
+                <option value="awaiting_payment">Awaiting Payment</option>
+                <option value="locked">Funds Held</option>
+                <option value="work_submitted">Work Submitted</option>
+                <option value="reviewing">Under Review</option>
+                <option value="disputed">Disputed</option>
+                <option value="released">Released</option>
+                <option value="refunded">Refunded</option>
+              </select>
+            </label>
           </div>
 
           {error && (
@@ -90,16 +150,33 @@ export default function Dashboard() {
                 <Button size="lg">Create Your First Deal</Button>
               </Link>
             </div>
+          ) : filteredDeals.length === 0 ? (
+            <div className="vault-card p-8 text-center text-ink-400">No deals match this filter.</div>
           ) : (
-            <div className="space-y-4">
-              {deals.map((deal) => (
-                <DealCard
-                  key={deal.id}
-                  deal={deal}
-                  onClick={() => router.push(`/deals/${deal.id}`)}
-                />
-              ))}
-            </div>
+            <>
+              <div className="space-y-4">
+                {pagedDeals.map((deal) => (
+                  <DealCard
+                    key={deal.id}
+                    deal={deal}
+                    onClick={() => router.push(`/deals/${deal.id}`)}
+                  />
+                ))}
+              </div>
+              {totalPages > 1 && (
+                <div className="mt-6 flex items-center justify-between text-sm text-ink-400">
+                  <span>Page {currentPage} of {totalPages}</span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                      Previous
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

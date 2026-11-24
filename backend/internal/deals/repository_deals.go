@@ -217,6 +217,32 @@ func (r *Repository) ListForUser(ctx context.Context, userID, email string) ([]D
 	return deals, nil
 }
 
+// ListAllDeals returns all deals for operator triage/dashboard.
+func (r *Repository) ListAllDeals(ctx context.Context) ([]Deal, error) {
+	query := "SELECT" + dealColumns + `
+		FROM deals
+		ORDER BY created_at DESC;
+	`
+
+	rows, err := r.q.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list all deals: %w", err)
+	}
+	defer rows.Close()
+	var deals []Deal
+	for rows.Next() {
+		deal, err := r.scanDeal(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repository: scan deal: %w", err)
+		}
+		deals = append(deals, *deal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate deals: %w", err)
+	}
+	return deals, nil
+}
+
 // UpdatePayeeInvoice swaps the freelancer's payout destination. Allowed for
 // any open deal — once released/refunded the money has already moved.
 func (r *Repository) UpdatePayeeInvoice(ctx context.Context, dealID, payeeInvoice string) error {

@@ -107,8 +107,17 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 func (h *Handler) ListDeals(c *gin.Context) {
 	userID := c.GetString("userID")
 	email := c.GetString("email")
+	isOperator := c.GetBool("isOperator")
 
-	deals, err := h.service.ListByUser(c.Request.Context(), userID, email)
+	var (
+		deals []Deal
+		err   error
+	)
+	if isOperator {
+		deals, err = h.service.ListAllDeals(c.Request.Context())
+	} else {
+		deals, err = h.service.ListByUser(c.Request.Context(), userID, email)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
