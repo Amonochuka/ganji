@@ -25,6 +25,15 @@ func mockID() string {
 	return fmt.Sprintf("mock-%d", mockIDCounter)
 }
 
+func allowLocalWalletURLsForTest(t *testing.T) {
+	t.Helper()
+	previous := walletEndpointValidator
+	walletEndpointValidator = func(raw string) (string, error) {
+		return strings.TrimRight(strings.TrimSpace(raw), "/"), nil
+	}
+	t.Cleanup(func() { walletEndpointValidator = previous })
+}
+
 type fakeScanRow struct {
 	values []any
 }
@@ -1415,6 +1424,7 @@ func (f *fakeDealRepo) DeleteMilestone(ctx context.Context, milestoneID string) 
 }
 
 func TestFundDealLocksAfterAcceptedHold(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1460,6 +1470,7 @@ func TestFundDealLocksAfterAcceptedHold(t *testing.T) {
 }
 
 func TestFundDealIsIdempotentWhenAlreadyLocked(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	addFundedMilestone(repo, deal, 1, 5000, MilestoneInProgress)
@@ -1478,6 +1489,7 @@ func TestFundDealIsIdempotentWhenAlreadyLocked(t *testing.T) {
 }
 
 func TestFundDealSucceedsWhenRefreshAlreadyLocked(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1508,6 +1520,7 @@ func TestFundDealSucceedsWhenRefreshAlreadyLocked(t *testing.T) {
 }
 
 func TestFundDealSucceedsWhenWebhookAlreadyLocked(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1542,6 +1555,7 @@ func TestFundDealSucceedsWhenWebhookAlreadyLocked(t *testing.T) {
 }
 
 func TestFundDealWrapsWalletPaymentFailure(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1576,6 +1590,7 @@ func TestFundDealWrapsWalletPaymentFailure(t *testing.T) {
 }
 
 func TestFundDealRefusesUnacceptedHold(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1606,6 +1621,7 @@ func TestFundDealRefusesUnacceptedHold(t *testing.T) {
 }
 
 func TestFundDealRequiresAcceptedHoldChecker(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	repo := newFakeDealRepo()
 	deal := lockedDeal(repo, "deal-1", "freelancer-1", "client@example.com")
 	deal.Status = StatusAwaitingPayment
@@ -1621,6 +1637,7 @@ func TestFundDealRequiresAcceptedHoldChecker(t *testing.T) {
 }
 
 func TestGenerateInvoiceUsesLinkedWallet(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	var body struct {
 		Amount int64  `json:"amount"`
 		Memo   string `json:"memo"`
@@ -1656,6 +1673,7 @@ func TestGenerateInvoiceUsesLinkedWallet(t *testing.T) {
 }
 
 func TestGenerateInvoiceWrapsLinkedWalletFailure(t *testing.T) {
+	allowLocalWalletURLsForTest(t)
 	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"detail":"invalid key"}`))
