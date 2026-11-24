@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/Amonochuka/ganji-backend/internal/lnbits"
 )
 
 func (s *Service) validatePayeeInvoiceAmount(ctx context.Context, bolt11 string, expectedSats int64) error {
@@ -28,6 +31,24 @@ func (s *Service) validatePayeeInvoiceAmount(ctx context.Context, bolt11 string,
 	if got != expectedSats {
 		return fmt.Errorf("%w: payee invoice amount %d sats does not match expected %d sats", ErrInvalidInput, got, expectedSats)
 	}
+	return validatePayeeInvoiceExpiry(decoded)
+}
+
+func validatePayeeInvoiceExpiry(decoded *lnbits.DecodedPayment) error {
+	if decoded == nil || decoded.Expiry <= 0 {
+		return nil
+	}
+	issuedAt := decoded.Date
+	if issuedAt <= 0 {
+		issuedAt = decoded.Timestamp
+	}
+	if issuedAt <= 0 {
+		return fmt.Errorf("%w: payee invoice expiry cannot be verified", ErrInvalidInput)
+	}
+	expiresAt := time.Unix(issuedAt+decoded.Expiry, 0).UTC()
+	if !time.Now().Before(expiresAt) {
+		return fmt.Errorf("%w: payee invoice has expired", ErrInvalidInput)
+	}
 	return nil
 }
 
@@ -43,5 +64,5 @@ func (s *Service) validatePayeeInvoiceDecodable(ctx context.Context, bolt11 stri
 	if decoded.AmountMsat <= 0 {
 		return fmt.Errorf("%w: payee invoice must have a fixed amount", ErrInvalidInput)
 	}
-	return nil
+	return validatePayeeInvoiceExpiry(decoded)
 }

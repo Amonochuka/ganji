@@ -165,7 +165,7 @@ func (h *Handler) UpdateMilestone(c *gin.Context) {
 		completedAt = &t
 	}
 
-	if err := h.service.UpdateMilestoneStatus(c.Request.Context(), milestoneID, MilestoneStatus(req.Status), completedAt); err != nil {
+	if err := h.service.UpdateMilestoneStatus(c.Request.Context(), dealID, milestoneID, MilestoneStatus(req.Status), completedAt); err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

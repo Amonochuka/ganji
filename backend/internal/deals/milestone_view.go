@@ -27,5 +27,5 @@ func milestoneViewFrom(m Milestone) MilestoneView {
 		s := m.FundedAt.Time.AddDate(0, 0, m.DeliveryDays).UTC().Format(time.RFC3339)
 		dueAt = &s
 	}
-	return MilestoneView{ID: m.ID, Title: m.Title, AmountSats: m.AmountSats, Order: m.Order, Status: string(m.Status), Invoice: m.Invoice, CompletedAt: completed, DeliveryDays: m.DeliveryDays, DueAt: dueAt, CreatedAt: m.CreatedAt}
+	return MilestoneView{ID: m.ID, Title: m.Title, AmountSats: m.AmountSats, Order: m.Order, Status: string(m.Status), Invoice: m.Invoice, CompletedAt: completed, DeliveryDays: m.DeliveryDays, DueAt: dueAt, CreatedAt: m.CreatedAt, PayoutResetAvailable: canResetMilestonePayoutAttempt(&m)}
 }

@@ -61,7 +61,7 @@ func (s *Service) GetMilestoneByID(ctx context.Context, milestoneID string) (*Mi
 	return milestone, nil
 }
 
-func (s *Service) UpdateMilestoneStatus(ctx context.Context, milestoneID string, status MilestoneStatus, completedAt *time.Time) error {
+func (s *Service) UpdateMilestoneStatus(ctx context.Context, dealID, milestoneID string, status MilestoneStatus, completedAt *time.Time) error {
 	// released/refunded are money moves — never set them through this
 	// endpoint. released must go through ReleaseMilestone (settle + pay);
 	// refunded must go through CancelHold (ResolveMilestone/exit).
@@ -71,6 +71,9 @@ func (s *Service) UpdateMilestoneStatus(ctx context.Context, milestoneID string,
 	current, err := s.repo.GetMilestoneByID(ctx, milestoneID)
 	if err != nil {
 		return err
+	}
+	if current.DealID != dealID {
+		return ErrMilestoneNotFound
 	}
 	if !CanMilestoneTransition(current.Status, status) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, current.Status, status)

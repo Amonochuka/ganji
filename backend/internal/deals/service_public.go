@@ -74,13 +74,14 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 		}
 	}
 	return &PublicDeal{
-		Title:          deal.Title,
-		AmountSats:     deal.AmountSats,
-		SourcePlatform: deal.SourcePlatform,
-		Invoice:        activeInvoice,
-		Status:         activeStatus,
-		DisputeReason:  deal.DisputeReason,
-		CreatedAt:      deal.CreatedAt,
-		Milestones:     views,
+		Title:                deal.Title,
+		AmountSats:           deal.AmountSats,
+		SourcePlatform:       deal.SourcePlatform,
+		Invoice:              activeInvoice,
+		Status:               activeStatus,
+		PayoutResetAvailable: payoutResetAvailable,
+		DisputeReason:        deal.DisputeReason,
+		CreatedAt:            deal.CreatedAt,
+		Milestones:           views,
 	}, nil
 }

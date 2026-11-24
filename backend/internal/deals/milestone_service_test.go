@@ -35,6 +35,9 @@ type milestoneLN struct {
 	cancelErr            error             // forced CancelHold error
 	overridden           bool
 	decodeAmountMsat     int64 // default decoded payee amount; 0 means infer from string
+	decodeDate           int64
+	decodeTimestamp      int64
+	decodeExpiry         int64
 }
 
 func newMilestoneLN(t *testing.T) *milestoneLN {
@@ -114,7 +117,7 @@ func (m *milestoneLN) handler() http.Handler {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(fmt.Appendf(nil, `{"amount_msat":%d,"payment_hash":"dec"}`, amount))
+		_, _ = w.Write(fmt.Appendf(nil, `{"amount_msat":%d,"payment_hash":"dec","date":%d,"timestamp":%d,"expiry":%d}`, amount, m.decodeDate, m.decodeTimestamp, m.decodeExpiry))
 	})
 	mux.HandleFunc("/api/v1/payments/settle", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&m.settleCount, 1)
@@ -791,6 +794,23 @@ func TestPublicAcceptNextDisputedBlocked(t *testing.T) {
 	}
 }
 
+func TestPublicAcceptNextRejectsOutOfOrderMilestone(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+	deal := milestoneTestDeal(repo, "deal-1")
+	deal.ShareToken = "good-token"
+	repo.milestones["ms-1"] = escrowMilestone(deal.ID, "ms-1", 1, MilestoneWorkSubmitted)
+	repo.milestones["ms-2"] = escrowMilestone(deal.ID, "ms-2", 2, MilestoneWorkSubmitted)
+
+	if _, err := service.PublicAcceptNextMilestone(context.Background(), "good-token", "ms-2"); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("out-of-order accept-next must be rejected, got %v", err)
+	}
+	if atomic.LoadInt32(&ln.settleCount) != 0 || atomic.LoadInt32(&ln.payCount) != 0 {
+		t.Fatal("out-of-order accept-next must not move money")
+	}
+}
+
 func TestShareTokenOnlyAuth(t *testing.T) {
 	repo := newFakeDealRepo()
 	service := newTestService(repo)
@@ -806,6 +826,44 @@ func TestShareTokenOnlyAuth(t *testing.T) {
 	}
 }
 
+func TestPayeeInvoiceExpiryValidation(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+	now := time.Now().UTC().Unix()
+
+	tests := []struct {
+		name        string
+		date        int64
+		timestamp   int64
+		expiry      int64
+		wantInvalid bool
+	}{
+		{name: "valid", date: now - 60, expiry: 3600},
+		{name: "expired", date: now - 7200, expiry: 3600, wantInvalid: true},
+		{name: "timestamp fallback", timestamp: now - 60, expiry: 3600},
+		{name: "unverifiable expiry", expiry: 3600, wantInvalid: true},
+		{name: "no expiry data", date: now - 7200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ln.decodeDate = tt.date
+			ln.decodeTimestamp = tt.timestamp
+			ln.decodeExpiry = tt.expiry
+			err := service.validatePayeeInvoiceAmount(context.Background(), "lnbc1000payee", 1000)
+			if tt.wantInvalid {
+				if !errors.Is(err, ErrInvalidInput) {
+					t.Fatalf("expected invalid input, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected invoice to be accepted, got %v", err)
+			}
+		})
+	}
+}
+
 // --- UpdateMilestoneStatus validation ---
 
 func TestUpdateMilestoneStatusCannotBypassMoneyMoves(t *testing.T) {
@@ -816,18 +874,22 @@ func TestUpdateMilestoneStatusCannotBypassMoneyMoves(t *testing.T) {
 
 	var now = repo.milestones["ms-1"].CreatedAt
 	_ = now
-	if err := service.UpdateMilestoneStatus(context.Background(), "ms-1", MilestoneReleased, nil); !errors.Is(err, ErrInvalidTransition) {
+	if err := service.UpdateMilestoneStatus(context.Background(), deal.ID, "ms-1", MilestoneReleased, nil); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("direct released via PATCH must be blocked, got %v", err)
 	}
-	if err := service.UpdateMilestoneStatus(context.Background(), "ms-1", MilestoneRefunded, nil); !errors.Is(err, ErrInvalidTransition) {
+	if err := service.UpdateMilestoneStatus(context.Background(), deal.ID, "ms-1", MilestoneRefunded, nil); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("direct refunded via PATCH must be blocked, got %v", err)
 	}
+	// Cross-deal milestone ids must not be reachable through another deal route.
+	if err := service.UpdateMilestoneStatus(context.Background(), "deal-2", "ms-1", MilestoneCompleted, nil); !errors.Is(err, ErrMilestoneNotFound) {
+		t.Fatalf("cross-deal milestone id must be rejected, got %v", err)
+	}
 	// Legal non-money transition still allowed: work_submitted -> completed.
-	if err := service.UpdateMilestoneStatus(context.Background(), "ms-1", MilestoneCompleted, nil); err != nil {
+	if err := service.UpdateMilestoneStatus(context.Background(), deal.ID, "ms-1", MilestoneCompleted, nil); err != nil {
 		t.Fatalf("work_submitted -> completed must be allowed, got %v", err)
 	}
 	// Illegal jump: completed -> in_progress is not in ValidMilestoneTransitions.
-	if err := service.UpdateMilestoneStatus(context.Background(), "ms-1", MilestoneInProgress, nil); !errors.Is(err, ErrInvalidTransition) {
+	if err := service.UpdateMilestoneStatus(context.Background(), deal.ID, "ms-1", MilestoneInProgress, nil); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("illegal transition must be rejected, got %v", err)
 	}
 }

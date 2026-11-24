@@ -229,6 +229,10 @@ func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, mil
 	if err != nil {
 		return nil, err
 	}
+	active := ActiveMilestone(ms)
+	if active == nil {
+		return nil, fmt.Errorf("%w: deal has no active milestone", ErrInvalidTransition)
+	}
 	idx := -1
 	for i := range ms {
 		if ms[i].ID == milestoneID {
@@ -238,6 +242,9 @@ func (s *Service) PublicAcceptNextMilestone(ctx context.Context, shareToken, mil
 	}
 	if idx < 0 {
 		return nil, ErrMilestoneNotFound
+	}
+	if ms[idx].ID != active.ID {
+		return nil, fmt.Errorf("%w: only the active milestone can be accepted", ErrInvalidTransition)
 	}
 	target := ms[idx]
 	if target.Status == MilestoneDisputed || target.Status == MilestoneRejected {

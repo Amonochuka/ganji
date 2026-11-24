@@ -34,7 +34,11 @@ func (s *Service) dealViewWithMilestones(ctx context.Context, deal *Deal) DealVi
 	}
 	views := make([]MilestoneView, 0, len(ms))
 	for i := range ms {
-		views = append(views, milestoneViewFrom(ms[i]))
+		mv := milestoneViewFrom(ms[i])
+		views = append(views, mv)
+		if mv.PayoutResetAvailable {
+			view.PayoutResetAvailable = true
+		}
 	}
 	view.Milestones = views
 	if active := ActiveMilestone(ms); active != nil {

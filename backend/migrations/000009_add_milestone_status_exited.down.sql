@@ -1,0 +1,1 @@
+-- PostgreSQL cannot safely remove an enum value; keep the forward migration.

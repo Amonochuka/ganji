@@ -12,6 +12,9 @@ import (
 type DecodedPayment struct {
 	AmountMsat  int64  `json:"amount_msat"`
 	PaymentHash string `json:"payment_hash"`
+	Date        int64  `json:"date,omitempty"`
+	Timestamp   int64  `json:"timestamp,omitempty"`
+	Expiry      int64  `json:"expiry,omitempty"`
 }
 
 func (c *Client) DecodePayment(ctx context.Context, bolt11 string) (*DecodedPayment, error) {

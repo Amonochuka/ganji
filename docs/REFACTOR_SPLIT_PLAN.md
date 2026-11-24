@@ -161,6 +161,15 @@ Document UI changes/ideas here as they are implemented or planned, especially wh
 | UI-5 | Public payout error reporting | implemented | Public approve and accept-next use one error mapper: payout refusal returns `502` with the real reason, in-flight/ambiguous payout returns `409`, validation/not-found/forbidden keep their specific codes, and unexpected errors are logged server-side while the client still gets a redacted `500`. The public page surfaces the returned message instead of a generic console-only failure. |
 
 
+## Security hardening pass (2026-11-24)
+
+- `PATCH /deals/:dealID/milestones/:milestoneID` now checks `milestone.deal_id == dealID`; a valid milestone id from another deal returns `404`.
+- `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` now requires the caller-supplied milestone to be the active (first non-terminal) milestone; out-of-order accept/release is rejected before any settle or payout call.
+- Added migration `000009_add_milestone_status_exited` so the `exited` status used by the exit flow exists in clean and already-migrated databases. Down migration is intentionally a no-op because PostgreSQL cannot safely remove an enum value.
+- Deal and milestone views now serialize `payout_reset_available` from the stored payout-attempt state; the dashboard stuck filter/badge receives the flag in authed deal responses as well as public ones.
+- Payee invoice validation now rejects expired invoices when LNbits decode data includes `date`/`timestamp` plus `expiry`, and rejects unverifiable expiry metadata. Validation remains best-effort when decode does not expose expiry data.
+- Public share-token money-action authorization is still an open product decision: public routes currently authorize by share token alone.
+
 ## Legacy single-hold removal / migration harmonization (2026-11-22)
 
 - `6c760c4` `refactor: remove legacy single-hold create/funding paths` — removed legacy single-hold create/funding/check/public-approve/release branches; omitted milestones normalized to 1 milestone (7-day default). `FundDeal`/`CheckPayment`/`PublicApproveDeal`/`ApproveDeal`/`refreshMilestonePayment` are milestone-only; `refreshMilestonePayment` requires accepted-hold verification and returns `ErrVerificationUnavailable` when verifier/hash unavailable (no `payment.Paid` fallback). `SubmitWork` updates milestone status with error handling; milestone release anchors CV. Verification: `cd backend && gofmt -w <changed> && go vet ./... && go test ./...` PASS.

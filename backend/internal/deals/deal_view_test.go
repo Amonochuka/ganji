@@ -1,11 +1,14 @@
 package deals
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -127,5 +130,40 @@ func TestListDealsResponsesRedactSecrets(t *testing.T) {
 		if strings.Contains(body, secret) {
 			t.Errorf("list response leaks %q: %s", secret, body)
 		}
+	}
+}
+
+func TestDealDetailSerializesPayoutResetAvailable(t *testing.T) {
+	repo := newFakeDealRepo()
+	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	m := repo.milestones["deal-1-m1"]
+	m.PayoutAttemptedAt = sql.NullTime{Time: time.Now().UTC(), Valid: true}
+	repo.milestones[m.ID] = m
+
+	service := newTestService(repo)
+	router := newTestDealRouter(t, service, "client-user", "client@example.com")
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/deals/deal-1", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Deal struct {
+			PayoutResetAvailable bool `json:"payout_reset_available"`
+			Milestones           []struct {
+				PayoutResetAvailable bool `json:"payout_reset_available"`
+			} `json:"milestones"`
+		} `json:"deal"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Deal.PayoutResetAvailable {
+		t.Fatalf("deal response missing top-level payout_reset_available: %s", resp.Body.String())
+	}
+	if len(payload.Deal.Milestones) != 1 || !payload.Deal.Milestones[0].PayoutResetAvailable {
+		t.Fatalf("milestone response missing payout_reset_available: %s", resp.Body.String())
 	}
 }

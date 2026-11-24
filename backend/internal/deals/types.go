@@ -90,14 +90,15 @@ const (
 // of the response on purpose so a shared link never leaks the DB row handle
 // (rotation would otherwise be pointless if the UUID leaked inside the body).
 type PublicDeal struct {
-	Title          string          `json:"title"`
-	AmountSats     int64           `json:"amount_sats"`
-	SourcePlatform string          `json:"source_platform"`
-	Invoice        string          `json:"invoice"`
-	Status         Status          `json:"status"`
-	DisputeReason  string          `json:"dispute_reason"`
-	CreatedAt      time.Time       `json:"created_at"`
-	Milestones     []MilestoneView `json:"milestones,omitempty"`
+	Title                string          `json:"title"`
+	AmountSats           int64           `json:"amount_sats"`
+	SourcePlatform       string          `json:"source_platform"`
+	Invoice              string          `json:"invoice"`
+	Status               Status          `json:"status"`
+	PayoutResetAvailable bool            `json:"payout_reset_available,omitempty"`
+	DisputeReason        string          `json:"dispute_reason"`
+	CreatedAt            time.Time       `json:"created_at"`
+	Milestones           []MilestoneView `json:"milestones,omitempty"`
 }
 
 type PublicMilestoneAction struct {
@@ -121,24 +122,25 @@ type MilestoneInput struct {
 // Everything else is surfaced to both the freelancer and the client (the
 // client is authorized by email match). See explained.md §10 #1.
 type DealView struct {
-	ID             string     `json:"id"`
-	FreelancerID   string     `json:"freelancer_id"`
-	ClientEmail    string     `json:"client_email"`
-	Title          string     `json:"title"`
-	AmountSats     int64      `json:"amount_sats"`
-	SourcePlatform string     `json:"source_platform"`
-	PreimageHash   string     `json:"preimage_hash"`
-	Invoice        string     `json:"invoice"`
-	CheckingID     string     `json:"checking_id"`
-	ShareToken     string     `json:"share_token"`
-	PayeeInvoice   string     `json:"payee_invoice,omitempty"`
-	Status         Status     `json:"status"`
-	DisputeReason  string     `json:"dispute_reason"`
-	DisputedAt     *time.Time `json:"disputed_at"`
-	ResolvedAt     *time.Time `json:"resolved_at"`
-	ResolvedBy     string     `json:"resolved_by,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	VerifiedAt     *time.Time `json:"verified_at"`
+	ID                   string     `json:"id"`
+	FreelancerID         string     `json:"freelancer_id"`
+	ClientEmail          string     `json:"client_email"`
+	Title                string     `json:"title"`
+	AmountSats           int64      `json:"amount_sats"`
+	SourcePlatform       string     `json:"source_platform"`
+	PreimageHash         string     `json:"preimage_hash"`
+	Invoice              string     `json:"invoice"`
+	CheckingID           string     `json:"checking_id"`
+	ShareToken           string     `json:"share_token"`
+	PayeeInvoice         string     `json:"payee_invoice,omitempty"`
+	Status               Status     `json:"status"`
+	PayoutResetAvailable bool       `json:"payout_reset_available,omitempty"`
+	DisputeReason        string     `json:"dispute_reason"`
+	DisputedAt           *time.Time `json:"disputed_at"`
+	ResolvedAt           *time.Time `json:"resolved_at"`
+	ResolvedBy           string     `json:"resolved_by,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	VerifiedAt           *time.Time `json:"verified_at"`
 	// Milestones carries per-milestone truth in milestone mode (empty in
 	// legacy single-hold mode). Order by Order asc. Invoice/CheckingID/Status
 	// on the view mirror the active milestone (first non-terminal) for
