@@ -170,26 +170,26 @@ export const api = {
     return this.post<GenerateInvoiceResponse>("/deals/wallet/invoice", data, token);
   },
 
-  publicApproveDeal(shareToken: string) {
-    return this.post<PublicApproveDealResponse>(`/public/deals/${shareToken}/approve`, {});
+  publicApproveDeal(shareToken: string, token: string) {
+    return this.post<PublicApproveDealResponse>(`/public/deals/${shareToken}/approve`, {}, token);
   },
 
-  publicResetPayout(shareToken: string, milestoneId?: string) {
+  publicResetPayout(shareToken: string, milestoneId: string | undefined, token: string) {
     return this.post<PublicResetPayoutResponse>(`/public/deals/${shareToken}/payout/reset`, {
       milestone_id: milestoneId || "",
-    });
+    }, token);
   },
 
-  publicAcceptNextMilestone(shareToken: string, milestoneId: string) {
-    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/milestones/${milestoneId}/accept-next`, {});
+  publicAcceptNextMilestone(shareToken: string, milestoneId: string, token: string) {
+    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/milestones/${milestoneId}/accept-next`, {}, token);
   },
 
-  publicRejectMilestone(shareToken: string, milestoneId: string, reason: string) {
-    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/milestones/${milestoneId}/reject`, { reason });
+  publicRejectMilestone(shareToken: string, milestoneId: string, reason: string, token: string) {
+    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/milestones/${milestoneId}/reject`, { reason }, token);
   },
 
-  publicExitDeal(shareToken: string) {
-    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/exit`, {});
+  publicExitDeal(shareToken: string, token: string) {
+    return this.post<{ deal: PublicDeal }>(`/public/deals/${shareToken}/exit`, {}, token);
   },
 
   // Auth

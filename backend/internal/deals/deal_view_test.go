@@ -90,6 +90,41 @@ func TestRespondPublicDealErrorMapsPayoutFailures(t *testing.T) {
 	}
 }
 
+func newTestPublicRouter(t *testing.T, service *Service, email string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("userID", "client-user")
+		c.Set("email", email)
+		c.Next()
+	})
+	RegisterPublicRoutes(router, NewHandler(service))
+	return router
+}
+
+func TestPublicMoneyActionsRejectWrongClientEmail(t *testing.T) {
+	repo := newFakeDealRepo()
+	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+	service := newTestService(repo)
+	router := newTestPublicRouter(t, service, "intruder@example.com")
+
+	routes := []string{
+		"/public/deals/share-deal-1/approve",
+		"/public/deals/share-deal-1/payout/reset",
+		"/public/deals/share-deal-1/milestones/deal-1-m1/accept-next",
+		"/public/deals/share-deal-1/milestones/deal-1-m1/reject",
+		"/public/deals/share-deal-1/exit",
+	}
+	for _, route := range routes {
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, route, nil))
+		if resp.Code != http.StatusForbidden {
+			t.Errorf("%s expected 403 for wrong client email, got %d: %s", route, resp.Code, resp.Body.String())
+		}
+	}
+}
+
 func TestFreelancerDealDetailIncludesPayeeInvoice(t *testing.T) {
 	repo := newFakeDealRepo()
 	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")

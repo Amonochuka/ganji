@@ -159,6 +159,7 @@ Document UI changes/ideas here as they are implemented or planned, especially wh
 | UI-3 | Freelancer payee invoice recovery | implemented | Freelancer deal page offers **Update Payee Invoice** with an empty textarea, **Retry Current Invoice** (loads the stored invoice from the freelancer-scoped `GET /deals/:id` response), optional LNbits **Generate Invoice** dialog for the open milestone amount, and manual paste. Choosing Generate clears the textarea and successful generation replaces it with the new invoice. Updating the invoice rewrites both `deals.payee_invoice` and all non-terminal `milestones.payee_invoice`, so stale expired invoices are not retried after escrow is settled. Client is not charged again; approval/reconcile pays from held escrow. |
 | UI-4 | Escrow/status copy and transient action errors | implemented | Work-submitted/reviewing deal pages no longer say "work can proceed"; they show waiting-for-approval/review copy and keep the held-escrow message accurate. Client approval copy states that approval releases already-held escrow and does not charge again. Public page background artifact polling no longer surfaces stale action errors, and successful reset/approve actions clear prior error messages. |
 | UI-5 | Public payout error reporting | implemented | Public approve and accept-next use one error mapper: payout refusal returns `502` with the real reason, in-flight/ambiguous payout returns `409`, validation/not-found/forbidden keep their specific codes, and unexpected errors are logged server-side while the client still gets a redacted `500`. The public page surfaces the returned message instead of a generic console-only failure. |
+| UI-6 | Client proof for public money actions | implemented | Public share links remain sufficient for viewing/funding/downloading artifacts. Approve/accept/reject/reset/exit require a logged-in account with the deal client's email; the public page shows a sign-in link that returns to the same deal. |
 
 
 ## Security hardening pass (2026-11-24)
@@ -168,7 +169,8 @@ Document UI changes/ideas here as they are implemented or planned, especially wh
 - Added migration `000009_add_milestone_status_exited` so the `exited` status used by the exit flow exists in clean and already-migrated databases. Down migration is intentionally a no-op because PostgreSQL cannot safely remove an enum value.
 - Deal and milestone views now serialize `payout_reset_available` from the stored payout-attempt state; the dashboard stuck filter/badge receives the flag in authed deal responses as well as public ones.
 - Payee invoice validation now rejects expired invoices when LNbits decode data includes `date`/`timestamp` plus `expiry`, and rejects unverifiable expiry metadata. Validation remains best-effort when decode does not expose expiry data.
-- Public share-token money-action authorization is still an open product decision: public routes currently authorize by share token alone.
+- Caller-supplied wallet URLs now reject loopback, private, link-local, shared-address, and non-routable IPv6 destinations before any wallet API call.
+- Public money actions (approve, accept-next, reject, reset payout, exit) now require an authenticated account whose email matches the deal client; public views, artifact access, and funding remain share-link based.
 
 ## Legacy single-hold removal / migration harmonization (2026-11-22)
 

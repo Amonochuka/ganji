@@ -3,6 +3,7 @@ package deals
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -84,4 +85,19 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 		CreatedAt:            deal.CreatedAt,
 		Milestones:           views,
 	}, nil
+}
+
+func (s *Service) AuthorizePublicClient(ctx context.Context, shareToken, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return ErrForbidden
+	}
+	deal, err := s.repo.GetDealByShareToken(ctx, shareToken)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(deal.ClientEmail), email) {
+		return ErrForbidden
+	}
+	return nil
 }

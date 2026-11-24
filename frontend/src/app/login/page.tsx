@@ -11,6 +11,11 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { ApiError } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 
+function safeNextPath(value: string | null): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  return value;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
@@ -19,10 +24,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [nextPath, setNextPath] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.has("email") || params.has("password")) {
+    setNextPath(safeNextPath(params.get("next")));
+    if (params.has("email") || params.has("password") || params.has("next")) {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -33,7 +40,7 @@ export default function LoginPage() {
     setIsSubmitting(true);
     try {
       await login({ email, password });
-      router.push("/dashboard");
+      router.push(nextPath || "/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {

@@ -8,6 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func (h *Handler) authorizePublicClient(c *gin.Context) bool {
+	if err := h.service.AuthorizePublicClient(c.Request.Context(), c.Param("shareToken"), c.GetString("email")); err != nil {
+		respondPublicDealError(c, err, "public client authorization")
+		return false
+	}
+	return true
+}
+
 func respondPublicDealError(c *gin.Context, err error, operation string) {
 	switch {
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTransition):
@@ -92,6 +100,9 @@ func (h *Handler) GetPublicDeal(c *gin.Context) {
 
 func (h *Handler) PublicApproveDeal(c *gin.Context) {
 	shareToken := c.Param("shareToken")
+	if !h.authorizePublicClient(c) {
+		return
+	}
 
 	_, err := h.service.PublicApproveDeal(c.Request.Context(), shareToken)
 	if err != nil {
@@ -129,6 +140,9 @@ type publicResetPayoutRequest struct {
 
 func (h *Handler) PublicResetPayout(c *gin.Context) {
 	shareToken := c.Param("shareToken")
+	if !h.authorizePublicClient(c) {
+		return
+	}
 
 	var req publicResetPayoutRequest
 	_ = c.ShouldBindJSON(&req)
@@ -158,6 +172,9 @@ type publicRejectRequest struct {
 func (h *Handler) PublicAcceptNextMilestone(c *gin.Context) {
 	shareToken := c.Param("shareToken")
 	milestoneID := c.Param("milestoneID")
+	if !h.authorizePublicClient(c) {
+		return
+	}
 	deal, err := h.service.PublicAcceptNextMilestone(c.Request.Context(), shareToken, milestoneID)
 	if err != nil {
 		respondPublicDealError(c, err, "public accept-next")
@@ -169,6 +186,9 @@ func (h *Handler) PublicAcceptNextMilestone(c *gin.Context) {
 func (h *Handler) PublicRejectMilestone(c *gin.Context) {
 	shareToken := c.Param("shareToken")
 	milestoneID := c.Param("milestoneID")
+	if !h.authorizePublicClient(c) {
+		return
+	}
 	var req publicRejectRequest
 	_ = c.ShouldBindJSON(&req)
 	deal, err := h.service.PublicRejectMilestone(c.Request.Context(), shareToken, milestoneID, req.Reason)
@@ -188,6 +208,9 @@ func (h *Handler) PublicRejectMilestone(c *gin.Context) {
 
 func (h *Handler) PublicExitDeal(c *gin.Context) {
 	shareToken := c.Param("shareToken")
+	if !h.authorizePublicClient(c) {
+		return
+	}
 	deal, err := h.service.PublicExitDeal(c.Request.Context(), shareToken)
 	if err != nil {
 		switch {

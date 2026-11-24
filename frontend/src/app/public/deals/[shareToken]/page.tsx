@@ -7,12 +7,15 @@ import { Button } from "@/components/ui/button";
 import { WalletLinkDialog } from "@/components/deals/wallet-link-dialog";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { api, type PublicDeal, type Artifact } from "@/lib/api/api-client";
+import { useAuth } from "@/lib/auth/auth-context";
 import { MilestoneRow, getStatusClass, getStatusLabel } from "./deal-ui";
 import { formatCurrency } from "@/lib/utils/format";
 
 export default function PublicDealPage() {
   const params = useParams();
   const shareToken = params.shareToken as string;
+  const { tokens, isLoading: authLoading } = useAuth();
+  const signInHref = `/login?next=${encodeURIComponent(`/public/deals/${shareToken}`)}`;
 
   const [deal, setDeal] = useState<PublicDeal | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,6 +64,13 @@ export default function PublicDealPage() {
         );
       }
     }
+  }
+
+  function requireClientToken(): string {
+    if (!tokens?.access_token) {
+      throw new Error("Sign in with the deal's client email to authorize this action.");
+    }
+    return tokens.access_token;
   }
 
   async function runAction(key: string, fn: () => Promise<void>) {
@@ -118,7 +128,7 @@ export default function PublicDealPage() {
 
   async function handleApprove() {
     await runAction("approve", async () => {
-      const res = await api.publicApproveDeal(shareToken);
+      const res = await api.publicApproveDeal(shareToken, requireClientToken());
       setDeal(res.deal);
     });
   }
@@ -144,14 +154,14 @@ export default function PublicDealPage() {
       : "Clear the failed payout attempt for this deal? This only removes the internal attempt marker. It does not move funds, settle escrow, or change the deal status. Continue only after confirming the freelancer was not paid.";
     if (!window.confirm(message)) return;
     await runAction(milestoneId ? `reset-${milestoneId}` : "reset", async () => {
-      const res = await api.publicResetPayout(shareToken, milestoneId);
+      const res = await api.publicResetPayout(shareToken, milestoneId, requireClientToken());
       setDeal(res.deal);
     });
   }
 
   async function handleAcceptNext(milestoneId: string) {
     await runAction(`accept-${milestoneId}`, async () => {
-      await api.publicAcceptNextMilestone(shareToken, milestoneId);
+      await api.publicAcceptNextMilestone(shareToken, milestoneId, requireClientToken());
     });
   }
 
@@ -159,7 +169,7 @@ export default function PublicDealPage() {
     const reason = prompt("Reason for rejection (required):");
     if (!reason?.trim()) return;
     await runAction(`reject-${milestoneId}`, async () => {
-      await api.publicRejectMilestone(shareToken, milestoneId, reason.trim());
+      await api.publicRejectMilestone(shareToken, milestoneId, reason.trim(), requireClientToken());
     });
   }
 
@@ -170,7 +180,7 @@ export default function PublicDealPage() {
       : "Exit this deal? The held escrow will be cancelled or refunded, and no payout will be sent to the freelancer.";
     if (!window.confirm(message)) return;
     await runAction("exit", async () => {
-      await api.publicExitDeal(shareToken);
+      await api.publicExitDeal(shareToken, requireClientToken());
     });
   }
 
@@ -290,6 +300,12 @@ export default function PublicDealPage() {
 
             {actionError && <p className="mb-4 text-sm text-red-400">{actionError}</p>}
 
+            {!authLoading && !tokens && !terminal && (
+              <div className="mb-4 rounded-lg border border-yellow-600/30 bg-yellow-600/10 p-3 text-sm text-yellow-300">
+                Viewing and funding are public. Approving, rejecting, resetting, or exiting requires signing in as the deal&apos;s client.{" "}
+                <Link href={signInHref} className="font-medium underline underline-offset-2">Sign in</Link>
+              </div>
+            )}
 
             {deal.payout_reset_available && !hasMilestones && (
               <p className="mb-4 rounded-lg border border-yellow-600/30 bg-yellow-600/10 p-3 text-sm text-yellow-300">
@@ -434,7 +450,7 @@ export default function PublicDealPage() {
           </div>
 
           <div className="text-center text-xs text-ink-500">
-            Powered by <span className="font-mono font-semibold text-gold-500">Ganji</span> — actions authorized by your share link.
+            Powered by <span className="font-mono font-semibold text-gold-500">Ganji</span> — viewing/funding by share link; client actions require sign-in.
           </div>
         </div>
       </div>
