@@ -182,7 +182,7 @@ func TestDownloadArtifactAsFreelancer(t *testing.T) {
 	service, _ := newTestServiceWithStorage(t, repo, 1024)
 	artifact := uploadHelper(t, service, deal.ID, "work content")
 
-	_, out, size, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", deal.ID, artifact.ID)
+	_, out, size, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", deal.ID, artifact.ID, false)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -208,7 +208,7 @@ func TestDownloadArtifactAsClient(t *testing.T) {
 	artifact := uploadHelper(t, service, deal.ID, "work content")
 
 	// The client ("visitor-id") is not the freelancer, but matches client_email.
-	_, out, _, err := service.DownloadArtifact(context.Background(), "visitor-id", "CLIENT@example.com", deal.ID, artifact.ID)
+	_, out, _, err := service.DownloadArtifact(context.Background(), "visitor-id", "CLIENT@example.com", deal.ID, artifact.ID, false)
 	if err != nil {
 		t.Fatalf("expected client download, got %v", err)
 	}
@@ -222,7 +222,7 @@ func TestDownloadArtifactRejectsStranger(t *testing.T) {
 	service, _ := newTestServiceWithStorage(t, repo, 1024)
 	artifact := uploadHelper(t, service, deal.ID, "work content")
 
-	_, _, _, err := service.DownloadArtifact(context.Background(), "stranger", "stranger@example.com", deal.ID, artifact.ID)
+	_, _, _, err := service.DownloadArtifact(context.Background(), "stranger", "stranger@example.com", deal.ID, artifact.ID, false)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
@@ -234,15 +234,15 @@ func TestDownloadArtifactUnknownOrMismatched(t *testing.T) {
 
 	service, _ := newTestServiceWithStorage(t, repo, 1024)
 
-	if _, _, _, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", "deal-1", "nope"); !errors.Is(err, ErrArtifactNotFound) {
+	if _, _, _, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", "deal-1", "nope", false); !errors.Is(err, ErrArtifactNotFound) {
 		t.Fatalf("expected ErrArtifactNotFound for unknown artifact, got %v", err)
 	}
 
 	repo.artifacts["deal-1"] = []Artifact{{ID: "a1", DealID: "deal-1", StorageKey: "deals/deal-1/missing"}}
-	if _, _, _, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", "deal-2", "a1"); !errors.Is(err, ErrArtifactNotFound) {
+	if _, _, _, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", "deal-2", "a1", false); !errors.Is(err, ErrArtifactNotFound) {
 		t.Fatalf("expected ErrArtifactNotFound for deal mismatch, got %v", err)
 	}
-	if _, _, _, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", "deal-1", "a1"); !errors.Is(err, ErrArtifactNotFound) {
+	if _, _, _, err := service.DownloadArtifact(context.Background(), "freelancer-1", "", "deal-1", "a1", false); !errors.Is(err, ErrArtifactNotFound) {
 		t.Fatalf("expected ErrArtifactNotFound for missing blob, got %v", err)
 	}
 }

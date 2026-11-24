@@ -134,7 +134,7 @@ func (s *Service) DeleteArtifact(ctx context.Context, userID, dealID, artifactID
 // client_email) may download — the client is precisely who has to review the
 // work. Anyone else is forbidden. Returns the artifact metadata plus a reader
 // and its size so the handler can send accurate headers.
-func (s *Service) DownloadArtifact(ctx context.Context, userID, email, dealID, artifactID string) (*Artifact, io.ReadCloser, int64, error) {
+func (s *Service) DownloadArtifact(ctx context.Context, userID, email, dealID, artifactID string, isOperator bool) (*Artifact, io.ReadCloser, int64, error) {
 	if s.storage == nil {
 		return nil, nil, 0, fmt.Errorf("%w: artifact storage is not configured", ErrInvalidInput)
 	}
@@ -159,7 +159,7 @@ func (s *Service) DownloadArtifact(ctx context.Context, userID, email, dealID, a
 		return nil, nil, 0, err
 	}
 
-	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
+	if !isOperator && deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
 		return nil, nil, 0, ErrForbidden
 	}
 
@@ -283,7 +283,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 func (s *Service) GetArtifactByID(
-	ctx context.Context, userID, email, dealID, artifactID string) (*Artifact, error) {
+	ctx context.Context, userID, email, dealID, artifactID string, isOperator bool) (*Artifact, error) {
 
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
@@ -307,14 +307,14 @@ func (s *Service) GetArtifactByID(
 		return nil, err
 	}
 
-	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
+	if !isOperator && deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
 		return nil, ErrForbidden
 	}
 
 	return artifact, nil
 }
 
-func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, email, dealID string) ([]Artifact, error) {
+func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, email, dealID string, isOperator bool) ([]Artifact, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
@@ -324,7 +324,7 @@ func (s *Service) ListArtifactsByDeal(ctx context.Context, userID, email, dealID
 		return nil, err
 	}
 
-	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
+	if !isOperator && deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
 		return nil, ErrForbidden
 	}
 

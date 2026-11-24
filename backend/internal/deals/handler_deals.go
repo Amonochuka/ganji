@@ -87,7 +87,7 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 	email := c.GetString("email")
 	dealID := c.Param("dealID")
 
-	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email)
+	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email, c.GetBool("isOperator"))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -409,7 +409,7 @@ func (h *Handler) ExitDeal(c *gin.Context) {
 
 	// Check user has access to this deal
 	email := c.GetString("email")
-	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email)
+	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email, c.GetBool("isOperator"))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):

@@ -119,7 +119,7 @@ func (h *Handler) ListArtifactsByDeal(c *gin.Context) {
 	email := c.GetString("email")
 	dealID := c.Param("dealID")
 
-	artifacts, err := h.service.ListArtifactsByDeal(c.Request.Context(), userID, email, dealID)
+	artifacts, err := h.service.ListArtifactsByDeal(c.Request.Context(), userID, email, dealID, c.GetBool("isOperator"))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -147,7 +147,7 @@ func (h *Handler) GetArtifactByID(c *gin.Context) {
 	artifactID := c.Param("artifactID")
 	dealID := c.Param("dealID")
 
-	artifact, err := h.service.GetArtifactByID(c.Request.Context(), userID, email, dealID, artifactID)
+	artifact, err := h.service.GetArtifactByID(c.Request.Context(), userID, email, dealID, artifactID, c.GetBool("isOperator"))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -178,7 +178,7 @@ func (h *Handler) DownloadArtifact(c *gin.Context) {
 	dealID := c.Param("dealID")
 	artifactID := c.Param("artifactID")
 
-	artifact, reader, size, err := h.service.DownloadArtifact(c.Request.Context(), userID, email, dealID, artifactID)
+	artifact, reader, size, err := h.service.DownloadArtifact(c.Request.Context(), userID, email, dealID, artifactID, c.GetBool("isOperator"))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):

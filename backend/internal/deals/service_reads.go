@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func (s *Service) GetDealByID(ctx context.Context, dealID, userID, email string) (*Deal, error) {
+func (s *Service) GetDealByID(ctx context.Context, dealID, userID, email string, isOperator bool) (*Deal, error) {
 	if dealID == "" {
 		return nil, fmt.Errorf("%w: deal id is required", ErrInvalidInput)
 	}
@@ -16,6 +16,9 @@ func (s *Service) GetDealByID(ctx context.Context, dealID, userID, email string)
 		return nil, err
 	}
 
+	if isOperator {
+		return deal, nil
+	}
 	if deal.FreelancerID != userID && !strings.EqualFold(deal.ClientEmail, email) {
 		return nil, ErrForbidden
 	}

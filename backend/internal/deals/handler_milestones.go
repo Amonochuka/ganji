@@ -26,7 +26,7 @@ func (h *Handler) CreateMilestone(c *gin.Context) {
 		return
 	}
 
-	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, c.GetString("email"))
+	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, c.GetString("email"), c.GetBool("isOperator"))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -74,7 +74,8 @@ func (h *Handler) ListMilestones(c *gin.Context) {
 
 	// Check user has access to this deal
 	email := c.GetString("email")
-	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email)
+	isOperator := c.GetBool("isOperator")
+	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email, isOperator)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
@@ -89,11 +90,11 @@ func (h *Handler) ListMilestones(c *gin.Context) {
 		return
 	}
 
-	// Only freelancer or client can list milestones
+	// Only freelancer, client, or operator can list milestones
 	isFreelancer := deal.FreelancerID == userID
 	isClient := email != "" && strings.EqualFold(deal.ClientEmail, email)
 
-	if !isFreelancer && !isClient {
+	if !isFreelancer && !isClient && !isOperator {
 		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
@@ -127,7 +128,7 @@ func (h *Handler) UpdateMilestone(c *gin.Context) {
 
 	// Check user has access to this deal
 	email := c.GetString("email")
-	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email)
+	deal, err := h.service.GetDealByID(c.Request.Context(), dealID, userID, email, c.GetBool("isOperator"))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):
