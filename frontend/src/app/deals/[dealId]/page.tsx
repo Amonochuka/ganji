@@ -375,6 +375,12 @@ export default function DealDetailPage() {
   const fundsHeld = ["locked", "work_submitted", "reviewing"].includes(
     deal.status,
   );
+  const escrowMessage =
+    deal.status === "locked"
+      ? "Funds held in Lightning escrow. Ganji verified the hold; work can proceed."
+      : deal.status === "work_submitted"
+        ? "Work submitted. Funds remain held in escrow while the client reviews and approves payout."
+        : "Work under review. Funds remain held in escrow while the client decides.";
   const canDispute =
     isFreelancer &&
     (deal.status === "locked" ||
@@ -383,6 +389,10 @@ export default function DealDetailPage() {
   const canRotateLink = isFreelancer;
   const canUpdatePayeeInvoice =
     isFreelancer && deal.status !== "released" && deal.status !== "refunded";
+  const currentPayeeInvoice =
+    milestones.find((milestone) =>
+      !["released", "refunded", "exited"].includes(milestone.status),
+    )?.payee_invoice || deal.payee_invoice || "";
   const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(
     deal.status,
   );
@@ -426,8 +436,7 @@ export default function DealDetailPage() {
           {fundsHeld && (
             <div className="mb-6 p-4 rounded-lg bg-blue-600/10 border border-blue-600/30 text-sm text-blue-400">
               <span className="inline-flex items-center gap-1.5">
-                <StatusIcon status="locked" /> Funds held in Lightning escrow.
-                Ganji verified the hold; work can proceed.
+                <StatusIcon status={deal.status} /> {escrowMessage}
               </span>
             </div>
           )}
@@ -713,9 +722,14 @@ export default function DealDetailPage() {
                       <Button
                         variant="outline"
                         onClick={() => {
-                          setPayeeInvoiceInput("");
+                          setPayeeInvoiceInput(currentPayeeInvoice);
                           setShowPayeeInvoiceForm((open) => !open);
                           setActionError(null);
+                          setNotice(
+                            currentPayeeInvoice
+                              ? "Stored invoice loaded from the deal."
+                              : null,
+                          );
                         }}
                         disabled={!!actionLoading}
                       >
@@ -751,6 +765,14 @@ export default function DealDetailPage() {
                       >
                         Check Escrow Status
                       </Button>
+                    )}
+                    {(deal.status === "work_submitted" ||
+                      deal.status === "reviewing") && (
+                      <span className="flex items-center px-3 py-2 text-sm text-blue-300">
+                        {deal.status === "work_submitted"
+                          ? "Waiting for client approval."
+                          : "Client review in progress."}
+                      </span>
                     )}
                     {(deal.status === "work_submitted" ||
                       deal.status === "released") && (
@@ -804,6 +826,22 @@ export default function DealDetailPage() {
                         className="w-full rounded-lg border border-vault-border bg-vault-bg px-3 py-2 text-xs font-mono text-ink-200"
                       />
                       <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setPayeeInvoiceInput(currentPayeeInvoice);
+                            setActionError(null);
+                            setNotice(
+                              currentPayeeInvoice
+                                ? "Stored invoice loaded. Save it to repair the payout target."
+                                : "No stored invoice is available.",
+                            );
+                          }}
+                          disabled={!currentPayeeInvoice || !!actionLoading}
+                        >
+                          Retry Current Invoice
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
@@ -868,10 +906,7 @@ export default function DealDetailPage() {
 
               {showBanner && (
                 <div className="vault-card p-4 mt-4">
-                  <p className="text-ink-400">
-                    Funds held in Lightning escrow. Ganji verified the hold;
-                    work can proceed.
-                  </p>
+                  <p className="text-ink-400">{escrowMessage}</p>
                 </div>
               )}
 
@@ -886,8 +921,9 @@ export default function DealDetailPage() {
                         Review the delivered work
                       </p>
                       <p className="text-sm text-ink-300">
-                        Approving releases escrow (current milestone in
-                        sequential mode) to the freelancer.
+                        Approving releases the already-held escrow (current
+                        milestone in sequential mode) to the freelancer. You
+                        are not charged again.
                       </p>
                     </div>
                   )}

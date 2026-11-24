@@ -131,6 +131,7 @@ type DealView struct {
 	Invoice        string     `json:"invoice"`
 	CheckingID     string     `json:"checking_id"`
 	ShareToken     string     `json:"share_token"`
+	PayeeInvoice   string     `json:"payee_invoice,omitempty"`
 	Status         Status     `json:"status"`
 	DisputeReason  string     `json:"dispute_reason"`
 	DisputedAt     *time.Time `json:"disputed_at"`

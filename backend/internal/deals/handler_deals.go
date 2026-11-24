@@ -104,8 +104,12 @@ func (h *Handler) GetDealByID(c *gin.Context) {
 		return
 	}
 
+	view := h.service.dealViewWithMilestones(c.Request.Context(), deal)
+	if userID == deal.FreelancerID {
+		view.PayeeInvoice = deal.PayeeInvoice
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"deal": h.service.dealViewWithMilestones(c.Request.Context(), deal),
+		"deal": view,
 	})
 }
 

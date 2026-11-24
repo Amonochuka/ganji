@@ -55,7 +55,11 @@ export default function PublicDealPage() {
       const res = await api.listPublicArtifacts(shareToken);
       setArtifacts(res.artifacts);
     } catch (err) {
-      if (!silent) setActionError(err instanceof Error ? err.message : "Failed to load deliverables");
+      if (!silent) {
+        setActionError(
+          err instanceof Error ? err.message : "Failed to load deliverables",
+        );
+      }
     }
   }
 
@@ -65,6 +69,7 @@ export default function PublicDealPage() {
     try {
       await fn();
       await fetchDeal(true);
+      setActionError(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Failed: ${key}`);
       await fetchDeal(true);

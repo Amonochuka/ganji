@@ -46,6 +46,7 @@ export type DealView = {
   invoice: string;
   checking_id: string;
   share_token: string;
+  payee_invoice?: string;
   status: DealStatus;
   payout_reset_available?: boolean;
   dispute_reason: string;
@@ -163,6 +164,7 @@ export type MilestoneView = {
   order: number;
   status: string;
   invoice?: string;
+  payee_invoice?: string;
   completed_at: string | null;
   delivery_days: number;
   due_at?: string | null;

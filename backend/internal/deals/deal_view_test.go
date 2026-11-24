@@ -60,6 +60,24 @@ func TestDealResponsesRedactSecrets(t *testing.T) {
 
 // TestListDealsResponsesRedactSecrets covers the list endpoint, which must map
 // every deal through the same redacted view.
+func TestFreelancerDealDetailIncludesPayeeInvoice(t *testing.T) {
+	repo := newFakeDealRepo()
+	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
+
+	service := newTestService(repo)
+	router := newTestDealRouter(t, service, "freelancer-1", "freelancer-1@example.com")
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/deals/deal-1", nil))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `"payee_invoice":"lnbc5000payee"`) {
+		t.Fatalf("freelancer detail response missing payee invoice: %s", resp.Body.String())
+	}
+}
+
 func TestListDealsResponsesRedactSecrets(t *testing.T) {
 	repo := newFakeDealRepo()
 	escrowDeal(repo, "deal-1", "freelancer-1", "client@example.com")
