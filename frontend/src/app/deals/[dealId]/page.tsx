@@ -368,6 +368,29 @@ export default function DealDetailPage() {
 
           <div className="grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
+              {user?.is_operator && deal && (
+                <div className="vault-card p-6 border-gold-500/30 bg-gold-500/5">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <h2 className="font-display text-lg font-semibold text-ink-100">Operator Actions</h2>
+                    <span className="text-xs px-2 py-1 rounded-full border border-gold-500/30 text-gold-400">Operator view</span>
+                  </div>
+                  <p className="text-sm text-ink-400 mb-4">
+                    This is a read-only triage view. Use reconcile for stuck payout attempts; do not resend payments from ambiguous states.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Link href={`/operator/deals/${deal.id}/reconcile`}>
+                      <Button variant="outline" size="sm">Open Reconcile</Button>
+                    </Link>
+                    <Link href="/operator/disputes">
+                      <Button variant="ghost" size="sm">Disputes Queue</Button>
+                    </Link>
+                  </div>
+                  {(deal.payout_reset_available || milestones.some((m) => m.payout_reset_available)) && (
+                    <p className="mt-3 text-xs text-red-400">Stuck payout attempt detected — reconcile required before retry.</p>
+                  )}
+                </div>
+              )}
+
               <DealCard deal={deal} />
 
               <div className="vault-card p-6 vault-seam">

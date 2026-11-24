@@ -19,7 +19,7 @@ export default function CVProfilePage() {
       try {
         setIsLoading(true);
         const res = await api.getCVProfile(slug);
-        setProfile(res.profile);
+        setProfile({ ...res.profile, entries: res.profile.entries ?? [] });
         setError(null);
       } catch (err) {
         if (err instanceof Error && "status" in err && typeof (err as { status?: number }).status === "number" && (err as { status: number }).status === 404) {
@@ -50,11 +50,11 @@ export default function CVProfilePage() {
     );
   }
 
-  const currentProfile = profile ?? {
-    display_name: "Your CV",
-    slug,
-    trust_score: 0,
-    entries: [] as CVEntry[],
+  const currentProfile = {
+    display_name: profile?.display_name ?? "Your CV",
+    slug: profile?.slug ?? slug,
+    trust_score: profile?.trust_score ?? 0,
+    entries: profile?.entries ?? ([] as CVEntry[]),
   };
 
   return (

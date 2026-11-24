@@ -198,7 +198,7 @@ function DashboardHeader({ user, onLogout }: { user: { display_name: string; slu
           ganji
         </Link>
         <nav className="flex items-center gap-5">
-          {user?.slug && (
+          {user?.slug && !user?.is_operator && (
             <Link href={`/cv/${user.slug}`} className="text-sm text-ink-300 hover:text-gold-400">
               My CV
             </Link>
