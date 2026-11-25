@@ -1,12 +1,20 @@
 import Link from "next/link";
 import type { DealView } from "@/lib/api/api-client";
 
-export function DealHeader({ user }: { user: { email?: string } | null }) {
+export function DealHeader({ user, role }: { user: { email?: string } | null; role?: "client" | "freelancer" | "operator" }) {
+  const dashboardHref = role === "client" ? "/dashboard?role=client" : role === "freelancer" ? "/dashboard?role=freelancer" : "/dashboard";
   return (
     <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-        <Link href="/dashboard" className="brand-wordmark" aria-label="Ganji Dashboard">ganji</Link>
-        <span className="text-xs font-mono text-ink-500">{user?.email ?? ""}</span>
+        <Link href={dashboardHref} className="brand-wordmark" aria-label="Ganji Dashboard">ganji</Link>
+        <div className="flex items-center gap-3">
+          {role && (
+            <span className="text-xs px-2 py-1 rounded-full border border-vault-border text-ink-300">
+              {role === "operator" ? "Operator view" : role === "client" ? "Client view" : "Freelancer view"}
+            </span>
+          )}
+          <span className="text-xs font-mono text-ink-500">{user?.email ?? ""}</span>
+        </div>
       </div>
     </header>
   );

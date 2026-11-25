@@ -15,7 +15,7 @@ export default function PublicDealPage() {
   const params = useParams();
   const shareToken = params.shareToken as string;
   const { tokens, isLoading: authLoading } = useAuth();
-  const signInHref = `/login?next=${encodeURIComponent(`/public/deals/${shareToken}`)}`;
+  const signInHref = `/login?role=client&next=${encodeURIComponent(`/public/deals/${shareToken}`)}`;
 
   const [deal, setDeal] = useState<PublicDeal | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -131,21 +131,6 @@ export default function PublicDealPage() {
       const res = await api.publicApproveDeal(shareToken, requireClientToken());
       setDeal(res.deal);
     });
-  }
-
-  async function handleCheckFreelancerStatus() {
-    setActionError(null);
-    setActionLoading("check freelancer status");
-    try {
-      const res = await api.getPublicDeal(shareToken);
-      setDeal(res.deal);
-      setError(null);
-      void fetchArtifacts(true);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to refresh deal status");
-    } finally {
-      setActionLoading(null);
-    }
   }
 
   async function handleResetPayout(milestoneId?: string) {

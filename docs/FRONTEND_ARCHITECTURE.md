@@ -45,6 +45,7 @@ app/
 3. **AuthContext** wraps the app and provides `tokens.access_token` plus `user`
 4. **Token persistence** — access token kept only in memory; refresh is replayed from the cookie on reload and rotated silently when access expires; failed refresh (including an unreachable backend) clears the local session instead of raising an unhandled promise rejection
 5. **API client** — all protected endpoints require `Authorization: Bearer <token>` header; public view/artifact/funding endpoints are share-link based, while approve/reset/milestone actions and exit additionally require a logged-in client whose email matches the deal
+6. **Role hints** — `?role=client|freelancer` is preserved from public share-link sign-in through login/signup and used by dashboard/deal views. Role is still authorized per deal: client role requires the account email to match `deal.client_email`; freelancer role requires the account ID to match `deal.freelancer_id`.
 
 ## State Management
 
@@ -194,6 +195,6 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - Milestone status transitions mirrored from the same doc's milestone table (`released` = paid; `completed` = payout pending, never paid; `disputed`/`rejected` = hold stays in review)
 - UI disables actions invalid per state (e.g., freelancer cannot set `locked`/`released`/`disputed`/`refunded` status directly)
 - Freelancer-driven transitions: `locked → work_submitted`, `work_submitted → reviewing`. Work submission requires a `locked` deal; `awaiting_payment → work_submitted` is invalid.
-- Deal detail refresh controls are stage- and role-specific: the freelancer gets **Check Payment** while `awaiting_payment`, then **Check Escrow Status** while `locked`; after submission, **Check Freelancer Status** refreshes the recorded payout/deal state. The client gets **Check Escrow Status** while `awaiting_payment` and **Check Freelancer Status** after submission. These refresh controls do not resend payments.
+- Deal detail refresh controls are stage- and role-specific: the freelancer gets **Check Payment** while `awaiting_payment`, then **Check Escrow Status** while `locked`. The client gets **Check Escrow Status** while `awaiting_payment`; after submission the client gets **Reject Submitted Work** (freezes payout for operator review, no refund) and **Approve & Release**. Both roles can **Exit Deal**; only the client gets **Clear Failed Payout** when a failed attempt is recorded. These controls do not resend payments except the explicit approve flow.
 - Backend-only money states (`locked`, `released`, `disputed`, `refunded`) set by accepted-hold verification, approve, dispute, and arbitration; milestone `released` is set only by the canonical payout path and can never be set without escrow ("fund it first")
 - Approve/release reveals R and pays the freelancer directly; rejecting after `work_submitted` reveals no R and leaves the hold untouched; arbiter reveals R to pay or cancels/waits for expiry to refund (refund never uses R).

@@ -11,11 +11,11 @@
 | Page | Route | Description | Backend Endpoints |
 |------|-------|-------------|-------------------|
 | **Home** | `/` | Marketing landing with ganji stopwatch-logo, hero, feature cards | — |
-| **Login** | `/login` | Email/password auth, redirects to dashboard | `POST /auth/login` |
-| **Signup** | `/signup` | Registration with validation, redirects to dashboard | `POST /auth/signup` |
-| **Dashboard** | `/dashboard` | Authenticated deal list with status cards, empty state, create CTA | `GET /deals` |
+| **Login** | `/login` | Email/password auth, preserves `next` and `role`, redirects to dashboard or return path | `POST /auth/login` |
+| **Signup** | `/signup` | Registration with validation, preserves `next` and `role`, redirects to dashboard or return path | `POST /auth/signup` |
+| **Dashboard** | `/dashboard` | Role-aware deal list (`?role=client|freelancer`) with status cards, empty state, and freelancer-only create CTA | `GET /deals` |
 | **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title + sats each); generate the freelancer payout invoice from a linked wallet | `POST /deals` (with `milestones[]`), `POST /deals/wallet/invoice` |
-| **Deal Detail** | `/deals/[id]` | Full deal view, timeline, deliverables, share link, milestone actions and stage-specific payment/escrow/payout status refresh controls | `GET /deals/:id`, `GET /deals/:id/payment`, submit/dispute/share/approve/exit, artifact and milestone endpoints |
+| **Deal Detail** | `/deals/[id]` | Role-aware deal view: freelancer gets funding/submission/invoice/share-link controls; client gets approve/reject/reset/exit controls; deliverables, milestones, and stage-specific payment/escrow status remain visible | `GET /deals/:id`, `GET /deals/:id/payment`, submit/share/approve/exit, public client approve/reject/reset, artifact and milestone endpoints |
 | **Public Deal** | `frontend/src/app/public/deals/[shareToken]/page.tsx` | Client-facing view: fund buttons on the deal and each milestone using a linked wallet, invoice to pay, approve/reset/accept/reject/exit actions wired to public endpoints; `locked` shown as "Funds Held" | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/fund`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/payout/reset`, public milestone actions |
 
 ---
@@ -29,7 +29,7 @@
 | `PasswordInput` | `components/ui/password-input.tsx` | Password field with working show/hide toggle |
 | `FormBanner` | `components/ui/form-banner.tsx` | Error/success toast banner |
 | `AuthShell` | `components/auth/auth-shell.tsx` | Centered auth card with vault-seam styling |
-| `DealCard` | `components/deals/deal-card.tsx` | Dashboard deal row with status badge, amount, client, copy share link |
+| `DealCard` | `components/deals/deal-card.tsx` | Dashboard deal row with status badge, amount, client, role badge, and freelancer-only copy share link |
 | `DealDetailPage` | `app/deals/[dealId]/page.tsx` | Authed deal view with artifact deliverables panel and synthetic single-step milestone |
 | `PublicDealPage` | `app/public/deals/[shareToken]/page.tsx` | Client fund/approve link with linked-wallet fund buttons and synthetic single-step milestone |
 | `StatusIcon` | `components/ui/status-icon.tsx` | Inline SVG icons per status (including "Funds Held" for `locked`); no emoji status map |

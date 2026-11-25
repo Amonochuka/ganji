@@ -8,6 +8,7 @@ import { copyText } from "@/lib/utils/clipboard";
 
 interface DealCardProps {
   deal: DealView;
+  viewerRole?: "client" | "freelancer" | "operator";
   onClick?: () => void;
 }
 
@@ -26,7 +27,7 @@ function isStuckDeal(deal: DealView): boolean {
   return deal.milestones?.some((m) => m.payout_reset_available) ?? false;
 }
 
-export function DealCard({ deal, onClick }: DealCardProps) {
+export function DealCard({ deal, viewerRole, onClick }: DealCardProps) {
   const [copyMessage, setCopyMessage] = useState("");
   const config = statusConfig[deal.status];
   const amount = formatCurrency(deal.amount_sats);
@@ -62,6 +63,11 @@ export function DealCard({ deal, onClick }: DealCardProps) {
           <p className="mt-1 text-sm text-ink-500 font-mono">{deal.source_platform}</p>
         </div>
         <div className="flex items-center gap-2">
+          {viewerRole && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-vault-raised text-ink-300 border-vault-border whitespace-nowrap">
+              {viewerRole === "operator" ? "Operator" : viewerRole === "client" ? "Client" : "Freelancer"}
+            </span>
+          )}
           {stuck && (
             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-red-600/20 text-red-400 border-red-600/30 whitespace-nowrap">
               Stuck
@@ -88,7 +94,7 @@ export function DealCard({ deal, onClick }: DealCardProps) {
         <p className="text-xs text-ink-500 font-mono">
           Created {formatRelativeTime(deal.created_at)}
         </p>
-        {deal.share_token && (
+        {deal.share_token && viewerRole !== "client" && (
           <button
             type="button"
             className="text-xs text-gold-500 hover:text-gold-400 font-medium underline underline-offset-1"

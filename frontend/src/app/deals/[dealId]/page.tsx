@@ -16,7 +16,6 @@ import {
   type DealStatus,
   type DealDetailResponse,
   type SubmitWorkResponse,
-  type DisputeDealResponse,
   type MilestoneView,
 } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -56,7 +55,13 @@ export default function DealDetailPage() {
   const [isGeneratingPayeeInvoice, setIsGeneratingPayeeInvoice] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [artifactKind, setArtifactKind] = useState<ArtifactKind>("source_file");
+  const [roleHint, setRoleHint] = useState<"client" | "freelancer" | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get("role");
+    setRoleHint(value === "client" || value === "freelancer" ? value : null);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -196,19 +201,6 @@ export default function DealDetailPage() {
     });
   }
 
-  async function handleDispute() {
-    const reason = prompt("Dispute reason (required):");
-    if (!reason?.trim()) return;
-    await handleAction("dispute", async () => {
-      const res = await api.disputeDeal(
-        dealId,
-        reason.trim(),
-        tokens!.access_token,
-      );
-      setDeal(res.deal);
-    });
-  }
-
   async function handleRotateShareLink() {
     await handleAction("rotate share link", async () => {
       const res = await api.rotateShareLink(dealId, tokens!.access_token);
@@ -286,13 +278,6 @@ export default function DealDetailPage() {
     }
   }
 
-  async function handleApproveDeal() {
-    await handleAction("approve", async () => {
-      const res = await api.approveDeal(dealId, tokens!.access_token);
-      setDeal(res.deal);
-    });
-  }
-
   async function handleExitDeal() {
     if (
       !window.confirm(
@@ -329,10 +314,10 @@ export default function DealDetailPage() {
     });
   }
 
-  async function handleCheckFreelancerStatus() {
+  async function handleRefreshStatus() {
     if (!tokens) return;
     setActionError(null);
-    setActionLoading("check freelancer status");
+    setActionLoading("refresh status");
     try {
       await Promise.all([fetchDeal(true), fetchMilestones(), fetchArtifacts()]);
     } finally {
@@ -340,10 +325,50 @@ export default function DealDetailPage() {
     }
   }
 
+  async function handleRejectWork() {
+    if (!tokens || !deal) return;
+    const milestone = milestones.find((m) =>
+      ["work_submitted", "completed"].includes(m.status),
+    );
+    if (!milestone) {
+      setActionError("No submitted milestone is available to reject.");
+      return;
+    }
+    const reason = prompt("Reason for rejecting this work (required):");
+    if (!reason?.trim()) return;
+    await handleAction("reject work", async () => {
+      await api.publicRejectMilestone(
+        deal.share_token,
+        milestone.id,
+        reason.trim(),
+        tokens.access_token,
+      );
+    });
+  }
+
+  async function handleResetPayout() {
+    if (!tokens || !deal) return;
+    const milestoneId = milestones.find((m) => m.payout_reset_available)?.id;
+    if (!deal.payout_reset_available && !milestoneId) return;
+    if (
+      !window.confirm(
+        "Clear the failed payout attempt? This only removes the internal attempt marker. It does not move funds or change the milestone status.",
+      )
+    )
+      return;
+    await handleAction("clear failed payout", async () => {
+      await api.publicResetPayout(
+        deal.share_token,
+        milestoneId,
+        tokens.access_token,
+      );
+    });
+  }
+
   if (isLoading) {
     return (
       <main className="flex min-h-screen flex-col bg-vault-bg">
-        <DealHeader user={user} />
+        <DealHeader user={user} role={roleHint ?? undefined} />
         <div className="flex-1 flex items-center justify-center px-6">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-gold-500 border-t-transparent" />
         </div>
@@ -354,7 +379,7 @@ export default function DealDetailPage() {
   if (!deal || loadError) {
     return (
       <main className="flex min-h-screen flex-col bg-vault-bg">
-        <DealHeader user={user} />
+        <DealHeader user={user} role={roleHint ?? undefined} />
         <div className="flex-1 flex items-center justify-center px-6">
           <div className="text-center">
             <p className="text-ink-500 mb-4">{loadError || "Deal not found"}</p>
@@ -367,9 +392,20 @@ export default function DealDetailPage() {
     );
   }
 
-  const isFreelancer = user?.id === deal.freelancer_id;
-  const isClient =
+  const canViewAsFreelancer = user?.id === deal.freelancer_id;
+  const canViewAsClient =
     !!user && user.email.toLowerCase() === deal.client_email.toLowerCase();
+  const viewerRole: "client" | "freelancer" | "operator" = user?.is_operator
+    ? "operator"
+    : roleHint === "client" && canViewAsClient
+      ? "client"
+      : roleHint === "freelancer" && canViewAsFreelancer
+        ? "freelancer"
+        : canViewAsClient && !canViewAsFreelancer
+          ? "client"
+          : "freelancer";
+  const isFreelancer = viewerRole === "freelancer" && canViewAsFreelancer;
+  const isClient = viewerRole === "client" && canViewAsClient;
   const canAttachArtifact = isFreelancer && deal.status === "locked";
   const canSubmit = canAttachArtifact && artifacts.length > 0;
   const fundsHeld = ["locked", "work_submitted", "reviewing"].includes(
@@ -381,11 +417,6 @@ export default function DealDetailPage() {
       : deal.status === "work_submitted"
         ? "Work submitted. Funds remain held in escrow while the client reviews and approves payout."
         : "Work under review. Funds remain held in escrow while the client decides.";
-  const canDispute =
-    isFreelancer &&
-    (deal.status === "locked" ||
-      deal.status === "work_submitted" ||
-      deal.status === "reviewing");
   const canRotateLink = isFreelancer;
   const canUpdatePayeeInvoice =
     isFreelancer && deal.status !== "released" && deal.status !== "refunded";
@@ -396,20 +427,23 @@ export default function DealDetailPage() {
   const clientCanApprove = ["work_submitted", "reviewing", "disputed"].includes(
     deal.status,
   );
-  const clientCanDispute = ["locked", "work_submitted", "reviewing"].includes(
-    deal.status,
+  const clientCanReject = milestones.some((milestone) =>
+    ["work_submitted", "completed"].includes(milestone.status),
   );
+  const clientCanResetPayout =
+    deal.payout_reset_available ||
+    milestones.some((milestone) => milestone.payout_reset_available);
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
-      <DealHeader user={user} />
+      <DealHeader user={user} role={viewerRole} />
 
       <div className="flex-1 px-6 py-8 md:py-12">
         <div className="mx-auto max-w-4xl">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
             <div>
               <Link
-                href="/dashboard"
+                href={viewerRole === "client" ? "/dashboard?role=client" : viewerRole === "freelancer" ? "/dashboard?role=freelancer" : "/dashboard"}
                 className="inline-flex items-center gap-2 text-sm text-ink-500 hover:text-ink-300 mb-2 block"
               >
                 ← Dashboard
@@ -466,7 +500,7 @@ export default function DealDetailPage() {
                 </div>
               )}
 
-              <DealCard deal={deal} />
+              <DealCard deal={deal} viewerRole={viewerRole} />
 
               <div className="vault-card p-6 vault-seam">
                 <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
@@ -698,16 +732,6 @@ export default function DealDetailPage() {
                         Submit Work
                       </Button>
                     )}
-                    {canDispute && (
-                      <Button
-                        variant="outline"
-                        onClick={handleDispute}
-                        disabled={actionLoading === "dispute"}
-                        isLoading={actionLoading === "dispute"}
-                      >
-                        Raise Dispute
-                      </Button>
-                    )}
                     {canRotateLink && (
                       <Button
                         variant="ghost"
@@ -772,23 +796,11 @@ export default function DealDetailPage() {
                     )}
                     {(deal.status === "work_submitted" ||
                       deal.status === "released") && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          onClick={handleCheckFreelancerStatus}
-                          disabled={actionLoading === "check freelancer status"}
-                          isLoading={
-                            actionLoading === "check freelancer status"
-                          }
-                        >
-                          Check Freelancer Status
-                        </Button>
-                        {deal.payout_reset_available && (
-                          <span className="flex items-center px-3 py-2 text-sm text-yellow-400">
-                            Payout needs operator confirmation before retry.
-                          </span>
-                        )}
-                      </>
+                      <span className="flex items-center px-3 py-2 text-sm text-blue-300">
+                        {deal.status === "work_submitted"
+                          ? "Submitted — waiting for client approval."
+                          : "Released — payment sent to your invoice."}
+                      </span>
                     )}
                     {deal.status !== "released" &&
                       deal.status !== "refunded" && (
@@ -908,20 +920,20 @@ export default function DealDetailPage() {
                 </div>
               )}
 
-              {!isFreelancer && isClient && (
+              {isClient && (
                 <div className="vault-card p-6 vault-seam">
                   <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
-                    Your Actions
+                    Client Actions
                   </h2>
-                  {clientCanApprove && (
+                  {(clientCanApprove || clientCanReject) && (
                     <div className="mb-4 p-4 rounded-lg bg-gold-500/5 border border-gold-500/30">
                       <p className="font-medium text-gold-400 mb-1">
                         Review the delivered work
                       </p>
                       <p className="text-sm text-ink-300">
-                        Approving releases the already-held escrow (current
-                        milestone in sequential mode) to the freelancer. You
-                        are not charged again.
+                        Approving releases the already-held escrow to the
+                        freelancer; you are not charged again. Rejecting pauses
+                        payout for operator review; it does not refund you.
                       </p>
                     </div>
                   )}
@@ -930,11 +942,10 @@ export default function DealDetailPage() {
                       <Button
                         onClick={() =>
                           handleAction("approve", async () => {
-                            const res = await api.approveDeal(
-                              dealId,
+                            await api.publicApproveDeal(
+                              deal.share_token,
                               tokens!.access_token,
                             );
-                            setDeal(res.deal);
                           })
                         }
                         disabled={actionLoading === "approve"}
@@ -944,14 +955,25 @@ export default function DealDetailPage() {
                         Approve & Release
                       </Button>
                     )}
-                    {clientCanDispute && (
+                    {clientCanReject && (
                       <Button
                         variant="outline"
-                        onClick={handleDispute}
-                        disabled={actionLoading === "dispute"}
-                        isLoading={actionLoading === "dispute"}
+                        onClick={handleRejectWork}
+                        disabled={actionLoading === "reject work"}
+                        isLoading={actionLoading === "reject work"}
+                        size="lg"
                       >
-                        Raise Dispute
+                        Reject Submitted Work
+                      </Button>
+                    )}
+                    {clientCanResetPayout && (
+                      <Button
+                        variant="outline"
+                        onClick={handleResetPayout}
+                        disabled={actionLoading === "clear failed payout"}
+                        isLoading={actionLoading === "clear failed payout"}
+                      >
+                        Clear Failed Payout
                       </Button>
                     )}
                     {deal.status === "released" && (
@@ -960,25 +982,11 @@ export default function DealDetailPage() {
                         the freelancer
                       </span>
                     )}
-                    {(deal.status === "work_submitted" ||
-                      deal.status === "released") && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          onClick={handleCheckFreelancerStatus}
-                          disabled={actionLoading === "check freelancer status"}
-                          isLoading={
-                            actionLoading === "check freelancer status"
-                          }
-                        >
-                          Check Freelancer Status
-                        </Button>
-                        {deal.payout_reset_available && (
-                          <span className="flex items-center px-3 py-2 text-sm text-yellow-400">
-                            Payout needs operator confirmation before retry.
-                          </span>
-                        )}
-                      </>
+                    {deal.status === "disputed" && (
+                      <span className="flex items-center px-3 py-2 text-sm text-yellow-400 bg-yellow-600/10 rounded-lg border border-yellow-600/30">
+                        <StatusIcon status="disputed" /> Submitted work rejected
+                        — held for operator review
+                      </span>
                     )}
                     {deal.status === "refunded" && (
                       <span className="flex items-center px-3 py-2 text-sm text-gray-400 bg-gray-600/10 rounded-lg border border-gray-600/30">

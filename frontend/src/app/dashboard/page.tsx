@@ -11,6 +11,12 @@ import { useAuth } from "@/lib/auth/auth-context";
 const PAGE_SIZE = 10;
 
 type StatusFilter = "all" | "active" | "stuck" | "done" | DealStatus;
+type ViewRole = "client" | "freelancer";
+
+function readRoleHint(): ViewRole | null {
+  const value = new URLSearchParams(window.location.search).get("role");
+  return value === "client" || value === "freelancer" ? value : null;
+}
 
 function isDealStuck(deal: DealView): boolean {
   if (deal.payout_reset_available) return true;
@@ -32,7 +38,12 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [roleHint, setRoleHint] = useState<ViewRole | null>(null);
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setRoleHint(readRoleHint());
+  }, []);
 
   useEffect(() => {
     if (!authLoading && !tokens) {
@@ -57,15 +68,32 @@ export default function Dashboard() {
     }
   }
 
+  const hasFreelancerDeals = deals.some((deal) => deal.freelancer_id === user?.id);
+  const hasClientDeals = deals.some(
+    (deal) => !!user && deal.client_email.toLowerCase() === user.email.toLowerCase(),
+  );
+  const role: ViewRole =
+    roleHint ?? (hasClientDeals && !hasFreelancerDeals ? "client" : "freelancer");
+  const visibleDeals = useMemo(() => {
+    if (user?.is_operator) return deals;
+    if (role === "client") {
+      return deals.filter(
+        (deal) =>
+          !!user && deal.client_email.toLowerCase() === user.email.toLowerCase(),
+      );
+    }
+    return deals.filter((deal) => deal.freelancer_id === user?.id);
+  }, [deals, role, user]);
+
   const filteredDeals = useMemo(() => {
-    return deals.filter((deal) => {
+    return visibleDeals.filter((deal) => {
       if (statusFilter === "all") return true;
       if (statusFilter === "stuck") return isDealStuck(deal);
       if (statusFilter === "active") return isDealActive(deal);
       if (statusFilter === "done") return isDealDone(deal);
       return deal.status === statusFilter;
     });
-  }, [deals, statusFilter]);
+  }, [visibleDeals, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredDeals.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -78,7 +106,7 @@ export default function Dashboard() {
   if (authLoading || (tokens && isLoading)) {
     return (
       <main className="flex min-h-screen flex-col bg-vault-bg">
-        <DashboardHeader user={user} />
+        <DashboardHeader user={user} role={role} />
         <div className="flex-1 flex items-center justify-center px-6">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-gold-500 border-t-transparent" />
         </div>
@@ -90,18 +118,31 @@ export default function Dashboard() {
 
   return (
     <main className="flex min-h-screen flex-col bg-vault-bg">
-      <DashboardHeader user={user} onLogout={async () => { await logout(); router.push("/"); }} />
+      <DashboardHeader
+        user={user}
+        role={role}
+        canViewAsClient={hasClientDeals}
+        canViewAsFreelancer={hasFreelancerDeals}
+        onLogout={async () => { await logout(); router.push("/"); }}
+      />
 
       <div className="flex-1 px-6 py-8 md:py-12">
         <div className="mx-auto max-w-6xl">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
             <div>
-              <h1 className="font-display text-3xl font-semibold text-ink-100">Dashboard</h1>
+              <h1 className="font-display text-3xl font-semibold text-ink-100">
+                {user?.is_operator ? "Operator Dashboard" : role === "client" ? "Client Dashboard" : "Freelancer Dashboard"}
+              </h1>
               <p className="mt-1 text-sm text-ink-500">
-                {filteredDeals.length} of {deals.length} deal{deals.length !== 1 ? "s" : ""} • Manage your escrows
+                {filteredDeals.length} of {visibleDeals.length} deal{visibleDeals.length !== 1 ? "s" : ""} •{" "}
+                {user?.is_operator
+                  ? "Triage all escrows"
+                  : role === "client"
+                    ? "Review, approve, reject, or exit deals where you are the client"
+                    : "Manage escrows where you are the freelancer"}
               </p>
             </div>
-            {!user?.is_operator && (
+            {!user?.is_operator && role === "freelancer" && (
               <Link href="/deals/new">
                 <Button size="lg">
                   Create Deal
@@ -139,7 +180,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {deals.length === 0 ? (
+          {visibleDeals.length === 0 ? (
             <div className="vault-card p-12 text-center">
               <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-vault-raised flex items-center justify-center text-3xl">
                 📭
@@ -148,9 +189,11 @@ export default function Dashboard() {
               <p className="text-ink-500 mb-6 max-w-sm mx-auto">
                 {user?.is_operator
                   ? "No deals found. Deals created by freelancers will appear here for triage."
-                  : "Create your first escrow deal to get started. Funds stay locked until your client approves."}
+                  : role === "client"
+                    ? "No deals are pending for your client email yet. Open the share link a freelancer sends you to review and approve work."
+                    : "Create your first escrow deal to get started. Funds stay locked until your client approves."}
               </p>
-              {!user?.is_operator && (
+              {!user?.is_operator && role === "freelancer" && (
                 <Link href="/deals/new">
                   <Button size="lg">Create Your First Deal</Button>
                 </Link>
@@ -165,7 +208,8 @@ export default function Dashboard() {
                   <DealCard
                     key={deal.id}
                     deal={deal}
-                    onClick={() => router.push(`/deals/${deal.id}`)}
+                    viewerRole={user?.is_operator ? "operator" : role}
+                    onClick={() => router.push(`/deals/${deal.id}?role=${role}`)}
                   />
                 ))}
               </div>
@@ -190,7 +234,7 @@ export default function Dashboard() {
   );
 }
 
-function DashboardHeader({ user, onLogout }: { user: { display_name: string; slug?: string; is_operator?: boolean } | null; onLogout?: () => void }) {
+function DashboardHeader({ user, role, canViewAsClient, canViewAsFreelancer, onLogout }: { user: { display_name: string; slug?: string; is_operator?: boolean } | null; role: ViewRole; canViewAsClient?: boolean; canViewAsFreelancer?: boolean; onLogout?: () => void }) {
   return (
     <header className="border-b border-vault-border bg-vault-bg/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
@@ -198,7 +242,22 @@ function DashboardHeader({ user, onLogout }: { user: { display_name: string; slu
           ganji
         </Link>
         <nav className="flex items-center gap-5">
-          {user?.slug && !user?.is_operator && (
+          {!user?.is_operator && (canViewAsClient || canViewAsFreelancer) && (
+            <span className="flex items-center gap-2 text-xs">
+              {canViewAsFreelancer && (
+                <Link href="/dashboard?role=freelancer" className={role === "freelancer" ? "font-medium text-gold-400" : "text-ink-400 hover:text-gold-400"}>
+                  Freelancer
+                </Link>
+              )}
+              {canViewAsClient && canViewAsFreelancer && <span className="text-ink-500">/</span>}
+              {canViewAsClient && (
+                <Link href="/dashboard?role=client" className={role === "client" ? "font-medium text-gold-400" : "text-ink-400 hover:text-gold-400"}>
+                  Client
+                </Link>
+              )}
+            </span>
+          )}
+          {user?.slug && !user?.is_operator && role === "freelancer" && (
             <Link href={`/cv/${user.slug}`} className="text-sm text-ink-300 hover:text-gold-400">
               My CV
             </Link>

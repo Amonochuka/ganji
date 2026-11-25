@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
 import { FormBanner } from "@/components/ui/form-banner";
@@ -16,6 +16,23 @@ type FieldErrors = {
   confirmPassword?: string;
 };
 
+type ViewRole = "client" | "freelancer";
+
+function safeNextPath(value: string | null): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  return value;
+}
+
+function safeRole(value: string | null): ViewRole | null {
+  return value === "client" || value === "freelancer" ? value : null;
+}
+
+function withRole(path: string, role: ViewRole | null): string {
+  if (!role) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}role=${role}`;
+}
+
 export default function SignupPage() {
   const router = useRouter();
   const { signup } = useAuth();
@@ -27,6 +44,17 @@ export default function SignupPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [nextPath, setNextPath] = useState<string | null>(null);
+  const [role, setRole] = useState<ViewRole | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setNextPath(safeNextPath(params.get("next")));
+    setRole(safeRole(params.get("role")));
+    if (params.has("next") || params.has("role")) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   function validate(): boolean {
     const errors: FieldErrors = {};
@@ -44,7 +72,7 @@ export default function SignupPage() {
     setIsSubmitting(true);
     try {
       await signup({ email, password, display_name: displayName });
-      router.push("/dashboard");
+      router.push(withRole(nextPath || "/dashboard", role));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -56,11 +84,11 @@ export default function SignupPage() {
     <AuthShell
       eyebrow="Get started"
       title="Create your account"
-      subtitle="Your Live CV starts the moment your first deal closes."
+      subtitle={role === "client" ? "Create an account with the client email on your deal to review and approve work." : "Your Live CV starts the moment your first deal closes."}
       footer={
         <>
           Already have an account?{" "}
-          <Link href="/login" className="font-medium text-gold-500 hover:text-gold-400 underline underline-offset-2">
+          <Link href={withRole(nextPath ? `/login?next=${encodeURIComponent(nextPath)}` : "/login", role)} className="font-medium text-gold-500 hover:text-gold-400 underline underline-offset-2">
             Log in
           </Link>
         </>
