@@ -328,7 +328,7 @@ alone never locks.
   payout-verification races
 - **Idempotency tests**: Simulate an ambiguous/confirmed/failed prior payout →
   machine never re-sends without proof; the operator reconcile endpoint is
-  covered via `reconcile_handler_test.go`
+  covered via `handler_arbitration_reconcile_test.go`
 
 Not yet automated: an end-to-end DB test against a real Postgres. The schema
 and repository SQL were validated once against Postgres 16 (migrations +
@@ -336,8 +336,8 @@ payout tracking + guarded updates) using a throwaway driver that is not part
 of the suite.
 
 Key test files:
-- `arbitration_handler_test.go` — full auth+operator middleware chain
-- `reconcile_handler_test.go` — operator reconcile endpoint (`confirm_payout` / `reset_payout`)
+- `handler_arbitration_test.go` — full auth+operator middleware chain
+- `handler_arbitration_reconcile_test.go` — operator reconcile endpoint (`confirm_payout` / `reset_payout`)
 - `service_test.go` — business logic with fake repo
 - `client_test.go` — LNbits HTTP contract (4xx refusal classification)
 

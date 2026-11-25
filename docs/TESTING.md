@@ -34,7 +34,7 @@ LNbits servers:
 
 Transactions simulated via a no-op `database/sql` driver so `BeginTx/Commit` flows without a DB.
 
-### `internal/deals/milestone_service_test.go`
+### `internal/deals/service_milestone_test.go`
 Dedicated milestone tests with an `httptest` LNbits server:
 - `CreateDealWithMilestones` funds M1 only; no deal/milestones persisted on
   hold-invoice or DB failure; first hold cancelled on DB failure
@@ -52,7 +52,7 @@ Dedicated milestone tests with an `httptest` LNbits server:
 - `UpdateMilestoneStatus` cannot bypass money moves; transition table,
   artifact-gated submit, active-milestone mirroring
 
-### `internal/deals/arbitration_handler_test.go`
+### `internal/deals/handler_arbitration_test.go`
 Operator-only routes behind the **real** auth + operator middleware:
 - Queue contents
 - Release round-trip
@@ -65,7 +65,7 @@ Operator-only routes behind the **real** auth + operator middleware:
 - `AuthRequired` surfaces it
 - `OperatorRequired` allows operators / 403s everyone else
 
-### `internal/deals/artifact_upload_test.go` / `artifact_handler_test.go` + `internal/storage/local_test.go`
+### `internal/deals/service_artifacts_upload_test.go` / `handler_artifacts_test.go` + `internal/storage/local_test.go`
 - Streaming upload/download
 - Size-cap rejection leaves no blob
 - Owner/party gating

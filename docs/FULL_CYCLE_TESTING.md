@@ -188,7 +188,7 @@ Tests cover:
 - Payee-invoice rotation
 - Share link rotation
 - Webhook accepted/rejected/unavailable (`internal/webhook/service_test.go`: locks only on accepted hold, rejects paid-but-unaccepted, missing checker → `ErrVerificationUnavailable`)
-- Dedicated milestone tests (`internal/deals/milestone_service_test.go`): sequential funding, canonical release idempotency/crash-window/ambiguous payouts, reject/exit → dispute, operator release/refund, share-token auth, transitions
+- Dedicated milestone tests (`internal/deals/service_milestone_test.go`): sequential funding, canonical release idempotency/crash-window/ambiguous payouts, reject/exit → dispute, operator release/refund, share-token auth, transitions
 
 ---
 
@@ -213,5 +213,5 @@ The CV proves: **this work was paid for on Lightning at block height X**.
 | `backend/internal/lnbits/client.go` | LNbits API client |
 | `backend/internal/deals/service.go` | Core escrow logic |
 | `backend/internal/deals/service_test.go` | Full cycle unit tests (accepted-hold, linked wallet) |
-| `backend/internal/deals/milestone_service_test.go` | Dedicated milestone funding/release/resolve tests |
+| `backend/internal/deals/service_milestone_test.go` | Dedicated milestone funding/release/resolve tests |
 | `backend/internal/webhook/service_test.go` | Webhook accepted/rejected/unavailable tests |

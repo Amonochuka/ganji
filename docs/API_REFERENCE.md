@@ -380,7 +380,7 @@ The raw `preimage` (the network secret that can settle the escrow) and the freel
 > deal endpoint (and the dispute queue) serializes the redacted `DealView`
 > (`internal/deals/types.go`) instead of the raw `Deal` — `preimage`,
 > `payee_invoice`, and the payout-tracking fields never leave the server.
-> Regression-guarded by `internal/deals/deal_view_test.go`. See
+> Regression-guarded by `internal/deals/service_views_test.go`. See
 > `explained.md` §10 #1.
 
 `share_token` is the token for the public payment link (`GET /public/deals/:shareToken`) — there is one per deal from creation, rotatable via `POST /deals/:dealID/share-link`.

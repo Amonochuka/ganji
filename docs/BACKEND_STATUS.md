@@ -83,7 +83,7 @@ and [`API_REFERENCE.md`](./API_REFERENCE.md) for the current state.**
 - **Frontend compiles and has 12 pages implemented** — see [`FRONTEND_REPORT.md`](./FRONTEND_REPORT.md).
 - Still stubbed (unchanged): `internal/websocket`, `pkg/sanitize`.
   Rate limiting now implemented (in-memory) in `internal/middleware/ratelimit.go`.
-- **Milestone redesign (2026-11-09, `main`)** — sequential per-milestone escrow shipped as WIP (see [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) for canonical status). Consolidated migration `000008` (`milestones` + nullable deal hold); `CreateDealWithMilestones` funds M1; canonical `ReleaseMilestone` (idempotent two-phase payout); escrow-mandatory ("fund it first"); post-submission reject/exit → `disputed` (hold stays); operator per-milestone `ResolveMilestone`; symmetric exit; public milestone actions (`accept-next`/`reject`/`exit`). Idempotency/atomicity parity, per-milestone artifacts/evidence, deal-level current-milestone contract, and UX/API polish are done (with `milestone_service_test.go`); remaining: rework-after-reject policy, deal/milestone dispute coherence, and real-LNbits + accepted-hold E2E (tracked in the redesign notes TODOs).
+- **Milestone redesign (2026-11-09, `main`)** — sequential per-milestone escrow shipped as WIP (see [`MILESTONE_REDESIGN_NOTES.md`](./MILESTONE_REDESIGN_NOTES.md) for canonical status). Consolidated migration `000008` (`milestones` + nullable deal hold); `CreateDealWithMilestones` funds M1; canonical `ReleaseMilestone` (idempotent two-phase payout); escrow-mandatory ("fund it first"); post-submission reject/exit → `disputed` (hold stays); operator per-milestone `ResolveMilestone`; symmetric exit; public milestone actions (`accept-next`/`reject`/`exit`). Idempotency/atomicity parity, per-milestone artifacts/evidence, deal-level current-milestone contract, and UX/API polish are done (with `service_milestone_test.go`); remaining: rework-after-reject policy, deal/milestone dispute coherence, and real-LNbits + accepted-hold E2E (tracked in the redesign notes TODOs).
 
 ---
 
@@ -116,8 +116,8 @@ The Go backend (Gin + PostgreSQL) has a solid foundation with auth, deal CRUD, a
 | Deal CRUD (create, get, list) | ✅ Done | `internal/deals/` |
 | Deal status state machine | ✅ Done | `internal/deals/types.go` |
 | Ownership enforcement | ✅ Done | `internal/deals/service.go` |
-| Artifact CRUD (source_code, source_file) | ✅ Done | `internal/deals/artifact_handler.go` |
-| Verification CRUD (sandbox, preview) | ✅ Done | `internal/deals/verification_handler.go` |
+| Artifact CRUD (source_code, source_file) | ✅ Done | `internal/deals/handler_artifacts.go` |
+| Verification CRUD (sandbox, preview) | ✅ Done | `internal/deals/handler_verification.go` |
 | Transactional deal creation | ✅ Done | `internal/deals/service.go` |
 
 ### Phase 3 — Lightning Integration (Week 6–7) ✅ Backend done

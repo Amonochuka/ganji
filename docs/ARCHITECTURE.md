@@ -63,13 +63,13 @@ frontend/             Next.js app (out of scope here)
 | Background workers (hold-expiry sweep) | `backend/cmd/api/workers.go` |
 | Deal struct, statuses, valid transitions | `backend/internal/deals/types.go` |
 | Deal business logic (escrow, ownership, share link) | `backend/internal/deals/service.go` |
-| Artifact upload/download (streamed to storage) | `backend/internal/deals/service.go` + `artifact_handler.go` |
+| Artifact upload/download (streamed to storage) | `backend/internal/deals/service.go` + `handler_artifacts.go` |
 | Artifact blob backend (`Storage` iface + `Local`) | `backend/internal/storage/` |
 | Deal SQL (repos, transactions) | `backend/internal/deals/repository.go` |
-| Deal repository interface | `backend/internal/deals/interface_types.go` |
+| Deal repository interface | `backend/internal/deals/types_interfaces.go` |
 | Deal sentinel errors | `backend/internal/deals/errors.go` |
 | Deal HTTP handlers + route registration | `backend/internal/deals/handler.go` |
-| Hold-expiry sweep worker logic | `backend/internal/deals/sweep.go` |
+| Hold-expiry sweep worker logic | `backend/internal/deals/worker_sweep.go` |
 | LNbits client | `backend/internal/lnbits/client.go` + `models.go` |
 | LND accepted-hold checker | `backend/internal/lnd/client.go` (`IsAcceptedHold`) |
 | Accepted-hold checker wiring | `backend/internal/deals/service.go` (`AcceptedHoldChecker`, `WithAcceptedHoldChecker`), `backend/internal/webhook/service.go`, `backend/cmd/api/router.go` (`LND_REST_*` from `.env.example`) |
