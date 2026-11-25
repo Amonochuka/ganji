@@ -56,7 +56,7 @@ Each package's purpose is documented in [`docs/ARCHITECTURE.md`](./docs/ARCHITEC
 
 | Route | Page | Description |
 |---|---|---|
-| `/` | Home | Marketing landing with GNJ stopwatch-logo, hero, feature cards |
+| `/` | Home | Marketing landing with ganji stopwatch-logo, hero, feature cards |
 | `/login` | Login | Email/password auth, JWT tokens in localStorage |
 | `/signup` | Signup | Registration with validation |
 | `/dashboard` | Dashboard | Authenticated deal list with status cards, empty state, create CTA |
@@ -73,7 +73,7 @@ Each package's purpose is documented in [`docs/ARCHITECTURE.md`](./docs/ARCHITEC
 
 **API Client:** `lib/api/api-client.ts` — full TypeScript coverage for auth + all deal endpoints
 
-**Design System:** Vault (near-black matte) + Gold accents, Orbitron/Share Tech Mono for GNJ logo, CSS variables for all colors/fonts
+**Design System:** Vault (near-black matte) + Gold accents, Orbitron/Share Tech Mono for ganji logo, CSS variables for all colors/fonts
 
 ### Local Lightning dev (Polar + LNbits)
 

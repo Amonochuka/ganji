@@ -25,7 +25,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### AuthShell (`components/auth/auth-shell.tsx`)
 - Centered card with vault-seam background
-- Gold GNJ logo at top
+- Gold ganji logo at top
 - Consistent width constraints (max-w-md, max-w-lg)
 - Footer slot for extra actions (terms, links)
 

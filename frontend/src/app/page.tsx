@@ -89,7 +89,7 @@ export default function Home() {
             Built for freelancers. Powered by Bitcoin. No platform lock-in.
           </p>
           <p className="mt-2 text-xs text-ink-700 font-mono">
-            GNJ — Lightning Escrow Protocol
+            ganji — Lightning Escrow Protocol
           </p>
         </div>
       </footer>

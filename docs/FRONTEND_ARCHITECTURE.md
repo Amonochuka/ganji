@@ -58,7 +58,7 @@ app/
 - **Color palette** defined as CSS variables in `globals.css` under `:root`
 - **Vault theme** — near-black matte backgrounds (`#0a0c0e`), gold accents (`#c49632`, `#d4a843`)
 - **Ink text** — `#faf9f6` (light) / `#5a5852` (readable on vault)
-- **Font families** — Space Grotesk (display/headings), Inter (body), IBM Plex Mono (monospace), Orbitron + Share Tech Mono (digital/stopwatch style for GNJ logo)
+- **Font families** — Space Grotesk (display/headings), Inter (body), IBM Plex Mono (monospace), Orbitron + Share Tech Mono (digital/stopwatch style for ganji logo)
 - **Components** — all UI components in `components/ui/` follow the vault/gold visual language
 - **Responsive** — mobile-first Tailwind breakpoints (sm: ≥640px, md: ≥768px, lg: ≥1024px)
 

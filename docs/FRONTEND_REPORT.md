@@ -10,7 +10,7 @@
 
 | Page | Route | Description | Backend Endpoints |
 |------|-------|-------------|-------------------|
-| **Home** | `/` | Marketing landing with GNJ stopwatch-logo, hero, feature cards | — |
+| **Home** | `/` | Marketing landing with ganji stopwatch-logo, hero, feature cards | — |
 | **Login** | `/login` | Email/password auth, redirects to dashboard | `POST /auth/login` |
 | **Signup** | `/signup` | Registration with validation, redirects to dashboard | `POST /auth/signup` |
 | **Dashboard** | `/dashboard` | Authenticated deal list with status cards, empty state, create CTA | `GET /deals` |
@@ -84,7 +84,7 @@
 - Display: Space Grotesk
 - Body: Inter
 - Mono: IBM Plex Mono
-- **Digital/Stopwatch:** Orbitron + Share Tech Mono (GNJ logo)
+- **Digital/Stopwatch:** Orbitron + Share Tech Mono (ganji logo)
 
 **Colors (CSS variables):**
 - Vault surfaces: `#0a0c0e` → `#181b1f`

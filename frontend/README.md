@@ -7,7 +7,7 @@ Next.js 16 (App Router) + TypeScript + Tailwind v4 frontend for the Ganji Lightn
 - **Framework:** Next.js 16 with App Router, React 19
 - **Language:** TypeScript (strict mode)
 - **Styling:** Tailwind CSS v4 (CSS-first config via `@theme` in `globals.css`)
-- **Fonts:** Space Grotesk (display), Inter (body), IBM Plex Mono (mono), Orbitron + Share Tech Mono (digital/stopwatch GNJ logo)
+- **Fonts:** Space Grotesk (display), Inter (body), IBM Plex Mono (mono), Orbitron + Share Tech Mono (digital/stopwatch ganji logo)
 - **Auth:** JWT in localStorage (access + refresh tokens), `AuthContext` provider
 - **API:** `lib/api/api-client.ts` — typed fetch wrapper with credentials
 
@@ -21,7 +21,7 @@ Next.js 16 (App Router) + TypeScript + Tailwind v4 frontend for the Ganji Lightn
 
 **Utilities:**
 - `.vault-card` — hover gold border glow
-- `.logo-gnj` / `.logo-gnj-sm` — stopwatch-style GNJ logo with gold glow pulse
+- `.logo-gnj` / `.logo-gnj-sm` — stopwatch-style ganji logo with gold glow pulse
 - `.font-digital` — Orbitron, tabular-nums, wide tracking
 - `.hero-gradient` — ink → gold → ink text gradient
 - `.gold-accent` — gradient underline
