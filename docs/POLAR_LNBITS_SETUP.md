@@ -192,7 +192,10 @@ channel routing.
 Open each URL, log in, and create one test wallet where needed. Use the client
 wallet **admin key** from `:5001` in the fund dialog and the freelancer wallet
 **invoice key** from `:5002` in the generate-invoice dialog. Leave the backend's
-`LNBITS_*` keys pointing at the `:5000` escrow wallet.
+`LNBITS_*` keys pointing at the `:5000` escrow wallet. Set
+`DEV_ALLOWED_WALLET_URLS=http://localhost:5001,http://localhost:5002` in
+`backend/.env` and restart the backend so those two exact local origins pass the
+SSRF guard.
 
 Our `lnbits-docker-compose.yml` joins Polar's network using an **external network**:
 
@@ -481,10 +484,13 @@ of funds.
 ### Funding rejected as an invalid wallet URL or key
 
 **Cause:** Wallet URLs must be `http`/`https` with a host and no
-userinfo/query/fragment; there is no allowlist. The key must be non-empty and
-is used transiently (never stored or logged).
+userinfo/query/fragment. Production only accepts routable public hosts; local
+Polar wallets are rejected unless their exact origins are explicitly allowlisted
+for development. The key must be non-empty and is used transiently (never stored
+or logged).
 
-**Fix:** Pass the linked wallet's URL and admin key in
+**Fix:** Set `DEV_ALLOWED_WALLET_URLS=http://localhost:5001,http://localhost:5002`
+in `backend/.env`, restart the backend, and pass the linked wallet URL and key in
 `POST /public/deals/:shareToken/fund` (or `POST /deals/wallet/invoice` for the
 freelancer payout invoice).
 

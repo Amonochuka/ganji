@@ -141,6 +141,9 @@ func setupRouter(cfg *config.Config, dbConn *sql.DB, uploadStore storage.Storage
 	if acceptedHoldChecker != nil {
 		dealOptions = append(dealOptions, deals.WithAcceptedHoldChecker(acceptedHoldChecker))
 	}
+	if len(cfg.DevAllowedWalletURLs) > 0 {
+		dealOptions = append(dealOptions, deals.WithDevAllowedWalletURLs(cfg.DevAllowedWalletURLs))
+	}
 	dealService := deals.NewService(dealRepo, lnbitsClient, dealOptions...)
 	dealHandler := deals.NewHandler(dealService)
 

@@ -18,7 +18,7 @@ func (s *Service) FundDeal(ctx context.Context, shareToken, milestoneID, walletU
 	if strings.TrimSpace(shareToken) == "" {
 		return nil, fmt.Errorf("%w: share token is required", ErrInvalidInput)
 	}
-	endpoint, err := validateWalletEndpoint(walletURL)
+	endpoint, err := s.validateWalletEndpoint(walletURL)
 	if err != nil {
 		return nil, err
 	}

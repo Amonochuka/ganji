@@ -12,7 +12,7 @@ func (s *Service) GenerateInvoice(ctx context.Context, walletURL, walletKey stri
 	if amountSats <= 0 {
 		return nil, fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
 	}
-	endpoint, err := validateWalletEndpoint(walletURL)
+	endpoint, err := s.validateWalletEndpoint(walletURL)
 	if err != nil {
 		return nil, err
 	}

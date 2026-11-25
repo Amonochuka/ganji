@@ -26,6 +26,7 @@ type Config struct {
 	WebhookURL                string
 	FrontendURLs              []string
 	CORSAllowPrivateLAN       bool
+	DevAllowedWalletURLs      []string
 	HoldInvoiceExpirySeconds  int64
 	HoldSweepIntervalSeconds  int64
 	StoragePath               string
@@ -64,6 +65,7 @@ func Load() *Config {
 		WebhookURL:                getEnv("WEBHOOK_URL", ""),
 		FrontendURLs:              getEnvListFallback("FRONTEND_URLS", "FRONTEND_URL"),
 		CORSAllowPrivateLAN:       getEnvBool("CORS_ALLOW_PRIVATE_LAN", false),
+		DevAllowedWalletURLs:      getEnvList("DEV_ALLOWED_WALLET_URLS"),
 		HoldInvoiceExpirySeconds:  getEnvInt("LNBITS_HOLD_INVOICE_EXPIRY_SECONDS", 2_592_000),
 		HoldSweepIntervalSeconds:  getEnvInt("LNBITS_HOLD_SWEEP_INTERVAL_SECONDS", 21_600),
 		StoragePath:               getEnv("STORAGE_PATH", "./uploads"),
@@ -93,6 +95,12 @@ func Load() *Config {
 		if origin == "*" || origin == "null" {
 			log.Fatalf("CORS origin %q is not allowed (wildcard/null origins forbidden with credentials)", origin)
 		}
+	}
+	if len(cfg.DevAllowedWalletURLs) > 0 {
+		if isProduction() {
+			log.Fatalf("DEV_ALLOWED_WALLET_URLS cannot be enabled in production")
+		}
+		log.Printf("WARNING: %d dev wallet URL(s) allowed; never set DEV_ALLOWED_WALLET_URLS in production", len(cfg.DevAllowedWalletURLs))
 	}
 	if cfg.LNBitsWebhookSecret == "" {
 		if isProduction() {

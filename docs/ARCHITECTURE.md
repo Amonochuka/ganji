@@ -88,4 +88,4 @@ Milestone mode is a second, sequential escrow inside the same `deals` module:
 - Sentinel errors + `errors.Is` for HTTP mapping; `ErrVerificationUnavailable` maps to `503`
 - Single `DBTX` for transactional operations
 - LNbits `paid=true` is not proof of held funds: `locked`/`funded` require the LND accepted-hold checker on `polar-n3-Es`
-- Linked-wallet URLs are `http`/`https` host only (no userinfo/query/fragment, no allowlist); wallet keys are transient and never stored or logged
+- Linked-wallet URLs are `http`/`https` host only (no userinfo/query/fragment); private/loopback hosts are blocked except for exact dev-only origins in `DEV_ALLOWED_WALLET_URLS`, which production refuses to load; wallet keys are transient and never stored or logged

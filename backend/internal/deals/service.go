@@ -2,6 +2,7 @@ package deals
 
 import (
 	"context"
+	"log"
 
 	"golang.org/x/sync/singleflight"
 
@@ -42,14 +43,15 @@ type DealNotifier interface {
 const maxDisputeReasonRunes = 2000
 
 type Service struct {
-	repo           DealRepository
-	lnbits         *lnbits.Client
-	acceptedHolds  AcceptedHoldChecker
-	cv             CVAnchorer
-	storage        storage.Storage
-	maxUploadBytes int64
-	notifier       DealNotifier
-	fundGroup singleflight.Group
+	repo                 DealRepository
+	lnbits               *lnbits.Client
+	acceptedHolds        AcceptedHoldChecker
+	cv                   CVAnchorer
+	storage              storage.Storage
+	maxUploadBytes       int64
+	notifier             DealNotifier
+	allowedWalletOrigins map[string]struct{}
+	fundGroup            singleflight.Group
 }
 
 type Option func(*Service)
@@ -76,6 +78,22 @@ func WithStorage(st storage.Storage, maxUploadBytes int64) Option {
 // WithNotifier wires best-effort deal-status notifications.
 func WithNotifier(n DealNotifier) Option {
 	return func(s *Service) { s.notifier = n }
+}
+
+func WithDevAllowedWalletURLs(urls []string) Option {
+	return func(s *Service) {
+		if s.allowedWalletOrigins == nil {
+			s.allowedWalletOrigins = make(map[string]struct{}, len(urls))
+		}
+		for _, raw := range urls {
+			origin, err := walletOrigin(raw)
+			if err != nil {
+				log.Printf("ignoring invalid dev wallet URL: %v", err)
+				continue
+			}
+			s.allowedWalletOrigins[origin] = struct{}{}
+		}
+	}
 }
 
 func NewService(repo DealRepository, lnbits *lnbits.Client, opts ...Option) *Service {

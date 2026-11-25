@@ -171,6 +171,7 @@ Document UI changes/ideas here as they are implemented or planned, especially wh
 - Deal and milestone views now serialize `payout_reset_available` from the stored payout-attempt state; the dashboard stuck filter/badge receives the flag in authed deal responses as well as public ones.
 - Payee invoice validation now rejects expired invoices when LNbits decode data includes `date`/`timestamp` plus `expiry`, and rejects unverifiable expiry metadata. Validation remains best-effort when decode does not expose expiry data.
 - Caller-supplied wallet URLs now reject unspecified (`0.0.0.0/8`), loopback, private, link-local, shared-address, and non-routable IPv6 destinations before any wallet API call; CIDR constants fail loudly at startup, and tests cover IPv4-mapped loopback.
+- `DEV_ALLOWED_WALLET_URLS` permits exact local wallet origins (`http://localhost:5001`, `http://localhost:5002`) through the SSRF guard in development only; production refuses to start if the setting is present.
 - Public money actions (approve, accept-next, reject, reset payout, exit) now require an authenticated account whose email matches the deal client; public views, artifact access, and funding remain share-link based.
 
 ## QA hardening pass (2026-11-24)

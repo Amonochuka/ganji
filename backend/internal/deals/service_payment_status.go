@@ -105,6 +105,28 @@ func validateWalletEndpoint(raw string) (string, error) {
 	return walletEndpointValidator(raw)
 }
 
+func walletOrigin(raw string) (string, error) {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
+		return "", fmt.Errorf("%w: invalid wallet URL", ErrInvalidInput)
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host), nil
+}
+
+func (s *Service) validateWalletEndpoint(raw string) (string, error) {
+	if s != nil {
+		if origin, err := walletOrigin(raw); err == nil {
+			if _, ok := s.allowedWalletOrigins[origin]; ok {
+				return strings.TrimRight(strings.TrimSpace(raw), "/"), nil
+			}
+		}
+	}
+	return validateWalletEndpoint(raw)
+}
+
 func validateWalletEndpointStrict(raw string) (string, error) {
 	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
 	if err != nil || parsed.Host == "" || parsed.User != nil ||

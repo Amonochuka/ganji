@@ -2,8 +2,56 @@ package deals
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
+
+func TestValidateWalletEndpointWithDevAllowlist(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(nil, nil, WithDevAllowedWalletURLs([]string{
+		"http://localhost:5001/",
+		"http://localhost:5002",
+	}))
+
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"client wallet", "http://localhost:5001"},
+		{"freelancer wallet", "http://localhost:5002"},
+		{"trailing slash", "http://localhost:5002/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			endpoint, err := svc.validateWalletEndpoint(tc.url)
+			if err != nil {
+				t.Fatalf("expected ok, got %v", err)
+			}
+			if endpoint != strings.TrimRight(tc.url, "/") {
+				t.Fatalf("expected canonical endpoint %q, got %q", strings.TrimRight(tc.url, "/"), endpoint)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"escrow wallet not allowlisted", "http://localhost:5000"},
+		{"ip alias not allowlisted", "http://127.0.0.1:5002"},
+		{"scheme mismatch", "https://localhost:5002"},
+		{"path rejected", "http://localhost:5002/wallet"},
+		{"metadata endpoint", "http://169.254.169.254"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := svc.validateWalletEndpoint(tc.url); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("expected ErrInvalidInput for %q, got %v", tc.url, err)
+			}
+		})
+	}
+}
 
 func TestValidateWalletEndpoint(t *testing.T) {
 	t.Parallel()
