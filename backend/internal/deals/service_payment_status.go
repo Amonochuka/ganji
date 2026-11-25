@@ -51,6 +51,7 @@ func isHoldReleased(status string) bool {
 // probe internal infrastructure (databases, cloud metadata endpoints, etc.).
 var privateOrLoopbackCIDRs = func() []*net.IPNet {
 	blocks := []string{
+		"0.0.0.0/8",      // Unspecified / routes to localhost on many systems
 		"127.0.0.0/8",    // IPv4 loopback
 		"10.0.0.0/8",     // RFC 1918
 		"172.16.0.0/12",  // RFC 1918
@@ -63,7 +64,10 @@ var privateOrLoopbackCIDRs = func() []*net.IPNet {
 	}
 	out := make([]*net.IPNet, 0, len(blocks))
 	for _, b := range blocks {
-		_, cidr, _ := net.ParseCIDR(b)
+		_, cidr, err := net.ParseCIDR(b)
+		if err != nil {
+			panic(err)
+		}
 		out = append(out, cidr)
 	}
 	return out
@@ -72,7 +76,8 @@ var privateOrLoopbackCIDRs = func() []*net.IPNet {
 // isPrivateOrLoopback returns true when ip falls within any range that should
 // not be reachable from a caller-supplied URL.
 func isPrivateOrLoopback(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsPrivate() {
 		return true
 	}
 	for _, cidr := range privateOrLoopbackCIDRs {

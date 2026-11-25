@@ -169,7 +169,7 @@ Document UI changes/ideas here as they are implemented or planned, especially wh
 - Added migration `000009_add_milestone_status_exited` so the `exited` status used by the exit flow exists in clean and already-migrated databases. Down migration is intentionally a no-op because PostgreSQL cannot safely remove an enum value.
 - Deal and milestone views now serialize `payout_reset_available` from the stored payout-attempt state; the dashboard stuck filter/badge receives the flag in authed deal responses as well as public ones.
 - Payee invoice validation now rejects expired invoices when LNbits decode data includes `date`/`timestamp` plus `expiry`, and rejects unverifiable expiry metadata. Validation remains best-effort when decode does not expose expiry data.
-- Caller-supplied wallet URLs now reject loopback, private, link-local, shared-address, and non-routable IPv6 destinations before any wallet API call.
+- Caller-supplied wallet URLs now reject unspecified (`0.0.0.0/8`), loopback, private, link-local, shared-address, and non-routable IPv6 destinations before any wallet API call; CIDR constants fail loudly at startup, and tests cover IPv4-mapped loopback.
 - Public money actions (approve, accept-next, reject, reset payout, exit) now require an authenticated account whose email matches the deal client; public views, artifact access, and funding remain share-link based.
 
 ## QA hardening pass (2026-11-24)
@@ -187,6 +187,7 @@ Document UI changes/ideas here as they are implemented or planned, especially wh
 - Gin request logging redacts share-token path segments and uses route-style paths.
 - `LNBITS_WEBHOOK_SECRET` is now required unless `ALLOW_INSECURE_WEBHOOKS=true` is explicitly set for local development; webhook signature verification fails closed and no longer warns per request.
 - `PREIMAGE_ENCRYPTION_KEY` is required (32+ chars) in production; local dev logs a one-time warning when preimages remain plaintext.
+- Frontend session restore now fails closed when refresh fails or the backend is unreachable, clearing stale local state without an unhandled promise rejection.
 - Rate limiting remains in-process: this assumes a single backend replica; a shared Redis/SQL store is required before horizontal scaling.
 - WebSocket support is still stubbed and no WebSocket route is mounted, so there is no socket auth surface yet.
 - Deal-level `preimage_hash` remains a nullable legacy column; milestone mode stores the canonical hash on each milestone, and a drop migration/deployment is still pending.

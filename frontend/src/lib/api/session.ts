@@ -72,8 +72,13 @@ export function refreshSession(): Promise<AuthTokens | null> {
   return refreshInFlight;
 }
 
-export function restoreSession(): Promise<AuthTokens | null> {
-  return refreshSession();
+export async function restoreSession(): Promise<AuthTokens | null> {
+  try {
+    return await refreshSession();
+  } catch {
+    expireSession();
+    return null;
+  }
 }
 
 export async function logoutSession(): Promise<void> {

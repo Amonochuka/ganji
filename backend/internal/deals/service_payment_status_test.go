@@ -33,6 +33,9 @@ func TestValidateWalletEndpoint(t *testing.T) {
 	}{
 		{"loopback ip", "http://127.0.0.1"},
 		{"loopback ip 2", "http://127.0.0.2:5000"},
+		{"unspecified ip", "http://0.0.0.0"},
+		{"unspecified ip with port", "http://0.0.0.0:5000"},
+		{"ipv4-mapped loopback", "http://[::ffff:127.0.0.1]"},
 		{"localhost hostname", "http://localhost"},
 		{"private 10.x", "http://10.0.0.1"},
 		{"private 192.168.x", "http://192.168.1.1"},

@@ -43,7 +43,7 @@ app/
 1. **Signup** → `POST /auth/signup` → user created, `is_operator` flag from `OPERATOR_EMAILS` at boot
 2. **Login** → `POST /auth/login` → access token returned in the response body; refresh token set as an `HttpOnly` cookie scoped to `/auth`
 3. **AuthContext** wraps the app and provides `tokens.access_token` plus `user`
-4. **Token persistence** — access token kept only in memory; refresh is replayed from the cookie on reload and rotated silently when access expires
+4. **Token persistence** — access token kept only in memory; refresh is replayed from the cookie on reload and rotated silently when access expires; failed refresh (including an unreachable backend) clears the local session instead of raising an unhandled promise rejection
 5. **API client** — all protected endpoints require `Authorization: Bearer <token>` header; public view/artifact/funding endpoints are share-link based, while approve/reset/milestone actions and exit additionally require a logged-in client whose email matches the deal
 
 ## State Management
