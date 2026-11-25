@@ -320,6 +320,12 @@ export default function DealDetailPage() {
     setActionLoading("refresh status");
     try {
       await Promise.all([fetchDeal(true), fetchMilestones(), fetchArtifacts()]);
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Failed to refresh freelancer status",
+      );
     } finally {
       setActionLoading(null);
     }
@@ -796,11 +802,21 @@ export default function DealDetailPage() {
                     )}
                     {(deal.status === "work_submitted" ||
                       deal.status === "released") && (
-                      <span className="flex items-center px-3 py-2 text-sm text-blue-300">
-                        {deal.status === "work_submitted"
-                          ? "Submitted — waiting for client approval."
-                          : "Released — payment sent to your invoice."}
-                      </span>
+                      <>
+                        <Button
+                          variant="ghost"
+                          onClick={handleRefreshStatus}
+                          disabled={actionLoading === "refresh status"}
+                          isLoading={actionLoading === "refresh status"}
+                        >
+                          Check Freelancer Status
+                        </Button>
+                        {deal.payout_reset_available && (
+                          <span className="flex items-center px-3 py-2 text-sm text-yellow-400">
+                            Payout needs operator confirmation before retry.
+                          </span>
+                        )}
+                      </>
                     )}
                     {deal.status !== "released" &&
                       deal.status !== "refunded" && (

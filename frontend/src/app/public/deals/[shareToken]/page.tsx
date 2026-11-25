@@ -294,7 +294,7 @@ export default function PublicDealPage() {
 
             {deal.payout_reset_available && !hasMilestones && (
               <p className="mb-4 rounded-lg border border-yellow-600/30 bg-yellow-600/10 p-3 text-sm text-yellow-300">
-                Payout outcome needs confirmation. Checking account status refreshes the deal; it will not resend payment.
+                Payout outcome needs operator confirmation before retry. Refreshing this page will not resend payment.
               </p>
             )}
 
