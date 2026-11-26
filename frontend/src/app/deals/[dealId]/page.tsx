@@ -545,14 +545,12 @@ export default function DealDetailPage() {
                       {deal.preimage_hash}
                     </dd>
                   </div>
-                  {!isClient && (
-                    <div className="sm:col-span-2">
-                      <dt className="text-ink-500">LNbits Checking ID</dt>
-                      <dd className="font-mono text-xs text-ink-400">
-                        {deal.checking_id || "—"}
-                      </dd>
-                    </div>
-                  )}
+                  <div className="sm:col-span-2">
+                    <dt className="text-ink-500">LNbits Checking ID</dt>
+                    <dd className="font-mono text-xs text-ink-400">
+                      {deal.checking_id || "—"}
+                    </dd>
+                  </div>
                   <div>
                     <dt className="text-ink-500">Created</dt>
                     <dd className="text-ink-300 font-mono">
