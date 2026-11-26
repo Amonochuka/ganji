@@ -323,7 +323,7 @@ The frontend renders the link from `share_token` (e.g. `FRONTEND_URL/public/deal
 
 Create a new deal. Generates a fresh escrow preimage `R`, draws a **hold invoice on `polar-n3-Es`** (`payment_hash = sha256(R)`), and stores the deal. No money moves on creation — the funds stay held on the network until approve/dispute.
 
-With `milestones` (≥1, each `title`, positive `amount_sats`, and optional `delivery_days`) the deal is created in **sequential per-milestone mode**: no single upfront deal hold; `amount_sats` is derived as the sum; M1 is funded immediately (`FundMilestone` → per-milestone hold invoice); later milestones get their hold only after the previous milestone is `released` (paid). `delivery_days` is the agreed delivery/funding window (1–3650 days; defaults to 7 for older clients). Each milestone hold invoice is created with `expiry = delivery_days * 86400` from that hold's creation time (M1 at deal creation, M2+ when that milestone becomes fundable/funded). `due_at` is derived as `funded_at + delivery_days` after funding. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` is the default/fallback for holds without a per-milestone expiry. `deal.Invoice`/`deal.CheckingID` mirror the active (M1) hold for compatibility. Legacy single-hold flow is preserved when `milestones` is empty/omitted.
+With `milestones` (≥1, each `title`, positive `amount_sats`, and either `work_start_at`/`work_due_at` or legacy `delivery_days`) the deal is created in **sequential per-milestone mode**: no single upfront deal hold; `amount_sats` is derived as the sum; M1 is funded immediately (`FundMilestone` → per-milestone hold invoice); later milestones get their hold only after the previous milestone is `released` (paid). Freelancer-set `work_start_at`/`work_due_at` define the work window; `delivery_days` is derived from that window (1–3650 days) and old clients may still send just `delivery_days` (defaults to 7). Each milestone hold invoice expires at the explicit due date, or at `delivery_days * 86400` from hold creation for legacy rows. `due_at` prefers the explicit due date, falling back to `funded_at + delivery_days`. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` is only the fallback for holds without a per-milestone expiry. `deal.Invoice`/`deal.CheckingID` mirror the active (M1) hold for compatibility. Legacy single-hold flow is preserved when `milestones` is empty/omitted.
 
 **Request (legacy single-hold)**
 ```json
@@ -344,8 +344,18 @@ With `milestones` (≥1, each `title`, positive `amount_sats`, and optional `del
   "client_email": "client@example.com",
   "payee_invoice": "lnbc50000n1...",
   "milestones": [
-    {"title": "Design", "amount_sats": 20000},
-    {"title": "Build", "amount_sats": 30000}
+    {
+      "title": "Design",
+      "amount_sats": 20000,
+      "work_start_at": "2026-11-26T00:00:00.000Z",
+      "work_due_at": "2026-12-03T23:59:59.000Z"
+    },
+    {
+      "title": "Build",
+      "amount_sats": 30000,
+      "work_start_at": "2026-12-04T00:00:00.000Z",
+      "work_due_at": "2026-12-18T23:59:59.000Z"
+    }
   ]
 }
 ```
@@ -434,11 +444,12 @@ Protected. Asks a linked wallet to create a regular LNbits invoice (e.g. for the
   "wallet_url": "http://localhost:5000",
   "wallet_key": "...",
   "amount_sats": 50000,
-  "memo": "Ganji payout"
+  "memo": "Ganji payout",
+  "expiry_seconds": 604800
 }
 ```
 
-`memo` defaults to `Ganji payout`. `wallet_url`/`wallet_key` follow the same rules as public funding: `http`/`https` host only, no userinfo/query/fragment, no allowlist; the key is transient and never stored or logged.
+`memo` defaults to `Ganji payout`. `expiry_seconds` is optional (0–315360000); when omitted LNbits uses its wallet default. The frontend derives it from the active milestone's explicit `work_due_at`, so generated payout invoices expire with the agreed work window instead of a fixed 30 days. `wallet_url`/`wallet_key` follow the same rules as public funding: `http`/`https` host only, no userinfo/query/fragment, dev-only exact-origin allowlist for local Polar wallets, blocked in production; the key is transient and never stored or logged.
 
 **Response `200`**
 ```json
@@ -455,7 +466,7 @@ Protected. Asks a linked wallet to create a regular LNbits invoice (e.g. for the
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid body/URL/key or non-positive amount |
+| `400` | Invalid body/URL/key, non-positive amount, or expiry out of range |
 | `502` | Invoice provider error |
 
 **Frontend API client:** `api.generateInvoice(data, token)`.
@@ -635,8 +646,8 @@ The **money states** (`locked`, `released`, `disputed`, `refunded`) are backend-
 
 In milestone mode each milestone is its own escrow leg with its own hold invoice. Milestone statuses: `pending → awaiting_payment → funded → in_progress → work_submitted → (completed →) released`, with `rejected`/`disputed` for work under review (hold stays), `refunded`/`exited` terminal. `funded` is entered only after accepted-hold verification on Es (LNbits `paid=true` alone is not enough). `released` = hold settled + freelancer paid (terminal, paid). `completed` = payout-pending, never paid. See `DEAL_LIFECYCLE.md` for the full transition table.
 
-- `POST /deals/:dealID/milestones` (freelancer) — create an additional milestone on an existing deal. Body: `{title, amount_sats, order, delivery_days?}` (order ≥ 1; delivery days 1–3650, default 7). Status starts `pending` (unfunded); it is funded only in sequence.
-- `GET /deals/:dealID/milestones` (freelancer or client by email) — list milestones ordered by `order`. Response includes `delivery_days` and, once funded, calculated `due_at`, as well as `{id, title, amount_sats, order, status, invoice?, completed_at?, created_at}`.
+- `POST /deals/:dealID/milestones` (freelancer) — create an additional milestone on an existing deal. Body: `{title, amount_sats, order, delivery_days?}` (order ≥ 1; delivery days 1–3650, default 7). Explicit `work_start_at`/`work_due_at` are accepted at deal creation via `POST /deals`; this endpoint remains legacy day-count based. Status starts `pending` (unfunded); it is funded only in sequence.
+- `GET /deals/:dealID/milestones` (freelancer or client by email) — list milestones ordered by `order`. Response includes `delivery_days`, optional `work_start_at`/`work_due_at`, and `due_at` (explicit due date preferred, otherwise `funded_at + delivery_days`), as well as `{id, title, amount_sats, order, status, invoice?, completed_at?, created_at}`.
 - `PATCH /deals/:dealID/milestones/:milestoneID` (freelancer) — update milestone status. Body: `{status, completed_at? (RFC3339)}`. Thin status write; money-moving outcomes (`released`/`paid`) must still go through the canonical escrow path — a milestone with no hold cannot be marked paid via this endpoint alone.
 
 Auth/portal behavior in milestone mode:

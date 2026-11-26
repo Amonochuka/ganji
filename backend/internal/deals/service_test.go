@@ -1642,6 +1642,7 @@ func TestGenerateInvoiceUsesLinkedWallet(t *testing.T) {
 		Amount int64  `json:"amount"`
 		Memo   string `json:"memo"`
 		Unit   string `json:"unit"`
+		Expiry int64  `json:"expiry"`
 	}
 	const invoiceKey = "invoice-key"
 	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1660,14 +1661,14 @@ func TestGenerateInvoiceUsesLinkedWallet(t *testing.T) {
 	defer wallet.Close()
 
 	service := newTestService(newFakeDealRepo())
-	invoice, err := service.GenerateInvoice(context.Background(), wallet.URL, invoiceKey, 1500, "payout")
+	invoice, err := service.GenerateInvoiceWithExpiry(context.Background(), wallet.URL, invoiceKey, 1500, "payout", 86400)
 	if err != nil {
 		t.Fatalf("expected invoice generation to succeed, got %v", err)
 	}
 	if invoice.PaymentRequest != "lnbc-payout" || invoice.PaymentHash != "hash-1" || invoice.CheckingID != "checking-1" {
 		t.Fatalf("unexpected invoice response: %+v", invoice)
 	}
-	if body.Amount != 1500 || body.Memo != "payout" || body.Unit != "sat" {
+	if body.Amount != 1500 || body.Memo != "payout" || body.Unit != "sat" || body.Expiry != 86400 {
 		t.Fatalf("unexpected invoice request: %+v", body)
 	}
 }

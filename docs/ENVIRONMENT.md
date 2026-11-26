@@ -34,7 +34,7 @@ funds. Both the webhook and `CheckPayment` require accepted-hold verification.
 
 Linked-wallet endpoints are public `POST /public/deals/:shareToken/fund`
 (`{wallet_url, wallet_key, milestone_id?}`) and protected
-`POST /deals/wallet/invoice` (`{wallet_url, wallet_key, amount_sats, memo?}`).
+`POST /deals/wallet/invoice` (`{wallet_url, wallet_key, amount_sats, memo?, expiry_seconds?}`).
 Wallet URLs must be `http`/`https` with a host and no userinfo/query/fragment;
 there is no allowlist. Wallet keys are used transiently, never stored or logged.
 
@@ -53,7 +53,7 @@ Then use `DATABASE_URL=postgres://postgres:postgres@localhost:5432/ganji?sslmode
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `8080` | HTTP server port |
-| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | `2592000` (30 days) | Default/fallback unpaid hold-invoice expiry. Milestone holds are created with `delivery_days * 86400` seconds (from hold creation/funding time per milestone); this env is used when a hold does not specify its own expiry. |
+| `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` | `2592000` (30 days) | Default/fallback unpaid hold-invoice expiry. New milestone holds expire at the freelancer-set `work_due_at`; legacy milestone holds use `delivery_days * 86400` from hold creation. This env is used only when a hold does not specify its own expiry. |
 | `LNBITS_HOLD_SWEEP_INTERVAL_SECONDS` | `21600` (6 hours) | Background job interval to reconcile stale open deals against LNbits |
 | `OTS_ESPLORA_URL` | (empty) | Esplora API URL for live Bitcoin chain verification (e.g., `https://blockstream.info/api`) |
 | `OTS_UPGRADE_INTERVAL_SECONDS` | `21600` (6 hours) | OTS proof upgrade worker cadence |

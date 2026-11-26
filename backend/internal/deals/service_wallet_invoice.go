@@ -9,8 +9,15 @@ import (
 )
 
 func (s *Service) GenerateInvoice(ctx context.Context, walletURL, walletKey string, amountSats int64, memo string) (*lnbits.Invoice, error) {
+	return s.GenerateInvoiceWithExpiry(ctx, walletURL, walletKey, amountSats, memo, 0)
+}
+
+func (s *Service) GenerateInvoiceWithExpiry(ctx context.Context, walletURL, walletKey string, amountSats int64, memo string, expirySeconds int64) (*lnbits.Invoice, error) {
 	if amountSats <= 0 {
 		return nil, fmt.Errorf("%w: amount must be greater than zero", ErrInvalidInput)
+	}
+	if expirySeconds < 0 || expirySeconds > int64(maxMilestoneScheduleDays)*86400 {
+		return nil, fmt.Errorf("%w: invoice expiry must be between 0 and %d seconds", ErrInvalidInput, int64(maxMilestoneScheduleDays)*86400)
 	}
 	endpoint, err := s.validateWalletEndpoint(walletURL)
 	if err != nil {
@@ -25,7 +32,7 @@ func (s *Service) GenerateInvoice(ctx context.Context, walletURL, walletKey stri
 		memo = "Ganji payout"
 	}
 	wallet := lnbits.NewClient(lnbits.Config{URL: endpoint, APIKey: key})
-	invoice, err := wallet.CreateInvoice(ctx, lnbits.CreateInvoiceRequest{Amount: amountSats, Memo: memo})
+	invoice, err := wallet.CreateInvoice(ctx, lnbits.CreateInvoiceRequest{Amount: amountSats, Memo: memo, Expiry: expirySeconds})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrWalletInvoiceFailed, err)
 	}

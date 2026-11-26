@@ -11,7 +11,26 @@ import { api, type CreateDealRequest } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatCurrency } from "@/lib/utils/format";
 
-type MilestoneDraft = { title: string; amount_sats: string; delivery_days: string };
+type MilestoneDraft = { title: string; amount_sats: string; work_start_date: string; work_due_date: string };
+
+function dateInputOffset(days: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function scheduleDays(start: string, due: string) {
+  const startMs = Date.parse(`${start}T00:00:00.000Z`);
+  const dueMs = Date.parse(`${due}T23:59:59.000Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(dueMs) || dueMs <= startMs) return 0;
+  return Math.floor((dueMs - startMs) / 86400000) + 1;
+}
+
+function invoiceExpirySeconds(date: string) {
+  const expiresAt = Date.parse(`${date}T23:59:59.000Z`);
+  if (!Number.isFinite(expiresAt)) return 0;
+  return Math.floor((expiresAt - Date.now()) / 1000);
+}
 
 export default function CreateDealPage() {
   const router = useRouter();
@@ -30,7 +49,7 @@ export default function CreateDealPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [milestoneMode, setMilestoneMode] = useState(false);
-  const [milestones, setMilestones] = useState<MilestoneDraft[]>([{ title: "Milestone 1", amount_sats: "", delivery_days: "7" }]);
+  const [milestones, setMilestones] = useState<MilestoneDraft[]>([{ title: "Milestone 1", amount_sats: "", work_start_date: dateInputOffset(0), work_due_date: dateInputOffset(7) }]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -69,7 +88,7 @@ export default function CreateDealPage() {
     setMilestones((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
   }
   function addMilestone() {
-    setMilestones((prev) => [...prev, { title: `Milestone ${prev.length + 1}`, amount_sats: "", delivery_days: "7" }]);
+    setMilestones((prev) => [...prev, { title: `Milestone ${prev.length + 1}`, amount_sats: "", work_start_date: dateInputOffset(0), work_due_date: dateInputOffset(7) }]);
   }
   function removeMilestone(i: number) {
     setMilestones((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
@@ -101,6 +120,15 @@ export default function CreateDealPage() {
       setError("Enter your wallet URL and invoice key");
       return;
     }
+    const firstDueDate = milestoneMode ? milestones[0]?.work_due_date : "";
+    let expirySeconds: number | undefined;
+    if (firstDueDate) {
+      expirySeconds = invoiceExpirySeconds(firstDueDate);
+      if (expirySeconds <= 0) {
+        setError("M1 due date must be in the future before generating an invoice");
+        return;
+      }
+    }
     setIsGeneratingInvoice(true);
     try {
       const res = await api.generateInvoice(
@@ -109,6 +137,7 @@ export default function CreateDealPage() {
           wallet_key: walletKey.trim(),
           amount_sats: amount,
           memo: title.trim() || "Ganji payout",
+          ...(expirySeconds ? { expiry_seconds: expirySeconds } : {}),
         },
         tokens!.access_token
       );
@@ -132,16 +161,22 @@ export default function CreateDealPage() {
     if (!payeeInvoice.trim().startsWith("lnbc")) return setError("Payee invoice must be a valid Lightning invoice (starts with lnbc)");
 
     let amount = 0;
-    let msPayload: { title: string; amount_sats: number; delivery_days: number }[] | undefined;
+    let msPayload: { title: string; amount_sats: number; delivery_days: number; work_start_at: string; work_due_at: string }[] | undefined;
     if (milestoneMode) {
-      const parsed = milestones.map((m, idx) => ({
-        title: m.title.trim() || `Milestone ${idx + 1}`,
-        amount_sats: /^\d+$/.test(m.amount_sats.trim()) ? parseInt(m.amount_sats, 10) : 0,
-        delivery_days: /^\d+$/.test(m.delivery_days.trim()) ? parseInt(m.delivery_days, 10) : 0,
-      }));
+      const parsed = milestones.map((m, idx) => {
+        const days = scheduleDays(m.work_start_date, m.work_due_date);
+        return {
+          title: m.title.trim() || `Milestone ${idx + 1}`,
+          amount_sats: /^\d+$/.test(m.amount_sats.trim()) ? parseInt(m.amount_sats, 10) : 0,
+          delivery_days: days,
+          work_start_at: `${m.work_start_date}T00:00:00.000Z`,
+          work_due_at: `${m.work_due_date}T23:59:59.000Z`,
+        };
+      });
       if (parsed.length === 0) return setError("Add at least one milestone");
       if (parsed.some((m) => !m.title || m.amount_sats <= 0)) return setError("Each milestone needs a title and positive sats amount");
-      if (parsed.some((m) => m.delivery_days < 1 || m.delivery_days > 3650)) return setError("Each milestone needs a delivery estimate from 1 to 3650 days");
+      if (parsed.some((m) => m.delivery_days < 1 || m.delivery_days > 3650)) return setError("Each milestone needs a start date and a later due date within 3650 days");
+      if (milestones.some((m) => invoiceExpirySeconds(m.work_due_date) <= 0)) return setError("Every milestone due date must be in the future");
       msPayload = parsed;
       amount = parsed.reduce((s, m) => s + m.amount_sats, 0);
     } else {
@@ -217,22 +252,28 @@ export default function CreateDealPage() {
                   <div className="space-y-3">
                     <p className="text-xs text-ink-500">Client funds M1 first; after release, M2 is funded. Total: <span className="font-mono text-ink-200">{formatCurrency(milestonesTotal)}</span></p>
                     {milestones.map((m, i) => (
-                      <div key={i} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-2 items-end">
+                      <div key={i} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-2 items-end">
                         <div className="md:col-span-3">
                           <Input label={i === 0 ? "Milestone title" : `Milestone ${i + 1} title`} type="text" value={m.title} onChange={(e) => updateMilestone(i, { title: e.target.value })} placeholder={`Milestone ${i + 1}`} />
                         </div>
                         <div className="md:col-span-2">
                           <Input label={i === 0 ? "Amount (sats)" : `Milestone ${i + 1} sats`} type="number" value={m.amount_sats} onChange={(e) => updateMilestone(i, { amount_sats: e.target.value })} placeholder="250000" min="1" />
                         </div>
-                        <div className="md:col-span-1">
-                          <Input label="Days" type="number" value={m.delivery_days} onChange={(e) => updateMilestone(i, { delivery_days: e.target.value })} min="1" max="3650" />
+                        <div className="md:col-span-2">
+                          <Input label="Work start date" type="date" value={m.work_start_date} onChange={(e) => updateMilestone(i, { work_start_date: e.target.value })} />
+                        </div>
+                        <div className="md:col-span-2">
+                          <Input label="Work due date" type="date" value={m.work_due_date} onChange={(e) => updateMilestone(i, { work_due_date: e.target.value })} />
                         </div>
                         <div className="md:col-span-1">
+                          <span className="block pb-2 text-xs text-ink-500">{scheduleDays(m.work_start_date, m.work_due_date) || "—"} days</span>
+                        </div>
+                        <div className="md:col-span-2">
                           <Button type="button" variant="ghost" size="sm" onClick={() => removeMilestone(i)} disabled={milestones.length <= 1}>Remove</Button>
                         </div>
                       </div>
                     ))}
-                    <p className="text-xs text-ink-500">Delivery time starts when that milestone is funded. Share the agreed schedule with your client before creating the deal.</p>
+                    <p className="text-xs text-ink-500">Freelancer-set work dates define each milestone window. Escrow hold expiry and generated payout-invoice expiry follow the due date.</p>
                     <Button type="button" variant="outline" size="sm" onClick={addMilestone}>Add milestone</Button>
                   </div>
                 )}

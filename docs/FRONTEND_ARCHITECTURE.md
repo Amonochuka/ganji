@@ -86,7 +86,7 @@ api.rotateShareLink(id, token)
 api.getPublicDeal(shareToken)
 api.getPublicMilestones(shareToken)
 api.fundPublicDeal(shareToken, { wallet_url, wallet_key, milestone_id? })  // POST /public/deals/:shareToken/fund
-api.generateInvoice({ wallet_url, wallet_key, amount_sats, memo? }, token)  // POST /deals/wallet/invoice
+api.generateInvoice({ wallet_url, wallet_key, amount_sats, memo?, expiry_seconds? }, token)  // POST /deals/wallet/invoice
 api.publicApproveDeal(shareToken)
 api.publicResetPayout(shareToken, milestoneId?)
 api.publicAcceptNextMilestone(shareToken, milestoneId)
@@ -126,7 +126,7 @@ All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
 - `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
 - `fundPublicDeal(shareToken, data)` → `POST /public/deals/:shareToken/fund` (no auth; `data` = `{wallet_url, wallet_key, milestone_id?}`, wallet key is transient)
-- `generateInvoice(data, token)` → `POST /deals/wallet/invoice` (protected; `data` = `{wallet_url, wallet_key, amount_sats, memo?}`, used for the freelancer payout invoice)
+- `generateInvoice(data, token)` → `POST /deals/wallet/invoice` (protected; `data` = `{wallet_url, wallet_key, amount_sats, memo?, expiry_seconds?}`, used for the freelancer payout invoice with expiry derived from milestone work dates)
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
 - `publicResetPayout(shareToken, milestoneId?)` → `POST /public/deals/:shareToken/payout/reset` (no auth)
 - `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)

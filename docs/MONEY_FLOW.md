@@ -105,9 +105,9 @@ Ganji. This is not built yet and must not weaken the accepted-hold requirement.
 
 ## Payout Invoice Helper (`POST /deals/wallet/invoice`)
 
-Protected. Body: `{wallet_url, wallet_key, amount_sats, memo?}` (`memo` defaults
+Protected. Body: `{wallet_url, wallet_key, amount_sats, memo?, expiry_seconds?}` (`memo` defaults
 to `Ganji payout`). Same transient-key and URL rules as public funding. Creates
-a regular invoice through the linked wallet; it does not move escrow funds.
+a regular invoice through the linked wallet; it does not move escrow funds. The frontend derives `expiry_seconds` from the active milestone's explicit work due date so payout invoices do not expire on a fixed 30-day schedule.
 
 ## Paths That Move Money
 

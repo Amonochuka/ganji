@@ -239,6 +239,15 @@ export default function DealDetailPage() {
       setPayeeWalletError("No open milestone amount is available for this invoice");
       return;
     }
+    let expirySeconds: number | undefined;
+    if (openMilestone?.work_due_at) {
+      const expiresAt = Date.parse(openMilestone.work_due_at);
+      expirySeconds = Math.floor((expiresAt - Date.now()) / 1000);
+      if (!Number.isFinite(expirySeconds) || expirySeconds <= 0) {
+        setPayeeWalletError("This milestone's work due date has passed; set a future due date before generating an invoice");
+        return;
+      }
+    }
     setIsGeneratingPayeeInvoice(true);
     setPayeeWalletError(null);
     try {
@@ -248,6 +257,7 @@ export default function DealDetailPage() {
           wallet_key: payeeWalletKey.trim(),
           amount_sats: amountSats,
           memo: deal ? `Ganji payout: ${deal.title}` : "Ganji payout",
+          ...(expirySeconds ? { expiry_seconds: expirySeconds } : {}),
         },
         tokens!.access_token,
       );
@@ -1091,13 +1101,26 @@ export default function DealDetailPage() {
                               {new Date(ms.completed_at).toLocaleString()}
                             </p>
                           )}
-                          <p className="mt-1 text-xs text-ink-500">
-                            Delivery estimate: {ms.delivery_days} days from
-                            funding
-                            {ms.due_at
-                              ? ` · Due ${new Date(ms.due_at).toLocaleDateString()}`
-                              : ""}
-                          </p>
+                          {ms.work_start_at || ms.work_due_at ? (
+                            <p className="mt-1 text-xs text-ink-500">
+                              Work window:{" "}
+                              {ms.work_start_at
+                                ? new Date(ms.work_start_at).toLocaleDateString()
+                                : "—"}{" "}
+                              –{" "}
+                              {ms.work_due_at
+                                ? new Date(ms.work_due_at).toLocaleDateString()
+                                : "—"}
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-xs text-ink-500">
+                              Delivery estimate: {ms.delivery_days} days from
+                              funding
+                              {ms.due_at
+                                ? ` · Due ${new Date(ms.due_at).toLocaleDateString()}`
+                                : ""}
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>

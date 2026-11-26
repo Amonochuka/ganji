@@ -62,10 +62,13 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 
 	var total int64
 	for i, mi := range milestones {
-		if mi.DeliveryDays == 0 {
+		if err := normalizeMilestoneSchedule(&milestones[i]); err != nil {
+			return err
+		}
+		if milestones[i].DeliveryDays == 0 {
 			milestones[i].DeliveryDays = 7
-		} else if mi.DeliveryDays < 1 || mi.DeliveryDays > 3650 {
-			return fmt.Errorf("%w: milestone delivery days must be between 1 and 3650", ErrInvalidInput)
+		} else if milestones[i].DeliveryDays < 1 || milestones[i].DeliveryDays > maxMilestoneScheduleDays {
+			return fmt.Errorf("%w: milestone delivery days must be between 1 and %d", ErrInvalidInput, maxMilestoneScheduleDays)
 		}
 		milestones[i].Title = strings.TrimSpace(mi.Title)
 		if milestones[i].Title == "" || mi.AmountSats <= 0 {
@@ -113,6 +116,8 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		Title:        milestones[0].Title,
 		AmountSats:   milestones[0].AmountSats,
 		DeliveryDays: milestones[0].DeliveryDays,
+		WorkStartAt:  nullTimeFromPtr(milestones[0].WorkStartAt),
+		WorkDueAt:    nullTimeFromPtr(milestones[0].WorkDueAt),
 		Order:        1,
 		Status:       MilestonePending,
 	}
@@ -141,7 +146,7 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	}
 
 	for i, mi := range milestones {
-		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays, Order: i + 1, Status: MilestonePending}
+		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays, WorkStartAt: nullTimeFromPtr(mi.WorkStartAt), WorkDueAt: nullTimeFromPtr(mi.WorkDueAt), Order: i + 1, Status: MilestonePending}
 		if i == 0 {
 			*m = *first
 			m.DealID = deal.ID

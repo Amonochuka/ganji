@@ -14,7 +14,7 @@
 | **Login** | `/login` | Email/password auth, preserves `next` and `role`, redirects to dashboard or return path | `POST /auth/login` |
 | **Signup** | `/signup` | Registration with validation, preserves `next` and `role`, redirects to dashboard or return path | `POST /auth/signup` |
 | **Dashboard** | `/dashboard` | Role-aware deal list (`?role=client|freelancer`) with status cards, empty state, and freelancer-only create CTA | `GET /deals` |
-| **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title + sats each); generate the freelancer payout invoice from a linked wallet | `POST /deals` (with `milestones[]`), `POST /deals/wallet/invoice` |
+| **Create Deal** | `/deals/new` | Form: title, amount (sats), platform dropdown, client email, payee invoice (lnbc); milestone mode: add milestones (title, sats, work start/due dates); generated payout invoices expire at the first milestone's due date | `POST /deals` (with `milestones[]`), `POST /deals/wallet/invoice` |
 | **Deal Detail** | `/deals/[id]` | Role-aware deal view: freelancer gets funding/submission/invoice/share-link controls; client gets approve/reject/reset/exit controls; deliverables, milestones, and stage-specific payment/escrow status remain visible | `GET /deals/:id`, `GET /deals/:id/payment`, submit/share/approve/exit, public client approve/reject/reset, artifact and milestone endpoints |
 | **Public Deal** | `frontend/src/app/public/deals/[shareToken]/page.tsx` | Client-facing view: fund buttons on the deal and each milestone using a linked wallet, invoice to pay, approve/reset/accept/reject/exit actions wired to public endpoints; `locked` shown as "Funds Held" | `GET /public/deals/:shareToken`, `POST /public/deals/:shareToken/fund`, `POST /public/deals/:shareToken/approve`, `POST /public/deals/:shareToken/payout/reset`, public milestone actions |
 
@@ -61,7 +61,7 @@
 - `getPublicDeal(shareToken)` → `GET /public/deals/:shareToken`
 - `getPublicMilestones(shareToken)` → `GET /public/deals/:shareToken/milestones`
 - `fundPublicDeal(shareToken, data)` → `POST /public/deals/:shareToken/fund` (no auth; `data` = `{wallet_url, wallet_key, milestone_id?}`)
-- `generateInvoice(data, token)` → `POST /deals/wallet/invoice` (protected; `data` = `{wallet_url, wallet_key, amount_sats, memo?}`)
+- `generateInvoice(data, token)` → `POST /deals/wallet/invoice` (protected; `data` = `{wallet_url, wallet_key, amount_sats, memo?, expiry_seconds?}`)
 - `publicApproveDeal(shareToken)` → `POST /public/deals/:shareToken/approve` (no auth)
 - `publicResetPayout(shareToken, milestoneId?)` → `POST /public/deals/:shareToken/payout/reset` (no auth)
 - `publicAcceptNextMilestone(shareToken, milestoneId)` → `POST /public/deals/:shareToken/milestones/:milestoneID/accept-next` (no auth)

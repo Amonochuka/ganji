@@ -9,7 +9,7 @@ import (
 )
 
 const milestoneColumns = `
-		id, deal_id, title, amount_sats, "order", status, completed_at, created_at, delivery_days, funded_at,
+		id, deal_id, title, amount_sats, "order", status, completed_at, created_at, delivery_days, work_start_at, work_due_at, funded_at,
 		preimage_hash, preimage, payee_invoice, invoice, checking_id, payout_checking_id, payout_attempted_at
 	`
 
@@ -24,7 +24,7 @@ func (r *Repository) scanMilestone(row interface{ Scan(dest ...any) error }) (*M
 	)
 	m := &Milestone{}
 	if err := row.Scan(
-		&m.ID, &m.DealID, &m.Title, &m.AmountSats, &m.Order, &m.Status, &m.CompletedAt, &m.CreatedAt, &m.DeliveryDays, &m.FundedAt,
+		&m.ID, &m.DealID, &m.Title, &m.AmountSats, &m.Order, &m.Status, &m.CompletedAt, &m.CreatedAt, &m.DeliveryDays, &m.WorkStartAt, &m.WorkDueAt, &m.FundedAt,
 		&preimageHash, &preimage, &payeeInvoice, &invoice, &checkingID, &payoutID, &m.PayoutAttemptedAt,
 	); err != nil {
 		return nil, err
@@ -197,8 +197,8 @@ func (r *Repository) UpdateDealStatusFromMilestones(ctx context.Context, dealID 
 // CreateMilestone inserts a new milestone for a deal.
 func (r *Repository) CreateMilestone(ctx context.Context, milestone *Milestone) error {
 	query := `
-		INSERT INTO milestones (deal_id, title, amount_sats, "order", status, delivery_days)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO milestones (deal_id, title, amount_sats, "order", status, delivery_days, work_start_at, work_due_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at;`
 	err := r.q.QueryRowContext(ctx, query,
 		milestone.DealID,
@@ -207,6 +207,8 @@ func (r *Repository) CreateMilestone(ctx context.Context, milestone *Milestone) 
 		milestone.Order,
 		milestone.Status,
 		milestone.DeliveryDays,
+		milestone.WorkStartAt,
+		milestone.WorkDueAt,
 	).Scan(&milestone.ID, &milestone.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("repository: create milestone: %w", err)

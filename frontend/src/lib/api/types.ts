@@ -66,7 +66,13 @@ export type CreateDealRequest = {
   source_platform: string;
   client_email: string;
   payee_invoice: string;
-  milestones?: { title: string; amount_sats: number; delivery_days: number }[];
+  milestones?: {
+    title: string;
+    amount_sats: number;
+    delivery_days: number;
+    work_start_at?: string;
+    work_due_at?: string;
+  }[];
 };
 
 export type CreateDealResponse = {
@@ -128,6 +134,7 @@ export type GenerateInvoiceRequest = {
   wallet_key: string;
   amount_sats: number;
   memo?: string;
+  expiry_seconds?: number;
 };
 
 export type GenerateInvoiceResponse = {
@@ -167,6 +174,8 @@ export type MilestoneView = {
   payee_invoice?: string;
   completed_at: string | null;
   delivery_days: number;
+  work_start_at?: string | null;
+  work_due_at?: string | null;
   due_at?: string | null;
   created_at: string;
   payout_reset_available?: boolean;

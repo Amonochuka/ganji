@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // GetPublicDeal returns a safe, public view of the deal for the shareable
@@ -37,26 +36,10 @@ func (s *Service) GetPublicDeal(ctx context.Context, shareToken string) (*Public
 	activeStatus := deal.Status
 	payoutResetAvailable := false
 	for i := range ms {
-		var completed *string
-		if ms[i].CompletedAt.Valid {
-			s := ms[i].CompletedAt.Time.Format(time.RFC3339)
-			completed = &s
-		}
-		resetAvailable := canResetMilestonePayoutAttempt(&ms[i])
-		views = append(views, MilestoneView{
-			ID:                   ms[i].ID,
-			Title:                ms[i].Title,
-			AmountSats:           ms[i].AmountSats,
-			Order:                ms[i].Order,
-			Status:               string(ms[i].Status),
-			Invoice:              ms[i].Invoice,
-			CompletedAt:          completed,
-			DeliveryDays:         ms[i].DeliveryDays,
-			DueAt:                milestoneViewFrom(ms[i]).DueAt,
-			CreatedAt:            ms[i].CreatedAt,
-			PayoutResetAvailable: resetAvailable,
-		})
-		payoutResetAvailable = payoutResetAvailable || resetAvailable
+		view := milestoneViewFrom(ms[i])
+		view.PayoutResetAvailable = canResetMilestonePayoutAttempt(&ms[i])
+		views = append(views, view)
+		payoutResetAvailable = payoutResetAvailable || view.PayoutResetAvailable
 		if activeInvoice == "" && (ms[i].Status == MilestoneAwaitingPayment || ms[i].Status == MilestonePending || ms[i].Status == MilestoneFunded || ms[i].Status == MilestoneInProgress) && ms[i].Invoice != "" {
 			activeInvoice = ms[i].Invoice
 		}

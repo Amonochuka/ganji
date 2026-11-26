@@ -24,6 +24,7 @@ type CreateInvoiceRequest struct {
 	Amount int64  `json:"amount"`
 	Memo   string `json:"memo"`
 	Unit   string `json:"unit,omitempty"`
+	Expiry int64  `json:"expiry,omitempty"`
 }
 
 // SettleHoldRequest is the body for POST /api/v1/payments/settle. LNbits

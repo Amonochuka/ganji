@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,16 +15,19 @@ type updateDealStatusRequest struct {
 }
 
 type milestoneInput struct {
-	Title        string `json:"title" binding:"required"`
-	AmountSats   int64  `json:"amount_sats" binding:"required"`
-	DeliveryDays int    `json:"delivery_days"`
+	Title        string     `json:"title" binding:"required"`
+	AmountSats   int64      `json:"amount_sats" binding:"required"`
+	DeliveryDays int        `json:"delivery_days"`
+	WorkStartAt  *time.Time `json:"work_start_at,omitempty"`
+	WorkDueAt    *time.Time `json:"work_due_at,omitempty"`
 }
 
 type generateInvoiceRequest struct {
-	WalletURL  string `json:"wallet_url" binding:"required"`
-	WalletKey  string `json:"wallet_key" binding:"required"`
-	AmountSats int64  `json:"amount_sats" binding:"required"`
-	Memo       string `json:"memo,omitempty"`
+	WalletURL     string `json:"wallet_url" binding:"required"`
+	WalletKey     string `json:"wallet_key" binding:"required"`
+	AmountSats    int64  `json:"amount_sats" binding:"required"`
+	Memo          string `json:"memo,omitempty"`
+	ExpirySeconds int64  `json:"expiry_seconds,omitempty"`
 }
 
 type createDealRequest struct {
@@ -63,7 +67,7 @@ func (h *Handler) CreateDeal(c *gin.Context) {
 
 	var ms []MilestoneInput
 	for _, mi := range req.Milestones {
-		ms = append(ms, MilestoneInput{Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays})
+		ms = append(ms, MilestoneInput{Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays, WorkStartAt: mi.WorkStartAt, WorkDueAt: mi.WorkDueAt})
 	}
 
 	if err := h.service.CreateDealWithMilestones(c.Request.Context(), deal, ms); err != nil {
@@ -355,7 +359,7 @@ func (h *Handler) GenerateInvoice(c *gin.Context) {
 		return
 	}
 
-	invoice, err := h.service.GenerateInvoice(c.Request.Context(), req.WalletURL, req.WalletKey, req.AmountSats, req.Memo)
+	invoice, err := h.service.GenerateInvoiceWithExpiry(c.Request.Context(), req.WalletURL, req.WalletKey, req.AmountSats, req.Memo, req.ExpirySeconds)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidInput):

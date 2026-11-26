@@ -259,6 +259,46 @@ func TestFundMilestoneUsesPerMilestoneExpiry(t *testing.T) {
 	}
 }
 
+func TestWorkDatesDriveMilestoneScheduleAndHoldExpiry(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+
+	start := time.Now().UTC().AddDate(0, 0, 1).Truncate(24 * time.Hour)
+	due := start.AddDate(0, 0, 4).Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+	deal := &Deal{ID: "deal-dates", FreelancerID: "f1", ClientEmail: "c@example.com", Title: "Job", SourcePlatform: "x", PayeeInvoice: "lnbc1000payee"}
+	repo.deals[deal.ID] = deal
+	in := MilestoneInput{Title: "M1", AmountSats: 1000, DeliveryDays: 999, WorkStartAt: &start, WorkDueAt: &due}
+	before := time.Now().UTC()
+	if err := service.CreateDealWithMilestones(context.Background(), deal, []MilestoneInput{in}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	mls, _ := repo.GetMilestonesByDeal(context.Background(), deal.ID)
+	if !mls[0].WorkStartAt.Valid || !mls[0].WorkDueAt.Valid {
+		t.Fatalf("expected work dates to persist, got %+v", mls[0])
+	}
+	if mls[0].DeliveryDays != 5 {
+		t.Fatalf("expected 5 delivery days from work dates, got %d", mls[0].DeliveryDays)
+	}
+	want := int64(due.Sub(before).Seconds())
+	if ln.lastHoldExpiry < want-10 || ln.lastHoldExpiry > want+10 {
+		t.Fatalf("expected hold expiry near due date (%d), got %d", want, ln.lastHoldExpiry)
+	}
+}
+
+func TestMilestoneHoldExpiryPrefersExplicitDueDate(t *testing.T) {
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	due := now.Add(72 * time.Hour)
+	m := Milestone{DeliveryDays: 999, WorkDueAt: sql.NullTime{Time: due, Valid: true}}
+	got, err := milestoneHoldExpirySeconds(&m, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("milestoneHoldExpirySeconds: %v", err)
+	}
+	if got != int64(71*time.Hour/time.Second) {
+		t.Fatalf("expected expiry until explicit due date, got %d", got)
+	}
+}
+
 func TestCreateDealWithMilestonesDoesNotPersistOnHoldFailure(t *testing.T) {
 	repo := newFakeDealRepo()
 	ln := newMilestoneLN(t)
