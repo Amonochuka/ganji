@@ -59,18 +59,10 @@ export function MilestoneRow({
       {ms.completed_at && <p className="mt-1 text-xs text-ink-500 font-mono">Completed: {new Date(ms.completed_at).toLocaleString()}</p>}
       {needsFunding && (
         <div className="mt-3 p-3 rounded border border-gold-500/30 bg-gold-500/5">
-          <p className="text-xs text-ink-400 mb-2">Fund this milestone (sequential hold invoice):</p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              readOnly
-              value={ms.invoice || ""}
-              className="flex-1 rounded border border-vault-border bg-vault-bg px-2 py-1 text-xs font-mono text-ink-400"
-            />
-            <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(ms.invoice || "")}>
-              Copy
-            </Button>
-          </div>
+          <p className="text-xs text-ink-400 mb-2">Sequential hold invoice is ready for this milestone.</p>
+          <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(ms.invoice || "")}>
+            Copy invoice
+          </Button>
           <Button
             size="sm"
             className="mt-2 w-full"

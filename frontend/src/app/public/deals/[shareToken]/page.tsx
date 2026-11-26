@@ -302,10 +302,17 @@ export default function PublicDealPage() {
               <div className="space-y-4">
                 <div className="p-4 rounded-lg bg-vault-raised border border-vault-border">
                   <p className="text-xs text-ink-500 uppercase tracking-wide mb-2">Lightning Invoice (current escrow)</p>
-                  <div className="flex gap-2">
-                    <input type="text" readOnly value={deal.invoice} className="flex-1 rounded-lg border border-vault-border bg-vault-bg px-3 py-2 text-xs font-mono text-ink-400" />
-                    <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(deal.invoice)}>Copy</Button>
-                  </div>
+                  <p className="text-sm text-ink-300 mb-3">
+                    The invoice is ready. Copy it to pay from any Lightning wallet, or use the linked-wallet funding button below.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigator.clipboard.writeText(deal.invoice)}
+                    disabled={!deal.invoice}
+                  >
+                    Copy invoice
+                  </Button>
                   {!hasMilestones && deal.status === "awaiting_payment" && (
                     <Button className="mt-3 w-full" onClick={() => openFundDialog(undefined, "this deal")} isLoading={actionLoading === "fund"} disabled={!!actionLoading}>
                       Fund from linked wallet
