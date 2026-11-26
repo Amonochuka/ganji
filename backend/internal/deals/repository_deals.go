@@ -273,6 +273,15 @@ func (r *Repository) UpdateMilestonePayeeInvoices(ctx context.Context, dealID, p
 	return nil
 }
 
+func (r *Repository) UpdateMilestonePayeeInvoice(ctx context.Context, milestoneID, payeeInvoice string) error {
+	query := `UPDATE milestones SET payee_invoice = $1 WHERE id = $2;`
+
+	if _, err := r.q.ExecContext(ctx, query, payeeInvoice, milestoneID); err != nil {
+		return fmt.Errorf("repository: update milestone payee invoice: %w", err)
+	}
+	return nil
+}
+
 // UpdateShareToken replaces a deal's public share-link token. Used by the
 // freelancer's "regenerate link" endpoint: the old token stops resolving
 // immediately, so a leaked link can be revoked. Empty token is rejected by

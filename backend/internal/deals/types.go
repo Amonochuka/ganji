@@ -109,6 +109,7 @@ type MilestoneInput struct {
 	Title        string     `json:"title"`
 	AmountSats   int64      `json:"amount_sats"`
 	DeliveryDays int        `json:"delivery_days"`
+	PayeeInvoice string     `json:"payee_invoice,omitempty"`
 	WorkStartAt  *time.Time `json:"work_start_at,omitempty"`
 	WorkDueAt    *time.Time `json:"work_due_at,omitempty"`
 }

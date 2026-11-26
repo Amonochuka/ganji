@@ -820,7 +820,7 @@ export default function DealDetailPage() {
                     <div className="mt-5 rounded-lg border border-vault-border bg-vault-raised p-4">
                       <h3 className="font-medium text-ink-100 mb-2">Replace payout invoice</h3>
                       <p className="text-xs text-ink-400 mb-3">
-                        Use this if a payout invoice expired. Start by pasting an invoice, use Retry Current Invoice to load the stored one, or use Generate Invoice to create a fresh one from LNbits. The client is not charged again; already-held escrow funds are paid to this invoice when approved/reconciled.
+                        Use this if a payout invoice expired or belongs to a different milestone amount. Start by pasting an invoice, use Retry Current Invoice to load the stored one, or use Generate Invoice to create a fresh exact-amount invoice for the active milestone. The client is not charged again; already-held escrow funds are paid to this invoice when approved/reconciled.
                       </p>
                       <textarea
                         value={payeeInvoiceInput}

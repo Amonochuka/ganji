@@ -11,7 +11,7 @@ import { api, type CreateDealRequest } from "@/lib/api/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatCurrency } from "@/lib/utils/format";
 
-type MilestoneDraft = { title: string; amount_sats: string; work_start_date: string; work_due_date: string };
+type MilestoneDraft = { title: string; amount_sats: string; payee_invoice?: string; work_start_date: string; work_due_date: string };
 
 function dateInputOffset(days: number) {
   const date = new Date();
@@ -85,7 +85,12 @@ export default function CreateDealPage() {
   }, 0);
 
   function updateMilestone(i: number, patch: Partial<MilestoneDraft>) {
-    setMilestones((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
+    setMilestones((prev) => prev.map((m, idx) => {
+      if (idx !== i) return m;
+      const next = { ...m, ...patch };
+      if (patch.amount_sats !== undefined && patch.amount_sats !== m.amount_sats) next.payee_invoice = undefined;
+      return next;
+    }));
   }
   function addMilestone() {
     setMilestones((prev) => [...prev, { title: `Milestone ${prev.length + 1}`, amount_sats: "", work_start_date: dateInputOffset(0), work_due_date: dateInputOffset(7) }]);
@@ -111,39 +116,58 @@ export default function CreateDealPage() {
   async function handleGenerateInvoice() {
     setError(null);
     setInvoiceNotice(null);
-    const amount = milestoneMode ? milestonesTotal : /^\d+$/.test(amountSats.trim()) ? parseInt(amountSats, 10) : 0;
-    if (amount <= 0) {
-      setError("Enter a positive amount before generating an invoice");
-      return;
-    }
     if (!walletURL.trim() || !walletKey.trim()) {
       setError("Enter your wallet URL and invoice key");
       return;
     }
-    const firstDueDate = milestoneMode ? milestones[0]?.work_due_date : "";
-    let expirySeconds: number | undefined;
-    if (firstDueDate) {
-      expirySeconds = invoiceExpirySeconds(firstDueDate);
-      if (expirySeconds <= 0) {
-        setError("M1 due date must be in the future before generating an invoice");
+
+    const targets = milestoneMode
+      ? milestones.map((m, i) => ({
+          amount: /^\d+$/.test(m.amount_sats.trim()) ? parseInt(m.amount_sats, 10) : 0,
+          dueDate: m.work_due_date,
+          memo: `${title.trim() || "Ganji payout"} — M${i + 1}: ${m.title.trim() || `Milestone ${i + 1}`}`,
+          label: `M${i + 1}`,
+        }))
+      : [{
+          amount: /^\d+$/.test(amountSats.trim()) ? parseInt(amountSats, 10) : 0,
+          dueDate: dateInputOffset(7),
+          memo: title.trim() || "Ganji payout",
+          label: "the deal",
+        }];
+
+    for (const target of targets) {
+      if (target.amount <= 0) {
+        setError(`Enter a positive amount for ${target.label} before generating an invoice`);
+        return;
+      }
+      if (invoiceExpirySeconds(target.dueDate) <= 0) {
+        setError(`The due date for ${target.label} must be in the future before generating an invoice`);
         return;
       }
     }
+
     setIsGeneratingInvoice(true);
     try {
-      const res = await api.generateInvoice(
-        {
-          wallet_url: walletURL.trim(),
-          wallet_key: walletKey.trim(),
-          amount_sats: amount,
-          memo: title.trim() || "Ganji payout",
-          ...(expirySeconds ? { expiry_seconds: expirySeconds } : {}),
-        },
-        tokens!.access_token
-      );
-      setPayeeInvoice(res.invoice.bolt11);
+      const invoices: string[] = [];
+      for (const target of targets) {
+        const res = await api.generateInvoice(
+          {
+            wallet_url: walletURL.trim(),
+            wallet_key: walletKey.trim(),
+            amount_sats: target.amount,
+            memo: target.memo,
+            expiry_seconds: invoiceExpirySeconds(target.dueDate),
+          },
+          tokens!.access_token
+        );
+        invoices.push(res.invoice.bolt11);
+      }
+      if (milestoneMode) {
+        setMilestones((prev) => prev.map((m, i) => ({ ...m, payee_invoice: invoices[i] })));
+      }
+      setPayeeInvoice(invoices[0]);
       closeWalletDialog();
-      setInvoiceNotice("Payout invoice generated and filled in below.");
+      setInvoiceNotice(milestoneMode ? `Generated payout invoices for all ${invoices.length} milestones.` : "Payout invoice generated and filled in below.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate invoice. Try again.");
     } finally {
@@ -160,29 +184,30 @@ export default function CreateDealPage() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())) return setError("Enter a valid client email");
     if (!payeeInvoice.trim().startsWith("lnbc")) return setError("Payee invoice must be a valid Lightning invoice (starts with lnbc)");
 
-    let amount = 0;
-    let msPayload: { title: string; amount_sats: number; delivery_days: number; work_start_at: string; work_due_at: string }[] | undefined;
-    if (milestoneMode) {
-      const parsed = milestones.map((m, idx) => {
-        const days = scheduleDays(m.work_start_date, m.work_due_date);
-        return {
-          title: m.title.trim() || `Milestone ${idx + 1}`,
-          amount_sats: /^\d+$/.test(m.amount_sats.trim()) ? parseInt(m.amount_sats, 10) : 0,
-          delivery_days: days,
-          work_start_at: `${m.work_start_date}T00:00:00.000Z`,
-          work_due_at: `${m.work_due_date}T23:59:59.000Z`,
-        };
-      });
-      if (parsed.length === 0) return setError("Add at least one milestone");
-      if (parsed.some((m) => !m.title || m.amount_sats <= 0)) return setError("Each milestone needs a title and positive sats amount");
-      if (parsed.some((m) => m.delivery_days < 1 || m.delivery_days > 3650)) return setError("Each milestone needs a start date and a later due date within 3650 days");
-      if (milestones.some((m) => invoiceExpirySeconds(m.work_due_date) <= 0)) return setError("Every milestone due date must be in the future");
-      msPayload = parsed;
-      amount = parsed.reduce((s, m) => s + m.amount_sats, 0);
-    } else {
-      if (!/^\d+$/.test(amountSats.trim()) || parseInt(amountSats, 10) <= 0) return setError("Amount must be a positive whole number of satoshis");
-      amount = parseInt(amountSats, 10);
-    }
+    const draftMilestones: MilestoneDraft[] = milestoneMode
+      ? milestones
+      : [{ title: title.trim(), amount_sats: amountSats, payee_invoice: payeeInvoice, work_start_date: dateInputOffset(0), work_due_date: dateInputOffset(7) }];
+    const parsed = draftMilestones.map((m, idx) => {
+      const days = scheduleDays(m.work_start_date, m.work_due_date);
+      return {
+        title: m.title.trim() || `Milestone ${idx + 1}`,
+        amount_sats: /^\d+$/.test(m.amount_sats.trim()) ? parseInt(m.amount_sats, 10) : 0,
+        delivery_days: days,
+        payee_invoice: (m.payee_invoice || payeeInvoice).trim(),
+        work_start_at: `${m.work_start_date}T00:00:00.000Z`,
+        work_due_at: `${m.work_due_date}T23:59:59.000Z`,
+      };
+    });
+    if (parsed.length === 0) return setError("Add at least one milestone");
+    if (parsed.some((m) => !m.title || m.amount_sats <= 0)) return setError("Each milestone needs a title and positive sats amount");
+    if (parsed.some((m) => m.delivery_days < 1 || m.delivery_days > 3650)) return setError("Each milestone needs a start date and a later due date within 3650 days");
+    if (draftMilestones.some((m) => invoiceExpirySeconds(m.work_due_date) <= 0)) return setError("Every milestone due date must be in the future");
+    const sameAmount = parsed.every((m) => m.amount_sats === parsed[0].amount_sats);
+    if (!sameAmount && parsed.some((m) => !m.payee_invoice)) return setError("Each milestone needs its own payout invoice. Use Generate payout invoices for all milestones.");
+
+    const amount = parsed.reduce((sum, m) => sum + m.amount_sats, 0);
+    const effectivePayeeInvoice = parsed[0].payee_invoice || payeeInvoice.trim();
+    const msPayload = parsed.map((m) => ({ ...m, payee_invoice: m.payee_invoice || effectivePayeeInvoice }));
 
     setIsSubmitting(true);
     try {
@@ -191,8 +216,8 @@ export default function CreateDealPage() {
         amount_sats: amount,
         source_platform: sourcePlatform,
         client_email: clientEmail.trim().toLowerCase(),
-        payee_invoice: payeeInvoice.trim(),
-        ...(msPayload ? { milestones: msPayload } : {}),
+        payee_invoice: effectivePayeeInvoice,
+        milestones: msPayload,
       };
       const res = await api.createDeal(data, tokens!.access_token);
       router.push(`/deals/${res.deal.id}`);
@@ -232,7 +257,7 @@ export default function CreateDealPage() {
           <div className="mb-8 text-center">
             <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-ink-500 hover:text-ink-300 mb-6 block text-left">← Back to Dashboard</Link>
             <h1 className="font-display text-3xl font-semibold text-ink-100 mb-2">Create New Deal</h1>
-            <p className="text-ink-500">Set up Lightning escrow. A one-step deal is shown as one final milestone; enable milestones for sequential holds (M1 funded/released, then M2).</p>
+            <p className="text-ink-500">Set up Lightning escrow. Every deal gets a dated milestone; enable splitting for sequential holds (M1 funded/released, then M2).</p>
           </div>
 
           <div className="vault-card p-6 md:p-8 vault-seam">
@@ -271,6 +296,7 @@ export default function CreateDealPage() {
                         <div className="md:col-span-2">
                           <Button type="button" variant="ghost" size="sm" onClick={() => removeMilestone(i)} disabled={milestones.length <= 1}>Remove</Button>
                         </div>
+                        {m.payee_invoice && <p className="md:col-span-12 text-xs text-green-400">Payout invoice ready for M{i + 1}.</p>}
                       </div>
                     ))}
                     <p className="text-xs text-ink-500">Freelancer-set work dates define each milestone window. Escrow hold expiry and generated payout-invoice expiry follow the due date.</p>
@@ -290,16 +316,16 @@ export default function CreateDealPage() {
               <Input label="Client Email" type="email" name="client_email" autoComplete="email" required value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="client@company.com" />
 
               <div>
-                <label className="block text-sm font-medium text-ink-300 mb-1.5">Your Payee Invoice (Lightning)</label>
+                <label className="block text-sm font-medium text-ink-300 mb-1.5">{milestoneMode ? "Your Payee Invoice (Lightning, M1 / fallback)" : "Your Payee Invoice (Lightning)"}</label>
                 <textarea name="payee_invoice" required value={payeeInvoice} onChange={(e) => setPayeeInvoice(e.target.value)} placeholder="lnbc500000u1p3... (your Lightning invoice for receiving payment)" rows={3} className="w-full rounded-lg border border-vault-border bg-vault-raised px-4 py-2.5 text-sm text-ink-100 placeholder-ink-500 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/30 font-mono text-xs resize-none" />
-                <p className="mt-1.5 text-xs text-ink-500">Generate a receive invoice from your Lightning wallet (Zap, Phoenix, Breez, etc.)</p>
+                <p className="mt-1.5 text-xs text-ink-500">{milestoneMode ? "A pasted invoice is only valid when every milestone has the same amount. Otherwise, generate one exact-amount invoice per milestone below." : "Generate a receive invoice from your Lightning wallet (Zap, Phoenix, Breez, etc.)"}</p>
               </div>
 
               <div className="rounded-lg border border-vault-border p-4 space-y-3">
                 <p className="text-sm font-medium text-ink-200">Generate payout invoice with LNbits</p>
-                <p className="text-xs text-ink-500">Link your wallet when you are ready; Ganji creates the Lightning invoice and fills the field below.</p>
+                <p className="text-xs text-ink-500">Link your wallet when you are ready; Ganji creates one exact-amount invoice {milestoneMode ? "for every milestone" : "for the deal"} and fills the fields below.</p>
                 <Button type="button" variant="outline" size="sm" onClick={openWalletDialog} disabled={isSubmitting}>
-                  Generate payout invoice
+                  {milestoneMode ? "Generate payout invoices" : "Generate payout invoice"}
                 </Button>
                 {invoiceNotice && <p className="text-xs text-green-400">{invoiceNotice}</p>}
               </div>
@@ -308,7 +334,7 @@ export default function CreateDealPage() {
             </form>
           </div>
 
-          <p className="mt-6 text-center text-xs text-ink-700">Single-step deals use one hold invoice and appear as one final milestone. In milestone mode, M1 gets a hold invoice after creation and later milestones are funded sequentially.</p>
+          <p className="mt-6 text-center text-xs text-ink-700">Single-step deals use one dated hold invoice and appear as one final milestone. In milestone mode, M1 gets a hold invoice after creation and later milestones are funded sequentially.</p>
         </div>
       </div>
 

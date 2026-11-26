@@ -71,6 +71,7 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 			return fmt.Errorf("%w: milestone delivery days must be between 1 and %d", ErrInvalidInput, maxMilestoneScheduleDays)
 		}
 		milestones[i].Title = strings.TrimSpace(mi.Title)
+		milestones[i].PayeeInvoice = strings.TrimSpace(mi.PayeeInvoice)
 		if milestones[i].Title == "" || mi.AmountSats <= 0 {
 			return fmt.Errorf("%w: each milestone needs a title and positive amount", ErrInvalidInput)
 		}
@@ -80,25 +81,30 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		total += mi.AmountSats
 	}
 	deal.AmountSats = total
-	// Validate payee invoice decodability; if all milestones share the same amount,
-	// require exact match now. Different-amount milestones are validated at payout time.
-	if len(milestones) > 0 {
-		sameAmount := true
-		for i := 1; i < len(milestones); i++ {
-			if milestones[i].AmountSats != milestones[0].AmountSats {
-				sameAmount = false
-				break
-			}
+
+	sameAmount := true
+	for i := 1; i < len(milestones); i++ {
+		if milestones[i].AmountSats != milestones[0].AmountSats {
+			sameAmount = false
+			break
 		}
-		if sameAmount {
-			if err := s.validatePayeeInvoiceAmount(ctx, deal.PayeeInvoice, milestones[0].AmountSats); err != nil {
-				return err
+	}
+	payeeInvoices := make([]string, len(milestones))
+	for i := range milestones {
+		invoice := milestones[i].PayeeInvoice
+		if invoice == "" {
+			if !sameAmount {
+				return fmt.Errorf("%w: each milestone needs its own payee invoice", ErrInvalidInput)
 			}
-		} else {
-			if err := s.validatePayeeInvoiceDecodable(ctx, deal.PayeeInvoice); err != nil {
-				return err
-			}
+			invoice = deal.PayeeInvoice
 		}
+		if err := s.validatePayeeInvoiceAmount(ctx, invoice, milestones[i].AmountSats); err != nil {
+			return err
+		}
+		payeeInvoices[i] = invoice
+	}
+	if len(payeeInvoices) > 0 {
+		deal.PayeeInvoice = payeeInvoices[0]
 	}
 	// Deal-level escrow fields mirror the active milestone; no single upfront hold.
 	deal.PreimageHash = ""
@@ -116,6 +122,7 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 		Title:        milestones[0].Title,
 		AmountSats:   milestones[0].AmountSats,
 		DeliveryDays: milestones[0].DeliveryDays,
+		PayeeInvoice: payeeInvoices[0],
 		WorkStartAt:  nullTimeFromPtr(milestones[0].WorkStartAt),
 		WorkDueAt:    nullTimeFromPtr(milestones[0].WorkDueAt),
 		Order:        1,
@@ -146,7 +153,7 @@ func (s *Service) CreateDealWithMilestones(ctx context.Context, deal *Deal, mile
 	}
 
 	for i, mi := range milestones {
-		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays, WorkStartAt: nullTimeFromPtr(mi.WorkStartAt), WorkDueAt: nullTimeFromPtr(mi.WorkDueAt), Order: i + 1, Status: MilestonePending}
+		m := &Milestone{DealID: deal.ID, Title: mi.Title, AmountSats: mi.AmountSats, DeliveryDays: mi.DeliveryDays, PayeeInvoice: payeeInvoices[i], WorkStartAt: nullTimeFromPtr(mi.WorkStartAt), WorkDueAt: nullTimeFromPtr(mi.WorkDueAt), Order: i + 1, Status: MilestonePending}
 		if i == 0 {
 			*m = *first
 			m.DealID = deal.ID

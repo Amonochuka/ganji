@@ -323,7 +323,7 @@ The frontend renders the link from `share_token` (e.g. `FRONTEND_URL/public/deal
 
 Create a new deal. Generates a fresh escrow preimage `R`, draws a **hold invoice on `polar-n3-Es`** (`payment_hash = sha256(R)`), and stores the deal. No money moves on creation — the funds stay held on the network until approve/dispute.
 
-With `milestones` (≥1, each `title`, positive `amount_sats`, and either `work_start_at`/`work_due_at` or legacy `delivery_days`) the deal is created in **sequential per-milestone mode**: no single upfront deal hold; `amount_sats` is derived as the sum; M1 is funded immediately (`FundMilestone` → per-milestone hold invoice); later milestones get their hold only after the previous milestone is `released` (paid). Freelancer-set `work_start_at`/`work_due_at` define the work window; `delivery_days` is derived from that window (1–3650 days) and old clients may still send just `delivery_days` (defaults to 7). Each milestone hold invoice expires at the explicit due date, or at `delivery_days * 86400` from hold creation for legacy rows. `due_at` prefers the explicit due date, falling back to `funded_at + delivery_days`. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` is only the fallback for holds without a per-milestone expiry. `deal.Invoice`/`deal.CheckingID` mirror the active (M1) hold for compatibility. Legacy single-hold flow is preserved when `milestones` is empty/omitted.
+With `milestones` (≥1, each `title`, positive `amount_sats`, optional `payee_invoice`, and either `work_start_at`/`work_due_at` or legacy `delivery_days`) the deal is created in **sequential per-milestone mode**: no single upfront deal hold; `amount_sats` is derived as the sum; M1 is funded immediately (`FundMilestone` → per-milestone hold invoice); later milestones get their hold only after the previous milestone is `released` (paid). When all milestone amounts are equal, one deal-level `payee_invoice` may be reused; when amounts differ, every milestone must supply its own exact-amount `payee_invoice` or creation fails with `400`. Freelancer-set `work_start_at`/`work_due_at` define the work window; `delivery_days` is derived from that window (1–3650 days) and old clients may still send just `delivery_days` (defaults to 7). Each milestone hold invoice expires at the explicit due date, or at `delivery_days * 86400` from hold creation for legacy rows. `due_at` prefers the explicit due date, falling back to `funded_at + delivery_days`. `LNBITS_HOLD_INVOICE_EXPIRY_SECONDS` is only the fallback for holds without a per-milestone expiry. `deal.Invoice`/`deal.CheckingID`/`deal.PayeeInvoice` mirror the active (M1) hold and payout destination for compatibility. The frontend sends one dated milestone even for a one-step deal, so every deal has an explicit work window.
 
 **Request (legacy single-hold)**
 ```json
@@ -342,17 +342,19 @@ With `milestones` (≥1, each `title`, positive `amount_sats`, and either `work_
   "title": "Landing page redesign",
   "source_platform": "Telegram",
   "client_email": "client@example.com",
-  "payee_invoice": "lnbc50000n1...",
+  "payee_invoice": "lnbc20000n1...",
   "milestones": [
     {
       "title": "Design",
       "amount_sats": 20000,
+      "payee_invoice": "lnbc20000n1...",
       "work_start_at": "2026-11-26T00:00:00.000Z",
       "work_due_at": "2026-12-03T23:59:59.000Z"
     },
     {
       "title": "Build",
       "amount_sats": 30000,
+      "payee_invoice": "lnbc30000n1...",
       "work_start_at": "2026-12-04T00:00:00.000Z",
       "work_due_at": "2026-12-18T23:59:59.000Z"
     }
@@ -361,7 +363,7 @@ With `milestones` (≥1, each `title`, positive `amount_sats`, and either `work_
 ```
 
 - `client_email` — the client's email (who gets to approve/dispute).
-- `payee_invoice` — the freelancer's Lightning invoice; it's where the settled escrow is forwarded on approve.
+- `payee_invoice` — the freelancer's Lightning invoice; it's where the settled escrow is forwarded on approve. In milestone mode it is reused only when all milestone amounts match; otherwise use each milestone's `payee_invoice`.
 
 **Response `201`**
 ```json
@@ -597,7 +599,7 @@ so the DB never claims a money move the network did not make.
 
 ### `PATCH /deals/:dealID/payee-invoice`
 
-Freelancer replaces the payout destination while the deal is still open. If the original `payee_invoice` expired mid-deal and the approve-time payout leg failed, this unsticks release: re-approving settles (already-settled is idempotent) and forwards the funds to the fresh invoice. Frozen once the deal is `released` or `refunded`.
+Freelancer replaces the payout destination for the **active milestone** while the deal is still open; the invoice amount must match that milestone exactly. If the original `payee_invoice` expired mid-deal and the approve-time payout leg failed, this unsticks release: re-approving settles (already-settled is idempotent) and forwards the funds to the fresh invoice. Later milestones keep their own invoices. Frozen once the deal is `released` or `refunded`.
 
 **Request**
 ```json

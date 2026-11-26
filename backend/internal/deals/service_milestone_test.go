@@ -207,7 +207,7 @@ func TestCreateDealWithMilestonesFundsM1Only(t *testing.T) {
 		PayeeInvoice:   "lnbc5000payee",
 	}
 	repo.deals[deal.ID] = deal
-	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
+	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000, PayeeInvoice: "lnbc2000payee"}, {Title: "Build", AmountSats: 3000, PayeeInvoice: "lnbc3000payee"}}
 	ms[0].DeliveryDays = 5
 	ms[1].DeliveryDays = 12
 	if err := service.CreateDealWithMilestones(context.Background(), deal, ms); err != nil {
@@ -218,6 +218,9 @@ func TestCreateDealWithMilestonesFundsM1Only(t *testing.T) {
 	}
 	if deal.Invoice == "" || deal.CheckingID == "" {
 		t.Fatal("expected deal.Invoice/CheckingID mirrored from M1")
+	}
+	if deal.PayeeInvoice != "lnbc2000payee" {
+		t.Fatalf("expected deal payee invoice mirrored from M1, got %q", deal.PayeeInvoice)
 	}
 	mls, err := repo.GetMilestonesByDeal(context.Background(), deal.ID)
 	if err != nil || len(mls) != 2 {
@@ -232,11 +235,79 @@ func TestCreateDealWithMilestonesFundsM1Only(t *testing.T) {
 	if mls[1].Status != MilestonePending || mls[1].CheckingID != "" {
 		t.Fatalf("M2 must remain unfunded pending, got %+v", mls[1])
 	}
+	if mls[0].PayeeInvoice != "lnbc2000payee" || mls[1].PayeeInvoice != "lnbc3000payee" {
+		t.Fatalf("expected per-milestone payee invoices, got %q and %q", mls[0].PayeeInvoice, mls[1].PayeeInvoice)
+	}
 	if atomic.LoadInt32(&ln.createHoldCount) != 1 {
 		t.Fatalf("expected exactly 1 hold invoice (M1), got %d", atomic.LoadInt32(&ln.createHoldCount))
 	}
 	if ln.lastHoldExpiry != 5*86400 {
 		t.Fatalf("expected M1 hold expiry from delivery_days, got %d", ln.lastHoldExpiry)
+	}
+}
+
+func TestCreateDealWithMilestonesRequiresPerMilestoneInvoicesWhenAmountsDiffer(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+
+	deal := &Deal{
+		FreelancerID:   "freelancer-1",
+		ClientEmail:    "client@example.com",
+		Title:          "Build a site",
+		SourcePlatform: "telegram",
+		PayeeInvoice:   "lnbc5000payee",
+	}
+	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
+
+	err := service.CreateDealWithMilestones(context.Background(), deal, ms)
+	if !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "each milestone needs its own payee invoice") {
+		t.Fatalf("expected per-milestone invoice requirement, got %v", err)
+	}
+	if atomic.LoadInt32(&ln.createHoldCount) != 0 {
+		t.Fatalf("expected no hold invoice before invoice validation, got %d", atomic.LoadInt32(&ln.createHoldCount))
+	}
+}
+
+func TestPublicApproveDealPreparesNextMilestoneFunding(t *testing.T) {
+	repo := newFakeDealRepo()
+	ln := newMilestoneLN(t)
+	service, _ := newMilestoneService(t, repo, ln)
+
+	deal := &Deal{
+		ID:             "deal-public-approve",
+		FreelancerID:   "freelancer-1",
+		ClientEmail:    "client@example.com",
+		ShareToken:     "share-public-approve",
+		Title:          "Build a site",
+		SourcePlatform: "telegram",
+		Status:         StatusWorkSubmitted,
+		PayeeInvoice:   "lnbc1000payee",
+		AmountSats:     2000,
+	}
+	repo.deals[deal.ID] = deal
+	m1 := escrowMilestone(deal.ID, "ms-public-1", 1, MilestoneWorkSubmitted)
+	repo.milestones[m1.ID] = m1
+	m2 := escrowMilestone(deal.ID, "ms-public-2", 2, MilestonePending)
+	m2.CheckingID = ""
+	m2.Invoice = ""
+	m2.Preimage = ""
+	m2.PreimageHash = ""
+	repo.milestones[m2.ID] = m2
+
+	updated, err := service.PublicApproveDeal(context.Background(), deal.ShareToken)
+	if err != nil {
+		t.Fatalf("PublicApproveDeal: %v", err)
+	}
+	if updated == nil || updated.Status != StatusWorkSubmitted {
+		t.Fatalf("expected deal to remain work_submitted with another milestone pending, got %+v", updated)
+	}
+	next := repo.milestones[m2.ID]
+	if next.Status != MilestoneAwaitingPayment || next.CheckingID == "" || next.Invoice == "" {
+		t.Fatalf("expected next milestone prepared for funding, got %+v", next)
+	}
+	if atomic.LoadInt32(&ln.createHoldCount) != 1 {
+		t.Fatalf("expected exactly one new hold for M2, got %d", atomic.LoadInt32(&ln.createHoldCount))
 	}
 }
 
@@ -338,7 +409,7 @@ func TestCreateDealWithMilestonesCancelsFirstHoldOnDBFailure(t *testing.T) {
 		SourcePlatform: "telegram",
 		PayeeInvoice:   "lnbc5000payee",
 	}
-	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000}, {Title: "Build", AmountSats: 3000}}
+	ms := []MilestoneInput{{Title: "Design", AmountSats: 2000, PayeeInvoice: "lnbc2000payee"}, {Title: "Build", AmountSats: 3000, PayeeInvoice: "lnbc3000payee"}}
 
 	if err := service.CreateDealWithMilestones(context.Background(), deal, ms); err == nil {
 		t.Fatal("expected create deal to fail when the DB insert fails after the first hold is created")

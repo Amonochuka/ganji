@@ -70,6 +70,7 @@ export type CreateDealRequest = {
     title: string;
     amount_sats: number;
     delivery_days: number;
+    payee_invoice?: string;
     work_start_at?: string;
     work_due_at?: string;
   }[];

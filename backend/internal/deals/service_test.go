@@ -332,6 +332,15 @@ func (f *fakeDealRepo) UpdateMilestonePayeeInvoices(ctx context.Context, dealID,
 	return nil
 }
 
+func (f *fakeDealRepo) UpdateMilestonePayeeInvoice(ctx context.Context, milestoneID, payeeInvoice string) error {
+	milestone, ok := f.milestones[milestoneID]
+	if !ok {
+		return fmt.Errorf("milestone not found")
+	}
+	milestone.PayeeInvoice = payeeInvoice
+	return nil
+}
+
 func (f *fakeDealRepo) UpdateShareToken(ctx context.Context, dealID, shareToken string) error {
 	deal, ok := f.deals[dealID]
 	if !ok {
@@ -1704,6 +1713,7 @@ func TestUpdatePayeeInvoiceUpdatesOpenMilestones(t *testing.T) {
 	repo := newFakeDealRepo()
 	repo.deals["deal-1"] = &Deal{ID: "deal-1", FreelancerID: "f1", Status: StatusWorkSubmitted, PayeeInvoice: "old-invoice"}
 	repo.milestones["ms-1"] = &Milestone{ID: "ms-1", DealID: "deal-1", Status: MilestoneWorkSubmitted, AmountSats: 889, PayeeInvoice: "old-invoice"}
+	repo.milestones["ms-2"] = &Milestone{ID: "ms-2", DealID: "deal-1", Order: 2, Status: MilestoneAwaitingPayment, AmountSats: 100, PayeeInvoice: "later-invoice"}
 	repo.milestones["ms-done"] = &Milestone{ID: "ms-done", DealID: "deal-1", Status: MilestoneReleased, AmountSats: 889, PayeeInvoice: "paid-invoice"}
 	service := NewService(repo, lnbits.NewClient(lnbits.Config{URL: decode.URL, APIKey: "key"}))
 
@@ -1714,7 +1724,10 @@ func TestUpdatePayeeInvoiceUpdatesOpenMilestones(t *testing.T) {
 		t.Fatalf("deal payee invoice was not updated")
 	}
 	if repo.milestones["ms-1"].PayeeInvoice != "lnbc889" {
-		t.Fatalf("open milestone payee invoice was not updated")
+		t.Fatalf("active milestone payee invoice was not updated")
+	}
+	if repo.milestones["ms-2"].PayeeInvoice != "later-invoice" {
+		t.Fatalf("later milestone payee invoice must not be overwritten with M1's amount")
 	}
 	if repo.milestones["ms-done"].PayeeInvoice != "paid-invoice" {
 		t.Fatalf("released milestone payee invoice must remain unchanged")

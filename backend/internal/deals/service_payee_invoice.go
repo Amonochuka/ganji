@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// UpdatePayeeInvoice lets the freelancer replace the payout destination while
-// the deal is still open. If the original payee invoice expired mid-deal the
-// approve-time payout leg would fail and leave the escrow settled but the
-// deal unreleased; a fresh invoice here unsticks it — re-approving then
-// forwards the funds to the new invoice. Frozen once the deal is released or
-// refunded.
+// UpdatePayeeInvoice lets the freelancer replace the payout destination for the
+// active milestone while the deal is still open. If the original payee invoice
+// expired mid-deal the approve-time payout leg would fail and leave the escrow
+// settled but the deal unreleased; a fresh invoice here unsticks it —
+// re-approving then forwards the funds to the new invoice. Frozen once the deal
+// is released or refunded.
 func (s *Service) UpdatePayeeInvoice(ctx context.Context, userID, dealID, bolt11 string) (*Deal, error) {
 	dealID = strings.TrimSpace(dealID)
 	bolt11 = strings.TrimSpace(bolt11)
@@ -45,20 +45,26 @@ func (s *Service) UpdatePayeeInvoice(ctx context.Context, userID, dealID, bolt11
 	if len(ms) == 0 {
 		return nil, fmt.Errorf("%w: deal has no milestones", ErrInvalidTransition)
 	}
+	var active *Milestone
 	for i := range ms {
 		if ms[i].Status == MilestoneReleased || ms[i].Status == MilestoneRefunded || ms[i].Status == MilestoneExited {
 			continue
 		}
-		if err := s.validatePayeeInvoiceAmount(ctx, bolt11, ms[i].AmountSats); err != nil {
-			return nil, err
-		}
+		active = &ms[i]
+		break
+	}
+	if active == nil {
+		return nil, fmt.Errorf("%w: no open milestone is waiting for a payout invoice", ErrInvalidTransition)
+	}
+	if err := s.validatePayeeInvoiceAmount(ctx, bolt11, active.AmountSats); err != nil {
+		return nil, err
 	}
 
 	if err := s.repo.UpdatePayeeInvoice(ctx, dealID, bolt11); err != nil {
 		return nil, fmt.Errorf("updating payee invoice: %w", err)
 	}
-	if err := s.repo.UpdateMilestonePayeeInvoices(ctx, dealID, bolt11); err != nil {
-		return nil, fmt.Errorf("updating milestone payee invoices: %w", err)
+	if err := s.repo.UpdateMilestonePayeeInvoice(ctx, active.ID, bolt11); err != nil {
+		return nil, fmt.Errorf("updating milestone payee invoice: %w", err)
 	}
 
 	deal.PayeeInvoice = bolt11

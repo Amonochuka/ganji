@@ -52,10 +52,12 @@ func (s *Service) PublicApproveDeal(ctx context.Context, shareToken string) (*De
 	rel, _ := s.repo.GetMilestoneByID(ctx, target.ID)
 	if idx+1 < len(ms) {
 		next := ms[idx+1]
-		if rel != nil && rel.Status == MilestoneReleased && next.CheckingID == "" && next.AmountSats > 0 && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
-			_ = s.FundMilestone(ctx, deal, &next)
-		} else if next.Status == MilestonePending {
-			_ = s.repo.UpdateMilestoneStatus(ctx, next.ID, MilestoneInProgress, nil)
+		if rel != nil && rel.Status == MilestoneReleased && next.Status != MilestoneReleased && next.Status != MilestoneExited && next.Status != MilestoneRefunded {
+			if next.Status == MilestonePending || next.Status == MilestoneAwaitingPayment || next.CheckingID == "" {
+				if err := s.FundMilestone(ctx, deal, &next); err != nil {
+					return nil, fmt.Errorf("milestone %d was released but milestone %d could not be prepared for funding: %w", target.Order, next.Order, err)
+				}
+			}
 		}
 		s.notifyMilestoneMoved(deal, target.Order, next.Order)
 		deal.Status = StatusWorkSubmitted
