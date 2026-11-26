@@ -41,7 +41,6 @@ export default function DealDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [showBanner, setShowBanner] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneView[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -302,23 +301,11 @@ export default function DealDetailPage() {
     });
   }
 
-  async function handleRefreshEscrowStatus() {
-    await handleAction("refresh escrow status", async () => {
-      await fetchDeal(true);
-      await fetchMilestones();
-      await fetchArtifacts();
-    });
-  }
-
   async function handleCheckPayment() {
     if (!tokens) return;
     await handleAction("check payment", async () => {
       const res = await api.checkPayment(dealId, tokens.access_token);
       setDeal(res.deal);
-      // Show banner and change button after funding is confirmed
-      if (res.deal.status === "locked") {
-        setShowBanner(true);
-      }
       await fetchMilestones();
       await fetchArtifacts();
     });
@@ -427,9 +414,12 @@ export default function DealDetailPage() {
   const fundsHeld = ["locked", "work_submitted", "reviewing"].includes(
     deal.status,
   );
+  const publicDealHref = `/public/deals/${deal.share_token}`;
   const escrowMessage =
     deal.status === "locked"
-      ? "Funds held in Lightning escrow. Ganji verified the hold; work can proceed."
+      ? isClient
+        ? "Funds held in Lightning escrow. Ganji verified the hold."
+        : "Funds held in Lightning escrow. Ganji verified the hold; work can proceed."
       : deal.status === "work_submitted"
         ? "Work submitted. Funds remain held in escrow while the client reviews and approves payout."
         : "Work under review. Funds remain held in escrow while the client decides.";
@@ -555,12 +545,14 @@ export default function DealDetailPage() {
                       {deal.preimage_hash}
                     </dd>
                   </div>
-                  <div className="sm:col-span-2">
-                    <dt className="text-ink-500">LNbits Checking ID</dt>
-                    <dd className="font-mono text-xs text-ink-400">
-                      {deal.checking_id || "—"}
-                    </dd>
-                  </div>
+                  {!isClient && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-ink-500">LNbits Checking ID</dt>
+                      <dd className="font-mono text-xs text-ink-400">
+                        {deal.checking_id || "—"}
+                      </dd>
+                    </div>
+                  )}
                   <div>
                     <dt className="text-ink-500">Created</dt>
                     <dd className="text-ink-300 font-mono">
@@ -782,26 +774,6 @@ export default function DealDetailPage() {
                         Check Payment
                       </Button>
                     )}
-                    {deal.status === "locked" && (
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowBanner(true)}
-                        disabled={actionLoading}
-                        isLoading={actionLoading}
-                      >
-                        Confirm Funded
-                      </Button>
-                    )}
-                    {deal.status === "locked" && (
-                      <Button
-                        variant="ghost"
-                        onClick={handleRefreshEscrowStatus}
-                        disabled={actionLoading === "refresh escrow status"}
-                        isLoading={actionLoading === "refresh escrow status"}
-                      >
-                        Check Escrow Status
-                      </Button>
-                    )}
                     {(deal.status === "work_submitted" ||
                       deal.status === "reviewing") && (
                       <span className="flex items-center px-3 py-2 text-sm text-blue-300">
@@ -940,12 +912,6 @@ export default function DealDetailPage() {
                 onSubmit={handleGeneratePayeeInvoice}
               />
 
-              {showBanner && (
-                <div className="vault-card p-4 mt-4">
-                  <p className="text-ink-400">{escrowMessage}</p>
-                </div>
-              )}
-
               {isClient && (
                 <div className="vault-card p-6 vault-seam">
                   <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
@@ -1020,14 +986,10 @@ export default function DealDetailPage() {
                       </span>
                     )}
                     {deal.status === "awaiting_payment" && (
-                      <Button
-                        variant="ghost"
-                        onClick={handleRefreshEscrowStatus}
-                        disabled={actionLoading === "refresh escrow status"}
-                        isLoading={actionLoading === "refresh escrow status"}
-                      >
-                        Check Escrow Status
-                      </Button>
+                      <span className="flex items-center px-3 py-2 text-sm text-yellow-400">
+                        Fund escrow via the share link; this page updates after
+                        the hold is verified.
+                      </span>
                     )}
                     {deal.status !== "released" &&
                       deal.status !== "refunded" && (
@@ -1162,38 +1124,63 @@ export default function DealDetailPage() {
             </div>
 
             <div className="space-y-6">
-              <div className="vault-card p-6 vault-seam">
-                <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
-                  Share Link
-                </h2>
-                <p className="text-sm text-ink-500 mb-4">
-                  Send this to your client. They can view the deal and approve
-                  payment.
-                </p>
-                <div className="space-y-3">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={`${window.location.origin}/public/deals/${deal.share_token}`}
-                      className="flex-1 rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm font-mono text-ink-300"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleCopyShareLink}
-                    >
-                      Copy
-                    </Button>
+              {isFreelancer && (
+                <div className="vault-card p-6 vault-seam">
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Share Link
+                  </h2>
+                  <p className="text-sm text-ink-500 mb-4">
+                    Send this to your client. They can view the deal and approve
+                    payment.
+                  </p>
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}/public/deals/${deal.share_token}`}
+                        className="flex-1 rounded-lg border border-vault-border bg-vault-raised px-3 py-2 text-sm font-mono text-ink-300"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleCopyShareLink}
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                    <p className="text-xs text-ink-500">
+                      Status:{" "}
+                      <span className="font-mono capitalize">
+                        {deal.status.replace("_", " ")}
+                      </span>
+                    </p>
                   </div>
-                  <p className="text-xs text-ink-500">
-                    Status:{" "}
-                    <span className="font-mono capitalize">
-                      {deal.status.replace("_", " ")}
-                    </span>
+                </div>
+              )}
+              {isClient && (
+                <div className="vault-card p-6 vault-seam">
+                  <h2 className="font-display text-lg font-semibold text-ink-100 mb-4">
+                    Public Deal Link
+                  </h2>
+                  <p className="text-sm text-ink-500 mb-4">
+                    Open the same link the freelancer sent you. Funding is
+                    public; approval requires signing in as this deal&apos;s
+                    client.
+                  </p>
+                  <Link
+                    href={publicDealHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 font-medium text-gold-400 underline underline-offset-4 hover:text-gold-300"
+                  >
+                    Open public deal page →
+                  </Link>
+                  <p className="mt-3 break-all font-mono text-xs text-ink-500">
+                    {publicDealHref}
                   </p>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
