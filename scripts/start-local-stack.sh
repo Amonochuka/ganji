@@ -219,6 +219,9 @@ for port in 5000 5001 5002; do
 done
 
 log "Building backend..."
+export LND_REST_URL="${LND_REST_URL:-https://localhost:8081}"
+export LND_REST_CERT_PATH="${LND_REST_CERT_PATH:-$HOME/.polar/networks/3/volumes/lnd/Es/tls.cert}"
+export LND_REST_MACAROON_PATH="${LND_REST_MACAROON_PATH:-$HOME/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon}"
 (cd "$ROOT_DIR/backend" && go build -o "$LOG_DIR/ganji-api" ./cmd/api)
 
 log "Starting backend..."
