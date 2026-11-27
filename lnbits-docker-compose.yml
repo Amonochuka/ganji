@@ -15,8 +15,8 @@ services:
       - LNBITS_RESERVE_FEE_PERCENT=0
     volumes:
       - lnbits-data:/data
-      - /home/amonoff/.polar/networks/3/volumes/lnd/Es/tls.cert:/certs/tls.cert:ro
-      - /home/amonoff/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+      - ${HOME}/.polar/networks/3/volumes/lnd/Es/tls.cert:/certs/tls.cert:ro
+      - ${HOME}/.polar/networks/3/volumes/lnd/Es/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
     networks:
       - polar-network
     extra_hosts:
@@ -38,8 +38,8 @@ services:
       - LNBITS_RESERVE_FEE_PERCENT=0
     volumes:
       - lnbits-client-data:/data
-      - /home/amonoff/.polar/networks/3/volumes/lnd/Cl/tls.cert:/certs/tls.cert:ro
-      - /home/amonoff/.polar/networks/3/volumes/lnd/Cl/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+      - ${HOME}/.polar/networks/3/volumes/lnd/Cl/tls.cert:/certs/tls.cert:ro
+      - ${HOME}/.polar/networks/3/volumes/lnd/Cl/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
     networks:
       - polar-network
 
@@ -59,8 +59,8 @@ services:
       - LNBITS_RESERVE_FEE_PERCENT=0
     volumes:
       - lnbits-freelancer-data:/data
-      - /home/amonoff/.polar/networks/3/volumes/lnd/Fre/tls.cert:/certs/tls.cert:ro
-      - /home/amonoff/.polar/networks/3/volumes/lnd/Fre/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
+      - ${HOME}/.polar/networks/3/volumes/lnd/Fre/tls.cert:/certs/tls.cert:ro
+      - ${HOME}/.polar/networks/3/volumes/lnd/Fre/data/chain/bitcoin/regtest/admin.macaroon:/certs/admin.macaroon:ro
     networks:
       - polar-network
 
